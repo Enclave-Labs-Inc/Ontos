@@ -1,0 +1,15 @@
+services:
+  ontos:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: ontos
+    ports:
+      - "8765:8765"
+    environment:
+      ONTOS_LISTEN_HOST: 0.0.0.0
+      ONTOS_LISTEN_PORT: "8765"
+      ONTOS_STORAGE_BACKEND: networkx
+      ONTOS_AUDIT_SIGNING_KEY: ${ONTOS_AUDIT_SIGNING_KEY:?set ONTOS_AUDIT_SIGNING_KEY in .env}
+      ONTOS_ENV: dev
+    restart: unless-stopped
