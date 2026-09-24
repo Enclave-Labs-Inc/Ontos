@@ -1,0 +1,74 @@
+name: Feature / proposal
+description: Suggest a new capability, connector, backend, or design change.
+title: "[proposal] "
+labels: ["proposal", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Before you start writing code for anything
+        architectural (new module, new storage backend, new authz backend,
+        new extractor family), please open this issue first so we can
+        align on the design.
+
+        Small fixes, docs, tests, and connector adapters don't need a
+        proposal issue — just open a PR.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: |
+        Describe the user or operational pain first. Do NOT lead with a
+        proposed solution — the shape of the fix follows from the shape
+        of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed approach
+      description: |
+        Rough sketch of the change. Modules touched, new data shapes,
+        MCP surface changes, config surface changes. Details welcome
+        but not required.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: What else could solve this, and why the proposed approach wins.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Which invariants does this touch?
+      description: Tick every one this proposal changes or has to preserve.
+      options:
+        - label: Provenance on every fact
+        - label: Audit-first (every request path emits an `AuditRecord`)
+        - label: Permission-aware traversal (no node-existence leaks)
+        - label: Bitemporal immutability
+        - label: Sovereignty (no outbound calls to non-configured hosts)
+        - label: Extractor interface stays a drop-in for enclave-scribe
+        - label: None of the above
+
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Which milestone does this target
+      options:
+        - "M0 (scaffolding, in-memory storage)"
+        - "M1 (Neo4j + extraction wrappers)"
+        - "M2 (OpenFGA / persistent audit)"
+        - "M3 (planner/executor split, PPR, PathRAG-style pruning)"
+        - "M4 (bitemporal writes, ER cascade, connectors)"
+        - "v0 GA (design partner ready)"
+        - "Not sure — you tell me"
+    validations:
+      required: true

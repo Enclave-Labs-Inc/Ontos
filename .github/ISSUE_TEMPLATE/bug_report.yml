@@ -1,0 +1,88 @@
+name: Bug report
+description: Something in Ontos doesn't work as documented.
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please fill in what you can — every field
+        makes triage faster.
+
+        **Do NOT file a security vulnerability here.** See
+        [SECURITY.md](../blob/main/SECURITY.md) for the private
+        disclosure path.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: |
+        The smallest snippet, commands, or steps that reliably reproduce
+        the issue. If you can't produce a MRE, describe the shape of what
+        you were doing instead.
+      render: bash
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Ontos version / commit
+      description: Output of `uv pip show ontos` or the commit SHA you're on.
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python --version`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: storage-backend
+    attributes:
+      label: Storage backend
+      options:
+        - networkx (M0 in-memory)
+        - neo4j
+        - kuzu / ladybugdb
+        - neptune
+        - other / n/a
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / stack trace
+      description: |
+        Paste any relevant structured log output or a stack trace. Redact
+        anything that looks like a customer identifier, credential, or
+        piece of regulated data before pasting.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: touches-compliance
+    attributes:
+      label: Does this touch a compliance property?
+      description: Tick every one that applies. This routes the bug to the right reviewer.
+      options:
+        - label: Audit chain (Article 12)
+        - label: Permission-aware traversal / node-existence leaks
+        - label: Bitemporal correctness (`as_of` returns wrong facts)
+        - label: Provenance metadata (missing / forged / dropped)
+        - label: Sovereignty (unexpected outbound network call)
+        - label: None of the above

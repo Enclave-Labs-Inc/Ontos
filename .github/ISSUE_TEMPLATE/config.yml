@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/getenclave/ontos/blob/main/SECURITY.md
+    about: Do NOT open a public issue. Follow the private disclosure path in SECURITY.md.
+  - name: Question / help / design discussion
+    url: https://github.com/getenclave/ontos/discussions
+    about: Use GitHub Discussions for questions and open-ended design conversation.
+  - name: Enclave (the parent product)
+    url: https://getenclave.ai
+    about: Ontos is a subset of Enclave. For anything about the wider Enclave platform, start here.

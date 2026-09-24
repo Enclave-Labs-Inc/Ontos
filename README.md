@@ -71,6 +71,15 @@ ontos/
 └── ingest/      # source connectors
 ```
 
+## Contributing
+
+Ontos is open-source and we actively want outside contributors. Start with:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, coding standards, the non-negotiable invariants, and the PR process.
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — Contributor Covenant v2.1.
+- [SECURITY.md](SECURITY.md) — how to report a vulnerability (**do not open a public issue for security bugs**).
+- GitHub Issues for bugs and feature proposals; GitHub Discussions for questions and design conversations.
+
 ## License
 
 Apache-2.0.
