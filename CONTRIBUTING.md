@@ -85,7 +85,7 @@ Layout under `tests/`:
 5. **Small PRs**: prefer several small PRs over one large one. Rule of thumb: if a reviewer can't read your diff in 15 minutes, split it.
 6. **Description quality**: state the *why* first; the *what* second. Link the issue.
 7. **Review**: expect 2–5 business days for first review. If it's urgent (security), say so in the PR title.
-8. **CI must be green** before merge — including the compliance suite.
+8. **CI must be green** before merge — including the compliance suite. The CI workflow (`.github/workflows/ci.yml`) runs `ruff check`, `mypy` strict, and the full `pytest` suite on every PR and on every push to `main`. Concurrent runs on the same branch are cancelled so a fast rebase doesn't waste runners. If CI is red, it's on the PR author to fix — do not merge red PRs, even with "obvious" failures.
 
 ## Roadmap alignment
 
