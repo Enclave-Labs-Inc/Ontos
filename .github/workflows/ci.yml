@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch/PR so a fast rebase doesn't
+# leave a stale run consuming a runner.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: lint · type-check · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          # Cache the uv download index + wheel cache across runs on the
+          # same branch. Cache key is derived from uv.lock so a lock
+          # change forces a clean install.
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python (from .python-version)
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Ruff (lint)
+        run: uv run ruff check ontos tests
+
+      - name: Mypy (strict type-check)
+        run: uv run mypy ontos
+
+      - name: Pytest (unit + compliance)
+        run: uv run pytest -q

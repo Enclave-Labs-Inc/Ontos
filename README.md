@@ -1,5 +1,9 @@
 # ontos
 
+[![CI](https://github.com/Enclave-Labs-Inc/Ontos/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Enclave-Labs-Inc/Ontos/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
+
 **A subset of [Enclave](https://getenclave.ai) — the knowledge-graph layer of Enclave's sovereign AI company brain.**
 
 ## What Ontos is
