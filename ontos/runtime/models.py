@@ -54,6 +54,25 @@ class Fact(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+class Entity(BaseModel):
+    """A named entity extracted from a source.
+
+    At extraction time an Entity is a candidate — the resolver (M1.d) may
+    later merge two candidates into one canonical entity. `id` is stable
+    across writes so the writer can `MERGE` on it; `aliases` collects the
+    surface forms the extractor saw for this entity in this source.
+    """
+
+    id: str
+    type: str
+    canonical_name: str
+    aliases: list[str] = Field(default_factory=list)
+    properties: dict[str, str] = Field(default_factory=dict)
+    provenance: Provenance
+
+    model_config = ConfigDict(frozen=True)
+
+
 class Result(BaseModel):
     """A single search/traverse hit with the provenance chain that produced it."""
 

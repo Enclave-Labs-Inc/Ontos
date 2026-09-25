@@ -31,7 +31,7 @@ class NetworkxStore:
     """
 
     def __init__(self) -> None:
-        self._graph: nx.MultiDiGraph = nx.MultiDiGraph()
+        self._graph: nx.MultiDiGraph[str] = nx.MultiDiGraph()
         self._facts: dict[UUID, Fact] = {}
 
     async def add_fact(self, fact: Fact) -> None:
@@ -50,7 +50,9 @@ class NetworkxStore:
             update={"t_invalid": t_invalid, "superseded_by": superseded_by}
         )
         self._facts[fact_id] = replacement
-        self._graph[current.subject_id][current.object_id][fact_id]["fact"] = replacement
+        # The stubs type edge keys as str, but MultiDiGraph accepts any hashable
+        # (see networkx MultiDiGraph.add_edge docs); we key on the UUID at runtime.
+        self._graph[current.subject_id][current.object_id][fact_id]["fact"] = replacement  # type: ignore[index]
 
     async def get_fact(self, fact_id: UUID) -> Fact | None:
         return self._facts.get(fact_id)
