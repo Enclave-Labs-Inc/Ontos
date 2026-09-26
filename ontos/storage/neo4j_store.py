@@ -180,6 +180,7 @@ class Neo4jStore:
         as_of: datetime | None = None,
         k: int = 10,
         acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
     ) -> list[Fact]:
         # M1.b uses substring match — mirrors NetworkxStore for parity.
         # M3 upgrades to full-text + vector hybrid.
@@ -194,7 +195,12 @@ class Neo4jStore:
                     AND (r.t_invalid IS NULL OR r.t_invalid > $as_of)
                 )
             )
-            AND (r.acl_ref IS NULL OR r.acl_ref = $acl_subject)
+            AND (
+                r.acl_ref IS NULL
+                OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
+                OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                    AND r.acl_ref = $acl_subject)
+            )
             AND toLower(coalesce(a.canonical_name, "") + " "
                         + r.predicate + " "
                         + coalesce(b.canonical_name, "")) CONTAINS toLower($needle)
@@ -207,6 +213,7 @@ class Neo4jStore:
                 needle=query,
                 as_of=as_of,
                 acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
                 k=k,
             )
             records = await result.data()
@@ -220,6 +227,7 @@ class Neo4jStore:
         depth: int = 2,
         as_of: datetime | None = None,
         acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
     ) -> Iterable[Fact]:
         # Depth is interpolated (not parameterized) because Cypher's
         # variable-length pattern syntax requires literal bounds. We
@@ -236,7 +244,12 @@ class Neo4jStore:
                     AND (r.t_invalid IS NULL OR r.t_invalid > $as_of)
                 )
             )
-            AND (r.acl_ref IS NULL OR r.acl_ref = $acl_subject)
+            AND (
+                r.acl_ref IS NULL
+                OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
+                OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                    AND r.acl_ref = $acl_subject)
+            )
             AND ($relation IS NULL OR r.predicate = $relation)
         )
         UNWIND rels AS r
@@ -249,6 +262,7 @@ class Neo4jStore:
                 start_id=start,
                 as_of=as_of,
                 acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
                 relation=relation,
             )
             records = await result.data()
@@ -260,6 +274,7 @@ class Neo4jStore:
         *,
         as_of: datetime | None = None,
         acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
     ) -> list[Fact]:
         cypher = """
         MATCH (n:Entity {id: $entity_id})-[r:RELATES]-(other:Entity)
@@ -272,7 +287,12 @@ class Neo4jStore:
                     AND (r.t_invalid IS NULL OR r.t_invalid > $as_of)
                 )
             )
-            AND (r.acl_ref IS NULL OR r.acl_ref = $acl_subject)
+            AND (
+                r.acl_ref IS NULL
+                OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
+                OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                    AND r.acl_ref = $acl_subject)
+            )
         RETURN startNode(r).id AS subject_id,
                endNode(r).id AS object_id,
                properties(r) AS props
@@ -283,6 +303,7 @@ class Neo4jStore:
                 entity_id=entity_id,
                 as_of=as_of,
                 acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
             )
             records = await result.data()
         return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]

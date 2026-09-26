@@ -17,6 +17,7 @@ from fastmcp import FastMCP
 from pydantic import BaseModel
 
 from ontos.audit.emitter import AuditEmitter
+from ontos.authz import VIEW, AuthzBackend, InMemoryAuthz
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.models import AuditRecord, Fact
 from ontos.storage.base import GraphStore
@@ -59,15 +60,69 @@ def build_store(config: RuntimeConfig) -> GraphStore:
     )
 
 
+def build_authz(config: RuntimeConfig) -> AuthzBackend | None:
+    """Instantiate the authz backend for this runtime, if any.
+
+    - unset / "none" → no backend; the store falls back to the M1
+      `acl_subject == fact.acl_ref` shim.
+    - "inmemory" → `InMemoryAuthz` for dev + tests; grants must be
+      seeded programmatically.
+    - "openfga" → `OpenFGAAuthz` (optional extra), configured via
+      `FGA_API_URL`, `FGA_STORE_ID`, `FGA_API_TOKEN`.
+    """
+    backend = os.environ.get("ONTOS_AUTHZ_BACKEND", "").lower()
+    if backend in ("", "none"):
+        return None
+    if backend == "inmemory":
+        return InMemoryAuthz()
+    if backend == "openfga":
+        # Deferred import — openfga-sdk is an optional extra.
+        from ontos.authz.openfga import OpenFGAAuthz
+
+        return OpenFGAAuthz.from_env()
+    raise RuntimeError(
+        f"ONTOS_AUTHZ_BACKEND={backend!r} not supported. "
+        "Use 'none', 'inmemory', or 'openfga'."
+    )
+
+
 def build_server(
     config: RuntimeConfig | None = None,
     *,
     store: GraphStore | None = None,
     audit: AuditEmitter | None = None,
+    authz: AuthzBackend | None = None,
 ) -> FastMCP:
     cfg = config if config is not None else RuntimeConfig.from_env()
     store = store if store is not None else build_store(cfg)
     audit = audit if audit is not None else AuditEmitter.from_env(cfg.audit_signing_key_env)
+    # Note: authz is opt-in — passing None disables authz and falls back
+    # to the M1 `acl_subject == fact.acl_ref` shim in the store.
+    resolved_authz: AuthzBackend | None = (
+        authz if authz is not None else build_authz(cfg)
+    )
+
+    async def _resolve_allowed_acls(
+        subject: str | None,
+    ) -> tuple[list[str] | None, list[dict[str, str]]]:
+        """Ask the authz backend which acl_refs `subject` can view.
+
+        Returns `(allowed_acls, policy_decisions)`. `allowed_acls` is
+        `None` when no authz backend is configured (store falls back
+        to M1 shim). `policy_decisions` is the audit-trail record of
+        what the backend was asked and what it said.
+        """
+        if resolved_authz is None or subject is None:
+            return None, []
+        allowed = await resolved_authz.list_authorized_objects(subject, VIEW)
+        return allowed, [
+            {
+                "policy": resolved_authz.id,
+                "subject": subject,
+                "relation": VIEW,
+                "result": ",".join(allowed) if allowed else "(none)",
+            }
+        ]
 
     mcp = FastMCP("ontos")
 
@@ -106,7 +161,14 @@ def build_server(
         """Semantic + graph retrieval. Returns facts with per-fact provenance."""
         started = time.perf_counter()
         ts = datetime.fromisoformat(as_of) if as_of else None
-        facts = await store.search(query, as_of=ts, k=k, acl_subject=acting_on_behalf_of)
+        allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
+        facts = await store.search(
+            query,
+            as_of=ts,
+            k=k,
+            acl_subject=acting_on_behalf_of,
+            allowed_acls=allowed_acls,
+        )
         latency_ms = (time.perf_counter() - started) * 1000
         record = _emit(
             tool="search",
@@ -116,7 +178,7 @@ def build_server(
             tool_arguments={"as_of": as_of, "k": k},
             result_fact_ids=[str(f.id) for f in facts],
             latency_ms=latency_ms,
-            policy_decisions=[],
+            policy_decisions=policy_decisions,
         )
         return ToolResponse(
             query_id=record.query_id,
@@ -136,6 +198,7 @@ def build_server(
         """Multi-hop traversal from an entity. Permission-aware during traversal."""
         started = time.perf_counter()
         ts = datetime.fromisoformat(as_of) if as_of else None
+        allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
         facts = list(
             await store.traverse(
                 start,
@@ -143,6 +206,7 @@ def build_server(
                 depth=depth,
                 as_of=ts,
                 acl_subject=acting_on_behalf_of,
+                allowed_acls=allowed_acls,
             )
         )
         latency_ms = (time.perf_counter() - started) * 1000
@@ -154,7 +218,7 @@ def build_server(
             tool_arguments={"relation": relation, "depth": depth, "as_of": as_of},
             result_fact_ids=[str(f.id) for f in facts],
             latency_ms=latency_ms,
-            policy_decisions=[],
+            policy_decisions=policy_decisions,
         )
         return ToolResponse(
             query_id=record.query_id,
@@ -172,8 +236,12 @@ def build_server(
         """Entity dossier: definition, sources, related entities, validity ranges."""
         started = time.perf_counter()
         ts = datetime.fromisoformat(as_of) if as_of else None
+        allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
         facts = await store.facts_for_entity(
-            entity_id, as_of=ts, acl_subject=acting_on_behalf_of
+            entity_id,
+            as_of=ts,
+            acl_subject=acting_on_behalf_of,
+            allowed_acls=allowed_acls,
         )
         latency_ms = (time.perf_counter() - started) * 1000
         record = _emit(
@@ -184,7 +252,7 @@ def build_server(
             tool_arguments={"as_of": as_of},
             result_fact_ids=[str(f.id) for f in facts],
             latency_ms=latency_ms,
-            policy_decisions=[],
+            policy_decisions=policy_decisions,
         )
         return ToolResponse(
             query_id=record.query_id,
