@@ -1,0 +1,22 @@
+apiVersion: v2
+name: ontos
+description: >-
+  Ontos — the knowledge-graph layer of Enclave's sovereign AI company
+  brain. Deploys inside a customer's VPC with a deny-egress default
+  and KMS-fed secrets.
+type: application
+version: 0.1.0
+appVersion: "0.0.1"
+kubeVersion: ">=1.28.0"
+keywords:
+  - ontos
+  - enclave
+  - knowledge-graph
+  - mcp
+  - regulated
+home: https://github.com/Enclave-Labs-Inc/Ontos
+sources:
+  - https://github.com/Enclave-Labs-Inc/Ontos
+maintainers:
+  - name: Enclave
+    url: https://getenclave.ai

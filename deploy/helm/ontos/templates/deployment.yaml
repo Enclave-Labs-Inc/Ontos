@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ontos.fullname" . }}
+  labels:
+    {{- include "ontos.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ontos.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ontos.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "ontos.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ontos
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: mcp-http
+              containerPort: {{ .Values.runtime.env.ONTOS_LISTEN_PORT }}
+              protocol: TCP
+          env:
+            {{- range $k, $v := .Values.runtime.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            - name: ONTOS_AUDIT_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.auditSigningKeySecret.name }}
+                  key: {{ .Values.runtime.auditSigningKeySecret.key }}
+            - name: NEO4J_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ontos.fullname" . }}-config
+                  key: {{ .Values.runtime.neo4j.uriConfigMapKey }}
+            - name: NEO4J_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.neo4j.userSecretRef.name }}
+                  key: {{ .Values.runtime.neo4j.userSecretRef.key }}
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.neo4j.passwordSecretRef.name }}
+                  key: {{ .Values.runtime.neo4j.passwordSecretRef.key }}
+            - name: NEO4J_DATABASE
+              value: {{ .Values.runtime.neo4j.database | quote }}
+            - name: ONTOS_AUDIT_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.auditDb.urlSecretRef.name }}
+                  key: {{ .Values.runtime.auditDb.urlSecretRef.key }}
+            {{- if eq (index .Values.runtime.env "ONTOS_AUTHZ_BACKEND") "openfga" }}
+            - name: FGA_API_URL
+              value: {{ .Values.runtime.openfga.apiUrl | quote }}
+            - name: FGA_STORE_ID
+              value: {{ .Values.runtime.openfga.storeId | quote }}
+            - name: FGA_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.openfga.apiTokenSecretRef.name }}
+                  key: {{ .Values.runtime.openfga.apiTokenSecretRef.key }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: audit-logs
+              mountPath: /var/lib/ontos/audit-logs
+            {{- if .Values.ontology.configMap.create }}
+            - name: ontology
+              mountPath: /etc/ontos/ontology
+              readOnly: true
+            {{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: mcp-http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: mcp-http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: audit-logs
+          emptyDir: {}
+        {{- if .Values.ontology.configMap.create }}
+        - name: ontology
+          configMap:
+            name: {{ include "ontos.fullname" . }}-ontology
+        {{- end }}
