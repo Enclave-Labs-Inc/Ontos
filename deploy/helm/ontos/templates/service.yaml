@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ontos.fullname" . }}
+  labels:
+    {{- include "ontos.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: mcp-http
+      protocol: TCP
+      name: mcp-http
+  selector:
+    {{- include "ontos.selectorLabels" . | nindent 4 }}

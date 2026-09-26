@@ -1,0 +1,45 @@
+{{- if .Values.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ontos.fullname" . }}
+  labels:
+    {{- include "ontos.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ontos.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # Ingress: MCP HTTP on the runtime port only.
+  ingress:
+    - ports:
+        - port: mcp-http
+          protocol: TCP
+  # Egress: DENY by default; allow only what's listed under
+  # networkPolicy.allowedEgress. This is the K8s-layer sovereignty
+  # guarantee — the pod cannot phone home.
+  egress:
+    # DNS is required for in-cluster service resolution.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- range .Values.networkPolicy.allowedEgress }}
+    - to:
+        {{- range .toEndpoints }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml .selectorLabels | nindent 14 }}
+        {{- end }}
+      ports:
+        {{- toYaml .ports | nindent 8 }}
+    {{- end }}
+{{- end }}

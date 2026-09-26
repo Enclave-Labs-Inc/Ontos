@@ -1,0 +1,124 @@
+# Ontos Helm values.
+#
+# Defaults are safe for a regulated in-VPC deploy: single replica,
+# no service exposure beyond the cluster, deny-egress NetworkPolicy,
+# audit signing key sourced from an existing Secret (never inline).
+#
+# Override anything here via `helm install ... --set` or a per-tenant
+# values.yaml. Every ONTOS_* env var from .env.example maps to a
+# `runtime.env` key.
+
+image:
+  repository: ghcr.io/enclave-labs-inc/ontos
+  tag: 0.0.1
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+replicaCount: 1
+
+# The runtime env — mirrors .env.example.
+runtime:
+  env:
+    ONTOS_LISTEN_HOST: 0.0.0.0
+    ONTOS_LISTEN_PORT: "8765"
+    ONTOS_STORAGE_BACKEND: neo4j
+    ONTOS_ENV: prod
+    ONTOS_AUTHZ_BACKEND: openfga
+    # ONTOS_ONTOLOGY_PATH is set via configMap by default; override
+    # here to point at a mounted per-tenant ontology.
+
+  # Secret ref for the audit signing key. In production this Secret
+  # is populated by an external-secrets ExternalSecret sourced from
+  # KMS / Vault / the customer's key manager — the chart never
+  # accepts the key inline.
+  auditSigningKeySecret:
+    name: ontos-audit-signing-key
+    key: signing-key
+
+  # Storage backend credentials (same pattern — external Secret).
+  neo4j:
+    uriConfigMapKey: NEO4J_URI
+    userSecretRef:
+      name: ontos-neo4j
+      key: user
+    passwordSecretRef:
+      name: ontos-neo4j
+      key: password
+    database: neo4j
+
+  # Postgres for persistent audit + optional metadata.
+  auditDb:
+    urlSecretRef:
+      name: ontos-audit-db
+      key: url
+
+  # OpenFGA settings (only when ONTOS_AUTHZ_BACKEND=openfga).
+  openfga:
+    apiUrl: ""
+    storeId: ""
+    apiTokenSecretRef:
+      name: ontos-openfga
+      key: token
+
+service:
+  type: ClusterIP
+  port: 8765
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "2"
+    memory: "4Gi"
+
+# NetworkPolicy defaults to deny-egress. Explicitly whitelist the
+# storage endpoints below. This is the sovereignty guarantee at the
+# K8s layer — the pod cannot phone home.
+networkPolicy:
+  enabled: true
+  allowedEgress:
+    # Neo4j reachable inside the cluster
+    - toEndpoints:
+        - selectorLabels:
+            app.kubernetes.io/name: neo4j
+      ports:
+        - port: 7687
+          protocol: TCP
+    # Postgres for audit
+    - toEndpoints:
+        - selectorLabels:
+            app.kubernetes.io/name: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+    # OpenFGA
+    - toEndpoints:
+        - selectorLabels:
+            app.kubernetes.io/name: openfga
+      ports:
+        - port: 8080
+          protocol: TCP
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Optional ontology mounted as ConfigMap. Empty by default; per-tenant
+# deploys either populate this or `ONTOS_ONTOLOGY_PATH` externally.
+ontology:
+  configMap:
+    create: false
+    yaml: ""

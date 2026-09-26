@@ -52,3 +52,16 @@ jobs:
 
       - name: Pytest (integration — Neo4j via Testcontainers)
         run: uv run pytest -q -m "integration and not benchmark"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+
+      - name: Helm lint (deploy/helm/ontos)
+        run: helm lint deploy/helm/ontos
+
+      - name: Helm template renders (deploy/helm/ontos)
+        # `--dry-run=client` skips the API server; we just want to
+        # prove every template compiles into valid YAML.
+        run: helm template ontos deploy/helm/ontos > /dev/null
