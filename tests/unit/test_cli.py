@@ -8,7 +8,10 @@ from typer.testing import CliRunner
 
 from ontos.cli import app
 
-runner = CliRunner()
+# Force a wide "terminal" so Typer/Rich doesn't wrap option names.
+# On CI (narrow TTY) --source-dir would render as --source-\ndir and
+# the naive substring check would miss it. Env goes through to Click.
+runner = CliRunner(env={"COLUMNS": "200", "TERM": "dumb", "NO_COLOR": "1"})
 
 STARTER_PATH = (
     Path(__file__).resolve().parents[2]
