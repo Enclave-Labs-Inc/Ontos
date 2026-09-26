@@ -31,7 +31,7 @@ Every fact carries provenance. Every query is audit-ready. Every deployment runs
 
 ## Status
 
-Pre-alpha — M0 scaffold. See `/Users/alias1623/.claude/plans/hey-claude-i-hope-buzzing-brook.md` for the full plan.
+**0.1.0 (first public release)** — the runtime works end-to-end: ingest a directory of text files via `ontos ingest`, query it via `ontos query "..."` or the `ask` MCP tool, verify the audit chain via `ontos audit verify`. See [CHANGELOG.md](CHANGELOG.md) for what shipped in this release and [docs/design/](docs/design/) for the per-milestone architecture notes.
 
 ## Quickstart (dev)
 

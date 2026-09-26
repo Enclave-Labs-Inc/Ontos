@@ -87,6 +87,12 @@ Layout under `tests/`:
 7. **Review**: expect 2–5 business days for first review. If it's urgent (security), say so in the PR title.
 8. **CI must be green** before merge — including the compliance suite. The CI workflow (`.github/workflows/ci.yml`) runs `ruff check`, `mypy` strict, and the full `pytest` suite on every PR and on every push to `main`. Concurrent runs on the same branch are cancelled so a fast rebase doesn't waste runners. If CI is red, it's on the PR author to fix — do not merge red PRs, even with "obvious" failures.
 
+## Versioning + CHANGELOG
+
+Ontos follows [SemVer](https://semver.org/spec/v2.0.0.html). The single source of truth for the version is `ontos/_version.py`; `pyproject.toml` reads it via hatchling. Do NOT bump the version in a feature PR — version bumps live in dedicated release PRs (see [RELEASING.md](RELEASING.md)).
+
+Every PR that changes user-visible behavior adds a bullet under the `## [Unreleased]` section of [CHANGELOG.md](CHANGELOG.md). The release PR then moves those bullets under a new versioned heading.
+
 ## Roadmap alignment
 
 Ontos ships against a milestone plan (M0 → M4 → v0 GA). Before starting a large piece of work, please:
