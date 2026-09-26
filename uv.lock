@@ -2394,6 +2394,7 @@ dev = [
     { name = "ruff" },
     { name = "testcontainers", extra = ["neo4j"] },
     { name = "types-networkx" },
+    { name = "types-pyyaml" },
 ]
 langchain = [
     { name = "langchain" },
@@ -2430,6 +2431,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.1" },
     { name = "testcontainers", extras = ["neo4j"], marker = "extra == 'dev'", specifier = ">=4.8" },
     { name = "types-networkx", marker = "extra == 'dev'", specifier = ">=3.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
 provides-extras = ["neo4j", "llama", "langchain", "authz", "dev"]
 
@@ -3674,6 +3676,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e9/8c/a788d233be06b9f20fbaaf4b090bbd6423ea8d67d27e47115fa22a930c6b/types_networkx-3.6.1.20260911.tar.gz", hash = "sha256:d592c4520b05f87e7b94087ce7f244194209ad213633a605131f6ab89cd6f8ea", size = 76365, upload-time = "2026-09-11T06:45:10.322Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d3/65/24c71d89a4f4ce053912ed46fe036e2e86019199c08b4d0e49568e4ee18c/types_networkx-3.6.1.20260911-py3-none-any.whl", hash = "sha256:e0ea7f786451bd2e16d7b657a1208edcb80c5e01b86e15b1c78bdeca9db620cf", size = 167431, upload-time = "2026-09-11T06:45:08.865Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260906"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/6e/abec85b9013db5b934b0280a6dd104904d84f7bcbaab2e2f3def87ac7463/types_pyyaml-6.0.12.20260906.tar.gz", hash = "sha256:f59c1cc05010b833d2d72287bbaa72610106b28d42d89a907313117faba85212", size = 18649, upload-time = "2026-09-06T06:35:35.362Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/c0/fc0644b7ddcfb969e95845837143cb5173ddd6e06ee4ba5fc493cd9329b7/types_pyyaml-6.0.12.20260906-py3-none-any.whl", hash = "sha256:bca893ff0d51df5c9053137d5d0e6ccd36e939a196356f1d5c16372422f5137b", size = 21282, upload-time = "2026-09-06T06:35:34.372Z" },
 ]
 
 [[package]]
