@@ -18,6 +18,8 @@ from pydantic import BaseModel
 
 from ontos.audit.emitter import AuditEmitter
 from ontos.authz import VIEW, AuthzBackend, InMemoryAuthz
+from ontos.executor import DeterministicExecutor, Executor
+from ontos.planner import Planner, PlannerError
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.models import AuditRecord, Fact
 from ontos.storage.base import GraphStore
@@ -92,6 +94,8 @@ def build_server(
     store: GraphStore | None = None,
     audit: AuditEmitter | None = None,
     authz: AuthzBackend | None = None,
+    planner: Planner | None = None,
+    executor: Executor | None = None,
 ) -> FastMCP:
     cfg = config if config is not None else RuntimeConfig.from_env()
     store = store if store is not None else build_store(cfg)
@@ -101,6 +105,12 @@ def build_server(
     resolved_authz: AuthzBackend | None = (
         authz if authz is not None else build_authz(cfg)
     )
+    # Executor is always available (deterministic, no config). Planner is
+    # opt-in — if no planner is wired, the `ask` tool is disabled (the
+    # store tools still work). This lets M0/M1 deployments run without
+    # an LLM planner backend.
+    resolved_executor: Executor = executor if executor is not None else DeterministicExecutor()
+    resolved_planner: Planner | None = planner
 
     async def _resolve_allowed_acls(
         subject: str | None,
@@ -301,6 +311,130 @@ def build_server(
             query_id=emitted.query_id,
             audit_hash=emitted.hash,
             payload=record.model_dump(mode="json") if record else None,
+        )
+
+    @mcp.tool()
+    async def ask(
+        question: str,
+        agent_identity: str,
+        acting_on_behalf_of: str | None = None,
+    ) -> ToolResponse:
+        """Ask a natural-language question. Runs planner → executor →
+        ranked-with-provenance results.
+
+        Requires a Planner to be configured on the server (M3.a). Without
+        one this tool returns a clear error rather than degrading to a
+        raw store call — a silent downgrade would violate the
+        schema-constrained contract.
+        """
+        started = time.perf_counter()
+        if resolved_planner is None:
+            record = _emit(
+                tool="ask",
+                agent_identity=agent_identity,
+                acting_on_behalf_of=acting_on_behalf_of,
+                query_text=question,
+                tool_arguments={},
+                result_fact_ids=[],
+                latency_ms=(time.perf_counter() - started) * 1000,
+                policy_decisions=[
+                    {"policy": "planner", "result": "not_configured"}
+                ],
+            )
+            return ToolResponse(
+                query_id=record.query_id,
+                audit_hash=record.hash,
+                payload={"error": "no planner configured on this runtime"},
+            )
+
+        # Ontology is required to build a Plan. If none is loaded, we
+        # can't run the planner. Same fail-loud posture.
+        if cfg.ontology_path is None:
+            record = _emit(
+                tool="ask",
+                agent_identity=agent_identity,
+                acting_on_behalf_of=acting_on_behalf_of,
+                query_text=question,
+                tool_arguments={},
+                result_fact_ids=[],
+                latency_ms=(time.perf_counter() - started) * 1000,
+                policy_decisions=[
+                    {"policy": "ontology", "result": "not_configured"}
+                ],
+            )
+            return ToolResponse(
+                query_id=record.query_id,
+                audit_hash=record.hash,
+                payload={"error": "no ontology configured on this runtime"},
+            )
+
+        # Deferred import so `ontos.ontology` isn't loaded on the hot path
+        # for the read tools that don't need it.
+        from ontos.ontology import load_ontology
+
+        ontology = load_ontology(cfg.ontology_path)
+        allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
+
+        try:
+            plan = await resolved_planner.plan(question, ontology)
+        except PlannerError as exc:
+            latency_ms = (time.perf_counter() - started) * 1000
+            record = _emit(
+                tool="ask",
+                agent_identity=agent_identity,
+                acting_on_behalf_of=acting_on_behalf_of,
+                query_text=question,
+                tool_arguments={"planner_id": resolved_planner.id},
+                result_fact_ids=[],
+                latency_ms=latency_ms,
+                policy_decisions=[
+                    *policy_decisions,
+                    {"policy": "planner", "result": f"error:{exc}"},
+                ],
+            )
+            return ToolResponse(
+                query_id=record.query_id,
+                audit_hash=record.hash,
+                payload={"error": str(exc)},
+            )
+
+        execution = await resolved_executor.execute(
+            plan,
+            store,
+            acl_subject=acting_on_behalf_of,
+            allowed_acls=allowed_acls,
+        )
+        latency_ms = (time.perf_counter() - started) * 1000
+        record = _emit(
+            tool="ask",
+            agent_identity=agent_identity,
+            acting_on_behalf_of=acting_on_behalf_of,
+            query_text=question,
+            tool_arguments={
+                "planner_id": resolved_planner.id,
+                "executor_id": resolved_executor.id,
+                "plan": plan.model_dump(mode="json"),
+            },
+            result_fact_ids=[str(h.fact.id) for h in execution.hits],
+            latency_ms=latency_ms,
+            policy_decisions=[
+                *policy_decisions,
+                {
+                    "policy": "executor",
+                    "executor_id": resolved_executor.id,
+                    "hits": str(len(execution.hits)),
+                    "warnings": ",".join(execution.warnings),
+                },
+            ],
+        )
+        return ToolResponse(
+            query_id=record.query_id,
+            audit_hash=record.hash,
+            payload={
+                "plan": plan.model_dump(mode="json"),
+                "hits": [h.model_dump(mode="json") for h in execution.hits],
+                "warnings": execution.warnings,
+            },
         )
 
     return mcp
