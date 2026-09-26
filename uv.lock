@@ -2418,7 +2418,6 @@ wheels = [
 
 [[package]]
 name = "ontos"
-version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -2498,7 +2497,7 @@ requires-dist = [
     { name = "types-networkx", marker = "extra == 'dev'", specifier = ">=3.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
-provides-extras = ["neo4j", "llama", "langchain", "authz", "openai", "dev"]
+provides-extras = ["authz", "dev", "langchain", "llama", "neo4j", "openai"]
 
 [[package]]
 name = "openai"
