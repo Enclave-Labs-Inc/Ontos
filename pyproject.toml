@@ -53,10 +53,12 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: tests that require external services (Docker + Neo4j, etc.)",
+    "benchmark: regression-tracking benchmarks; non-gate.",
 ]
-# Skip integration tests by default so `uv run pytest` stays fast for
-# contributors without Docker running. CI runs both suites explicitly.
-addopts = "-m 'not integration'"
+# Skip integration + benchmark tests by default so `uv run pytest` stays
+# fast for contributors without Docker running. CI runs the integration
+# suite explicitly; the benchmark suite runs opt-in only.
+addopts = "-m 'not integration and not benchmark'"
 
 [tool.ruff]
 line-length = 100

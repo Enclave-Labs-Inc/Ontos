@@ -48,7 +48,7 @@ jobs:
         run: uv run mypy ontos
 
       - name: Pytest (unit + compliance)
-        run: uv run pytest -q -m "not integration"
+        run: uv run pytest -q -m "not integration and not benchmark"
 
       - name: Pytest (integration — Neo4j via Testcontainers)
-        run: uv run pytest -q -m integration
+        run: uv run pytest -q -m "integration and not benchmark"
