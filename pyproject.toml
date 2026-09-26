@@ -29,6 +29,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-networkx>=3.0",
+    "types-PyYAML>=6.0",
     "neo4j>=5.20",
     "testcontainers[neo4j]>=4.8",
 ]

@@ -11,10 +11,18 @@ from ontos.extraction.base import (
     ExtractionResult,
     Extractor,
 )
+from ontos.extraction.llm_extractor import (
+    LLMBackend,
+    LlmExtractor,
+    RawTriple,
+)
 
 __all__ = [
     "Extractor",
     "ExtractionError",
     "ExtractionInput",
     "ExtractionResult",
+    "LLMBackend",
+    "LlmExtractor",
+    "RawTriple",
 ]

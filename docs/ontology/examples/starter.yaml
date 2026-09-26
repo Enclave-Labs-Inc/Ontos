@@ -1,0 +1,64 @@
+# Starter ontology — the minimum shape a working M1 needs.
+#
+# This is deliberately small: two entity types, three relation types,
+# five allowed patterns. Vertical ontologies (fintech, pharma, legal,
+# defense) will land under this same directory as separate files.
+
+version: "0.1"
+
+entity_types:
+  - label: Person
+    description: A natural person.
+    properties:
+      - name: full_name
+        type: STRING
+        required: true
+      - name: birth_date
+        type: DATE
+
+  - label: Company
+    description: A legal entity.
+    properties:
+      - name: legal_name
+        type: STRING
+        required: true
+      - name: incorporation_date
+        type: DATE
+      - name: jurisdiction
+        type: STRING
+
+relation_types:
+  - label: works_at
+    description: Employment relationship.
+    cardinality: many_to_one
+    properties:
+      - name: role
+        type: STRING
+      - name: since
+        type: DATE
+
+  - label: acquired
+    description: One company acquired another.
+    cardinality: many_to_many
+    properties:
+      - name: announced_at
+        type: DATE
+      - name: closed_at
+        type: DATE
+
+  - label: subsidiary_of
+    description: Corporate parent relationship.
+    cardinality: many_to_one
+
+patterns:
+  - subject_type: Person
+    predicate: works_at
+    object_type: Company
+
+  - subject_type: Company
+    predicate: acquired
+    object_type: Company
+
+  - subject_type: Company
+    predicate: subsidiary_of
+    object_type: Company
