@@ -2414,6 +2414,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
     { name = "fastmcp" },
+    { name = "httpx" },
     { name = "networkx" },
     { name = "numpy" },
     { name = "pydantic" },
@@ -2451,6 +2452,9 @@ llama = [
 neo4j = [
     { name = "neo4j" },
 ]
+openai = [
+    { name = "openai" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2458,6 +2462,7 @@ requires-dist = [
     { name = "asyncpg", marker = "extra == 'dev'", specifier = ">=0.30" },
     { name = "cryptography", specifier = ">=43.0" },
     { name = "fastmcp", specifier = ">=2.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "langchain", marker = "extra == 'langchain'", specifier = ">=0.3" },
     { name = "langchain-experimental", marker = "extra == 'langchain'", specifier = ">=0.3" },
     { name = "llama-index", marker = "extra == 'llama'", specifier = ">=0.11" },
@@ -2467,6 +2472,7 @@ requires-dist = [
     { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=5.20" },
     { name = "networkx", specifier = ">=3.3" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.50" },
     { name = "openfga-sdk", marker = "extra == 'authz'", specifier = ">=0.6" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -2481,7 +2487,7 @@ requires-dist = [
     { name = "types-networkx", marker = "extra == 'dev'", specifier = ">=3.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
-provides-extras = ["neo4j", "llama", "langchain", "authz", "dev"]
+provides-extras = ["neo4j", "llama", "langchain", "authz", "openai", "dev"]
 
 [[package]]
 name = "openai"
