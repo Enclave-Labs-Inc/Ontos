@@ -24,6 +24,7 @@ import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastmcp import Client, FastMCP
@@ -40,6 +41,30 @@ from ontos.runtime.server import build_server
 from ontos.storage.neo4j_store import Neo4jStore
 
 pytestmark = pytest.mark.integration
+
+
+def _unwrap(call_result: Any) -> dict[str, Any]:
+    """Coerce a FastMCP CallToolResult into a plain payload dict.
+
+    FastMCP v4 returns `result.data` as a dynamically-typed Pydantic
+    model (a `Root` wrapper when the tool's return type has `Any`
+    fields), which is not subscriptable. We reach for the raw
+    structured content instead — that's guaranteed by the MCP protocol.
+    """
+    if getattr(call_result, "structured_content", None):
+        return dict(call_result.structured_content)
+    data = getattr(call_result, "data", None)
+    if data is not None and hasattr(data, "model_dump"):
+        dumped = data.model_dump()
+        assert isinstance(dumped, dict)
+        return dumped
+    if getattr(call_result, "content", None):
+        first = call_result.content[0]
+        if hasattr(first, "text"):
+            parsed = json.loads(first.text)
+            assert isinstance(parsed, dict)
+            return parsed
+    raise AssertionError(f"could not extract payload from {call_result!r}")
 
 STARTER_PATH = (
     Path(__file__).resolve().parents[2]
@@ -158,14 +183,22 @@ CORPUS = {
 async def _ingest_corpus(
     extractor: LlmExtractor,
     store: Neo4jStore,
+    corpus: dict[str, list[RawTriple]] | None = None,
     *,
     acl_ref: str | None = None,
 ) -> int:
-    """Extract + persist the corpus. Returns the number of facts written."""
+    """Extract + persist a corpus. Returns the number of facts written.
+
+    Caller passes the exact texts the extractor's LLM has been scripted
+    for — sending unscripted texts triggers `ExtractionError` (loud-fail
+    on silent-empty per M1.d).
+    """
+    if corpus is None:
+        corpus = CORPUS
     n = 0
-    for i, text in enumerate(CORPUS):
+    for i, text in enumerate(corpus):
         result = await extractor.extract(
-            ExtractionInput(source_id=f"doc-{i}", text=text)
+            ExtractionInput(source_id=f"doc-{i}-{acl_ref or 'pub'}", text=text)
         )
         for fact in result.facts:
             if acl_ref is not None:
@@ -214,9 +247,7 @@ async def test_mcp_tool_call_produces_article_twelve_audit_record(
             {"query": "acquired", "agent_identity": "claude:e2e-test", "k": 5},
         )
 
-    # FastMCP CallToolResult wraps our ToolResponse dict
-    payload = result.data
-    assert payload is not None
+    payload = _unwrap(result)
     assert payload["query_id"]
     assert payload["audit_hash"]
     assert len(payload["payload"]) == 1
@@ -242,14 +273,20 @@ async def test_permission_aware_traversal_does_not_leak_through_mcp(
     downstream acquisitions/subsidiaries — those live behind acl_ref='alice'.
     The forbidden facts must be pruned during Cypher traversal (proven in
     M1.b) AND must not leak through the MCP tool response payload."""
-    # First doc is public; the next two are alice-only.
-    public_llm = ScriptedLLM({list(CORPUS.keys())[0]: CORPUS[list(CORPUS.keys())[0]]})
-    await _ingest_corpus(LlmExtractor(public_llm, ontology), store)
+    # First doc is public; the next two are alice-only. Partition CORPUS
+    # so each extractor only sees the texts its LLM is scripted for —
+    # LlmExtractor's loud-fail on silent-empty would otherwise raise on
+    # unmatched texts (which is correct behavior; we're just working with it).
+    public_docs = dict(list(CORPUS.items())[:1])
+    private_docs = dict(list(CORPUS.items())[1:])
 
-    private_llm = ScriptedLLM(
-        {t: CORPUS[t] for t in list(CORPUS.keys())[1:]}
+    public_llm = ScriptedLLM(public_docs)
+    await _ingest_corpus(LlmExtractor(public_llm, ontology), store, public_docs)
+
+    private_llm = ScriptedLLM(private_docs)
+    await _ingest_corpus(
+        LlmExtractor(private_llm, ontology), store, private_docs, acl_ref="alice"
     )
-    await _ingest_corpus(LlmExtractor(private_llm, ontology), store, acl_ref="alice")
 
     server: FastMCP = build_server(store=store, audit=audit)
 
@@ -274,8 +311,8 @@ async def test_permission_aware_traversal_does_not_leak_through_mcp(
             },
         )
 
-    bob_facts = bob_result.data["payload"]
-    alice_facts = alice_result.data["payload"]
+    bob_facts = _unwrap(bob_result)["payload"]
+    alice_facts = _unwrap(alice_result)["payload"]
 
     # Bob sees Alice → Acme only (one hop, one fact).
     assert len(bob_facts) == 1
@@ -328,7 +365,7 @@ async def test_explain_returns_facts_with_provenance_via_mcp(
             {"entity_id": "company:acme", "agent_identity": "agent:x"},
         )
 
-    facts = result.data["payload"]
+    facts = _unwrap(result)["payload"]
     assert len(facts) >= 1
     for fact in facts:
         prov = fact["provenance"]
@@ -368,5 +405,5 @@ async def test_as_of_query_reads_historical_state_via_mcp(
             },
         )
 
-    assert current.data["payload"] == []
-    assert len(historical.data["payload"]) == 1
+    assert _unwrap(current)["payload"] == []
+    assert len(_unwrap(historical)["payload"]) == 1
