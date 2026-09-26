@@ -29,6 +29,8 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-networkx>=3.0",
+    "neo4j>=5.20",
+    "testcontainers[neo4j]>=4.8",
 ]
 
 [project.scripts]
@@ -44,6 +46,12 @@ packages = ["ontos"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: tests that require external services (Docker + Neo4j, etc.)",
+]
+# Skip integration tests by default so `uv run pytest` stays fast for
+# contributors without Docker running. CI runs both suites explicitly.
+addopts = "-m 'not integration'"
 
 [tool.ruff]
 line-length = 100

@@ -39,9 +39,23 @@ class ToolResponse(BaseModel):
 def build_store(config: RuntimeConfig) -> GraphStore:
     if config.storage_backend == "networkx":
         return NetworkxStore()
+    if config.storage_backend == "neo4j":
+        # Deferred import: `neo4j` is an optional extra so the base install
+        # doesn't drag it in for dev/CI runs that use the in-memory backend.
+        from ontos.storage.neo4j_store import Neo4jStore
+
+        uri = os.environ.get("NEO4J_URI")
+        user = os.environ.get("NEO4J_USER", "neo4j")
+        password = os.environ.get("NEO4J_PASSWORD")
+        if not uri or not password:
+            raise RuntimeError(
+                "ONTOS_STORAGE_BACKEND=neo4j requires NEO4J_URI + NEO4J_PASSWORD"
+            )
+        database = os.environ.get("NEO4J_DATABASE", "neo4j")
+        return Neo4jStore.from_uri(uri, auth=(user, password), database=database)
     raise NotImplementedError(
-        f"backend {config.storage_backend!r} not wired in M0 — "
-        "only 'networkx' is available. Neo4j lands in M1."
+        f"backend {config.storage_backend!r} is not wired — "
+        "supported: 'networkx' (dev), 'neo4j'. Neptune/LadybugDB land in M2."
     )
 
 
