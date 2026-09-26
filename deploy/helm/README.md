@@ -25,7 +25,7 @@ kubectl create secret generic ontos-openfga \
     --from-literal=token="..."
 
 helm install ontos ./deploy/helm/ontos \
-    --set image.tag=0.0.1
+    --set image.tag=0.1.0
 ```
 
 ## Regulated-deploy checklist

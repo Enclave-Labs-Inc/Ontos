@@ -7,7 +7,12 @@ from ontos.runtime.models import ArticleTwelveField, Confidence, Fact
 
 
 def test_package_imports() -> None:
-    assert ontos.__version__ == "0.0.1"
+    # Don't hardcode the version — it bumps every release and this test
+    # would rot. Just check the shape (SemVer major.minor.patch, with an
+    # optional pre-release / build metadata trailer).
+    import re
+
+    assert re.match(r"^\d+\.\d+\.\d+([-.+][A-Za-z0-9.-]+)?$", ontos.__version__)
 
 
 def test_article_twelve_has_twelve_fields() -> None:
