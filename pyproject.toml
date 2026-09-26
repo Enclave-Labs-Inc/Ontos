@@ -31,7 +31,9 @@ dev = [
     "types-networkx>=3.0",
     "types-PyYAML>=6.0",
     "neo4j>=5.20",
-    "testcontainers[neo4j]>=4.8",
+    "testcontainers[neo4j,postgres]>=4.8",
+    "asyncpg>=0.30",
+    "aiosqlite>=0.20",
 ]
 
 [project.scripts]

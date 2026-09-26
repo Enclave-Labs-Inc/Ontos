@@ -64,15 +64,17 @@ class NetworkxStore:
         as_of: datetime | None = None,
         k: int = 10,
         acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
     ) -> list[Fact]:
         # M0: substring match over predicate + object_id, ranked by naive relevance.
-        # M2 replaces this with vector + BM25 hybrid; ACL is enforced pre-return.
+        # M3 replaces this with vector + BM25 hybrid; ACL is enforced pre-return.
         needle = query.lower()
         matches: list[tuple[float, Fact]] = []
+        allowed_set = set(allowed_acls) if allowed_acls is not None else None
         for fact in self._facts.values():
             if not _fact_alive_at(fact, as_of):
                 continue
-            if not self._acl_allows(fact, acl_subject):
+            if not _acl_allows(fact, acl_subject, allowed_set):
                 continue
             hay = f"{fact.subject_id} {fact.predicate} {fact.object_id}".lower()
             if needle in hay:
@@ -89,12 +91,14 @@ class NetworkxStore:
         depth: int = 2,
         as_of: datetime | None = None,
         acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
     ) -> Iterable[Fact]:
         if start not in self._graph:
             return []
         collected: list[Fact] = []
         frontier: set[str] = {start}
         seen: set[str] = {start}
+        allowed_set = set(allowed_acls) if allowed_acls is not None else None
         for _ in range(depth):
             next_frontier: set[str] = set()
             for node in frontier:
@@ -104,7 +108,7 @@ class NetworkxStore:
                         continue
                     if relation and fact.predicate != relation:
                         continue
-                    if not self._acl_allows(fact, acl_subject):
+                    if not _acl_allows(fact, acl_subject, allowed_set):
                         # Skip during traversal (not post-filter) — target node not expanded.
                         continue
                     collected.append(fact)
@@ -122,17 +126,19 @@ class NetworkxStore:
         *,
         as_of: datetime | None = None,
         acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
     ) -> list[Fact]:
         if entity_id not in self._graph:
             return []
         out: list[Fact] = []
+        allowed_set = set(allowed_acls) if allowed_acls is not None else None
         for _, _, _, data in self._graph.out_edges(entity_id, keys=True, data=True):
             fact: Fact = data["fact"]
-            if _fact_alive_at(fact, as_of) and self._acl_allows(fact, acl_subject):
+            if _fact_alive_at(fact, as_of) and _acl_allows(fact, acl_subject, allowed_set):
                 out.append(fact)
         for _, _, _, data in self._graph.in_edges(entity_id, keys=True, data=True):
             fact = data["fact"]
-            if _fact_alive_at(fact, as_of) and self._acl_allows(fact, acl_subject):
+            if _fact_alive_at(fact, as_of) and _acl_allows(fact, acl_subject, allowed_set):
                 out.append(fact)
         return out
 
@@ -140,10 +146,25 @@ class NetworkxStore:
         self._graph.clear()
         self._facts.clear()
 
-    def _acl_allows(self, fact: Fact, acl_subject: str | None) -> bool:
-        # M0: any fact with no acl_ref is public; any subject can see it.
-        # If acl_ref is set, M0 requires acl_subject == acl_ref. M2 delegates
-        # to OpenFGA `check(user, relation, object)`.
-        if fact.acl_ref is None:
-            return True
-        return acl_subject == fact.acl_ref
+
+def _acl_allows(
+    fact: Fact,
+    acl_subject: str | None,
+    allowed_acls: set[str] | None,
+) -> bool:
+    """Deny-by-default when a fact declares an acl_ref and no caller identity is supplied.
+
+    - `fact.acl_ref is None`: public. Always visible.
+    - `allowed_acls is not None`: M2 authz-resolved path. Fact visible iff its
+      `acl_ref` is in the resolved allow-list.
+    - `allowed_acls is None` and `acl_subject is not None`: M1 shim (dev-only).
+      Fact visible iff `fact.acl_ref == acl_subject`.
+    - Both `None` and `acl_ref` set: DENY.
+    """
+    if fact.acl_ref is None:
+        return True
+    if allowed_acls is not None:
+        return fact.acl_ref in allowed_acls
+    if acl_subject is not None:
+        return fact.acl_ref == acl_subject
+    return False
