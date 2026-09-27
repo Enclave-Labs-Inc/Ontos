@@ -1,8 +1,11 @@
 # ontos
 
 [![CI](https://github.com/Enclave-Labs-Inc/Ontos/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Enclave-Labs-Inc/Ontos/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/enclave-ontos.svg?label=PyPI&color=blue)](https://pypi.org/project/enclave-ontos/)
+[![Python](https://img.shields.io/pypi/pyversions/enclave-ontos.svg?label=python)](https://pypi.org/project/enclave-ontos/)
+[![Downloads](https://img.shields.io/pypi/dm/enclave-ontos.svg?label=PyPI%20downloads)](https://pypi.org/project/enclave-ontos/)
+[![Container](https://img.shields.io/badge/ghcr.io-enclave--labs--inc%2Fontos-blue?logo=docker&logoColor=white)](https://github.com/Enclave-Labs-Inc/Ontos/pkgs/container/ontos)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 
 **A subset of [Enclave](https://getenclave.ai) — the knowledge-graph layer of Enclave's sovereign AI company brain.**
 
@@ -33,14 +36,40 @@ Every fact carries provenance. Every query is audit-ready. Every deployment runs
 
 **0.1.0 (first public release)** — the runtime works end-to-end: ingest a directory of text files via `ontos ingest`, query it via `ontos query "..."` or the `ask` MCP tool, verify the audit chain via `ontos audit verify`. See [CHANGELOG.md](CHANGELOG.md) for what shipped in this release and [docs/design/](docs/design/) for the per-milestone architecture notes.
 
-## Quickstart (dev)
+## Install
 
 ```bash
+# From PyPI
+pip install enclave-ontos
+
+# Or via uv
+uv add enclave-ontos
+```
+
+The PyPI distribution name is `enclave-ontos`; the import name stays `ontos` (same shape as `pip install PyYAML` → `import yaml`).
+
+Container image on GHCR (multi-platform amd64):
+
+```bash
+docker pull ghcr.io/enclave-labs-inc/ontos:0.1.0
+# or the moving tag
+docker pull ghcr.io/enclave-labs-inc/ontos:latest
+```
+
+## Quickstart
+
+```bash
+# From an installed release
+ontos serve
+
+# From a clone (dev)
 uv sync --extra dev
-uv run ontos
+uv run ontos serve
 ```
 
 Then point any MCP-speaking client (Claude Code, Cursor, Codex, Gemini CLI) at the streamable-HTTP endpoint printed on start.
+
+The CLI also ships `ontos ingest <dir>`, `ontos query "<question>"`, and `ontos audit verify` — see [CHANGELOG.md](CHANGELOG.md) for what's in each release and [RELEASING.md](RELEASING.md) for the release process.
 
 ## Design pillars
 
