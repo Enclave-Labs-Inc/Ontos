@@ -6,7 +6,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Every release ships:
 
 - a matching git tag `vX.Y.Z`,
-- a PyPI wheel + sdist at `ontos==X.Y.Z`,
+- a PyPI wheel + sdist at `enclave-ontos==X.Y.Z` (imported as `import ontos`; the PyPI dist name is `enclave-ontos` because the `ontos` name was taken on PyPI),
 - a GHCR container image at `ghcr.io/enclave-labs-inc/ontos:X.Y.Z`,
 - a Helm chart `appVersion` bumped to match under `deploy/helm/ontos/Chart.yaml`.
 

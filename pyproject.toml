@@ -1,5 +1,5 @@
 [project]
-name = "ontos"
+name = "enclave-ontos"
 dynamic = ["version"]
 description = "Knowledge-graph layer of Enclave's sovereign AI company brain. Audit-first, agent-native, in-VPC."
 requires-python = ">=3.12"
