@@ -43,7 +43,7 @@ Ensure `main` requires the `lint · type-check · test` check (from `ci.yml`) be
    ```
 4. **Watch the workflow** at Actions → Release. The `build` job runs first and hard-fails if `ontos/_version.py` doesn't match the tag; then `publish-pypi`, `publish-ghcr`, and `gh-release` run in parallel from the built artifacts.
 5. **Verify the outputs**:
-   - PyPI: `pip install --upgrade ontos==X.Y.Z` from a clean venv.
+   - PyPI: `pip install --upgrade enclave-ontos==X.Y.Z` from a clean venv. Import path stays `import ontos`.
    - GHCR: `docker pull ghcr.io/enclave-labs-inc/ontos:X.Y.Z`.
    - GitHub Releases page shows the new release with the CHANGELOG excerpt and the sdist + wheel attached.
 6. **Post-release announcement** (optional): update whatever public docs, Slack channel, or Discord announcement channel needs it.
@@ -62,7 +62,7 @@ To validate the workflow without actually publishing:
 The right recovery is a **new patch release** that fixes the issue:
 
 1. Cut `vX.Y.(Z+1)` per the normal process, with a CHANGELOG entry noting what the previous release broke and how the patch fixes it.
-2. On PyPI, mark the broken version as **yanked** (Project → Manage → Releases → Yank). Yanking hides it from `pip install ontos` (unless the user pins the exact version) without deleting the record.
+2. On PyPI, mark the broken version as **yanked** (Project → Manage → Releases → Yank). Yanking hides it from `pip install enclave-ontos` (unless the user pins the exact version) without deleting the record.
 3. On GHCR, do NOT delete the tag. Push `:latest` to the patched image so `docker pull ontos:latest` picks up the fix.
 4. Announce the yank in the CHANGELOG entry for the new release and (if warranted) as a pinned GitHub issue.
 
