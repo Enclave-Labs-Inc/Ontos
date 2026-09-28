@@ -1,0 +1,437 @@
+# Pharma / life-sciences ontology — vocabulary for drug sponsors,
+# clinical trials, regulatory submissions, and GxP manufacturing.
+#
+# Grounded in:
+#   - ClinicalTrials.gov trial data model (NCT identifier, phase,
+#     status, sponsor, investigator, site, condition, intervention).
+#   - FDA regulatory submission ladder: IND → Phase 1/2/3 →
+#     NDA / BLA / sNDA / sBLA / MAA and their EMA / MHRA / PMDA peers.
+#   - ICH E6 (R2) Good Clinical Practice — sponsor / CRO / investigator
+#     / site / monitor roles.
+#   - GxP quality-system vocabulary (GMP, GLP, GCP) for the
+#     manufacturing side.
+#
+# Extraction target: everything here should be pullable from a
+# ClinicalTrials.gov record, an FDA-published structured drug label,
+# or a real FDA-483 inspection observation. Nothing speculative.
+#
+# See docs/design/m7.md for the design rationale and how the graded
+# questions in tests/verticals/test_pharma_graded.py (landing in M7.c)
+# map to these entities and relations.
+
+version: "0.1"
+
+entity_types:
+  # ------------------------------------------------------------------
+  # People and organizations
+  # ------------------------------------------------------------------
+  - label: Person
+    description: >-
+      A named individual — principal investigator, medical monitor,
+      regulatory-affairs lead, medical director, quality lead.
+    properties:
+      - name: full_name
+        type: STRING
+        required: true
+
+  - label: Company
+    description: >-
+      A sponsor / drug-maker / marketing-authorization holder.
+    properties:
+      - name: legal_name
+        type: STRING
+        required: true
+      - name: duns
+        type: STRING
+      - name: fda_establishment_id
+        type: STRING
+
+  - label: CRO
+    description: >-
+      A contract research organization acting on the sponsor's behalf
+      per ICH E6 delegation. Distinct entity type because the
+      responsibility chain is a first-class compliance concern.
+    properties:
+      - name: legal_name
+        type: STRING
+        required: true
+      - name: duns
+        type: STRING
+
+  - label: Regulator
+    description: >-
+      A drug regulator — FDA, EMA, MHRA, PMDA, Health Canada, CDSCO,
+      ANVISA, TGA.
+    properties:
+      - name: short_name
+        type: STRING
+        required: true
+      - name: full_name
+        type: STRING
+      - name: jurisdiction
+        type: STRING
+
+  - label: Regulation
+    description: >-
+      A specific regulation, guidance, or standard — 21 CFR Part 11,
+      21 CFR Part 210/211 (cGMP), ICH E6 R2 GCP, EU CTR (536/2014),
+      FDCA, PMD Act.
+    properties:
+      - name: short_name
+        type: STRING
+        required: true
+      - name: long_name
+        type: STRING
+      - name: jurisdiction
+        type: STRING
+
+  # ------------------------------------------------------------------
+  # Products and their scientific basis
+  # ------------------------------------------------------------------
+  - label: Drug
+    description: >-
+      A drug or biologic — approved or investigational. `inn` is the
+      International Nonproprietary Name; `code` is the sponsor's
+      pre-INN development code (e.g. "ABC-123").
+    properties:
+      - name: inn
+        type: STRING
+      - name: code
+        type: STRING
+      - name: brand_name
+        type: STRING
+      - name: modality
+        type: STRING
+      - name: approval_status
+        type: STRING
+
+  - label: MoleculeTarget
+    description: >-
+      The biological target a drug acts on — a receptor, enzyme,
+      ion channel, transporter, or pathway node.
+    properties:
+      - name: name
+        type: STRING
+        required: true
+      - name: target_class
+        type: STRING
+
+  - label: Indication
+    description: >-
+      A disease, condition, or symptom the drug is being developed or
+      approved to treat.
+    properties:
+      - name: name
+        type: STRING
+        required: true
+      - name: mesh_id
+        type: STRING
+      - name: icd10_code
+        type: STRING
+
+  # ------------------------------------------------------------------
+  # Clinical development
+  # ------------------------------------------------------------------
+  - label: ClinicalTrial
+    description: >-
+      A specific clinical trial. `nct_id` is the ClinicalTrials.gov
+      registration identifier, the load-bearing cross-source join key.
+    properties:
+      - name: nct_id
+        type: STRING
+        required: true
+      - name: phase
+        type: STRING
+      - name: status
+        type: STRING
+      - name: enrollment_target
+        type: INTEGER
+      - name: started_at
+        type: DATE
+      - name: primary_completion_at
+        type: DATE
+
+  - label: TrialProtocol
+    description: >-
+      The protocol document governing a clinical trial. Version and
+      amendments are load-bearing for GCP inspection readiness.
+    properties:
+      - name: version
+        type: STRING
+        required: true
+      - name: effective_at
+        type: DATE
+
+  - label: TrialSite
+    description: >-
+      A specific clinical site enrolling patients in a trial.
+    properties:
+      - name: name
+        type: STRING
+        required: true
+      - name: city
+        type: STRING
+      - name: country
+        type: STRING
+
+  - label: AdverseEvent
+    description: >-
+      A serious adverse event reported during a trial or post-market.
+      Grade follows CTCAE where applicable.
+    properties:
+      - name: term
+        type: STRING
+        required: true
+      - name: grade
+        type: STRING
+      - name: is_serious
+        type: BOOLEAN
+      - name: occurred_at
+        type: DATE
+
+  # ------------------------------------------------------------------
+  # Regulatory
+  # ------------------------------------------------------------------
+  - label: RegulatorySubmission
+    description: >-
+      A regulatory filing — IND, NDA, BLA, sNDA, sBLA, DMF, MAA, IMPD.
+      `submission_number` is the regulator's identifier for the
+      submission.
+    properties:
+      - name: submission_type
+        type: STRING
+        required: true
+      - name: submission_number
+        type: STRING
+      - name: submitted_at
+        type: DATE
+      - name: decision
+        type: STRING
+      - name: decision_at
+        type: DATE
+
+  # ------------------------------------------------------------------
+  # Manufacturing / GxP
+  # ------------------------------------------------------------------
+  - label: ManufacturingSite
+    description: >-
+      A drug-substance or drug-product manufacturing site subject to
+      GMP inspection.
+    properties:
+      - name: name
+        type: STRING
+        required: true
+      - name: fda_establishment_id
+        type: STRING
+      - name: city
+        type: STRING
+      - name: country
+        type: STRING
+
+  - label: QualityControl
+    description: >-
+      A GxP quality-system control — batch release, deviation
+      management, change control, CAPA, out-of-specification handling.
+    properties:
+      - name: control_type
+        type: STRING
+        required: true
+      - name: description
+        type: STRING
+
+  - label: InspectionObservation
+    description: >-
+      An inspection finding — FDA-483 observation, warning letter,
+      EMA inspection deficiency. Grade-level severity carried on
+      `classification` (e.g. "Critical", "Major", "Other").
+    properties:
+      - name: classification
+        type: STRING
+        required: true
+      - name: observation_number
+        type: STRING
+      - name: observed_at
+        type: DATE
+      - name: summary
+        type: STRING
+
+relation_types:
+  # ------------------------------------------------------------------
+  # Trial sponsorship and delegation
+  # ------------------------------------------------------------------
+  - label: sponsors_trial
+    description: The company is the sponsor of record.
+    cardinality: one_to_many
+
+  - label: conducted_by
+    description: A CRO conducting the trial on the sponsor's behalf.
+    cardinality: many_to_many
+    properties:
+      - name: delegated_activities
+        type: STRING
+
+  - label: leads_trial
+    description: Principal investigator (or coordinating PI) role.
+    cardinality: many_to_many
+    properties:
+      - name: since
+        type: DATE
+
+  - label: monitors_trial
+    description: Medical / safety monitor role.
+    cardinality: many_to_many
+
+  # ------------------------------------------------------------------
+  # Trial content
+  # ------------------------------------------------------------------
+  - label: evaluates
+    description: The trial evaluates this drug (investigational or approved).
+    cardinality: many_to_many
+
+  - label: treats_indication
+    description: The trial is designed to treat this indication.
+    cardinality: many_to_many
+
+  - label: has_protocol
+    description: The trial is governed by this protocol version.
+    cardinality: one_to_many
+
+  - label: enrolls_at
+    description: The trial enrolls patients at this site.
+    cardinality: many_to_many
+
+  - label: reports_event
+    description: The trial reported this adverse event.
+    cardinality: one_to_many
+
+  # ------------------------------------------------------------------
+  # Drug scientific + regulatory
+  # ------------------------------------------------------------------
+  - label: targets
+    description: The drug acts on this molecular target.
+    cardinality: many_to_many
+
+  - label: approved_for
+    description: The drug is approved to treat this indication.
+    cardinality: many_to_many
+    properties:
+      - name: approved_at
+        type: DATE
+      - name: pediatric
+        type: BOOLEAN
+
+  - label: caused_by
+    description: The adverse event was attributed to this drug.
+    cardinality: many_to_many
+    properties:
+      - name: causality
+        type: STRING
+
+  # ------------------------------------------------------------------
+  # Regulatory submissions
+  # ------------------------------------------------------------------
+  - label: submitted
+    description: The company submitted this regulatory submission.
+    cardinality: one_to_many
+
+  - label: reviewed_by
+    description: The submission is reviewed by this regulator.
+    cardinality: many_to_one
+
+  - label: covers_drug
+    description: The submission covers this drug.
+    cardinality: many_to_many
+
+  # ------------------------------------------------------------------
+  # Manufacturing / GxP
+  # ------------------------------------------------------------------
+  - label: manufactured_at
+    description: The drug is manufactured at this site.
+    cardinality: many_to_many
+
+  - label: operated_by
+    description: The company operates the manufacturing site.
+    cardinality: many_to_one
+
+  - label: certified_for
+    description: The site is certified against this regulation / standard.
+    cardinality: many_to_many
+    properties:
+      - name: certified_at
+        type: DATE
+      - name: valid_until
+        type: DATE
+
+  - label: has_control
+    description: The site implements this GxP quality control.
+    cardinality: one_to_many
+
+  - label: implements_regulation
+    description: The control implements or references this regulation.
+    cardinality: many_to_many
+
+  - label: inspected_by
+    description: The site was inspected by this regulator.
+    cardinality: many_to_many
+    properties:
+      - name: last_inspection_at
+        type: DATE
+      - name: outcome
+        type: STRING
+
+  - label: noted_at
+    description: The observation was raised on this manufacturing site.
+    cardinality: many_to_one
+
+  # ------------------------------------------------------------------
+  # Broad regulatory coverage
+  # ------------------------------------------------------------------
+  - label: regulated_by
+    description: The company is subject to this regulator's oversight.
+    cardinality: many_to_many
+
+  - label: subject_to
+    description: The company is subject to this regulation.
+    cardinality: many_to_many
+
+  - label: enforced_by
+    description: The regulation is enforced by this regulator.
+    cardinality: many_to_many
+
+patterns:
+  # Trial sponsorship and delegation
+  - { subject_type: Company, predicate: sponsors_trial, object_type: ClinicalTrial }
+  - { subject_type: ClinicalTrial, predicate: conducted_by, object_type: CRO }
+  - { subject_type: Person, predicate: leads_trial, object_type: ClinicalTrial }
+  - { subject_type: Person, predicate: monitors_trial, object_type: ClinicalTrial }
+
+  # Trial content
+  - { subject_type: ClinicalTrial, predicate: evaluates, object_type: Drug }
+  - { subject_type: ClinicalTrial, predicate: treats_indication, object_type: Indication }
+  - { subject_type: ClinicalTrial, predicate: has_protocol, object_type: TrialProtocol }
+  - { subject_type: ClinicalTrial, predicate: enrolls_at, object_type: TrialSite }
+  - { subject_type: ClinicalTrial, predicate: reports_event, object_type: AdverseEvent }
+
+  # Drug scientific + regulatory
+  - { subject_type: Drug, predicate: targets, object_type: MoleculeTarget }
+  - { subject_type: Drug, predicate: approved_for, object_type: Indication }
+  - { subject_type: AdverseEvent, predicate: caused_by, object_type: Drug }
+
+  # Regulatory submissions
+  - { subject_type: Company, predicate: submitted, object_type: RegulatorySubmission }
+  - { subject_type: RegulatorySubmission, predicate: reviewed_by, object_type: Regulator }
+  - { subject_type: RegulatorySubmission, predicate: covers_drug, object_type: Drug }
+
+  # Manufacturing / GxP
+  - { subject_type: Drug, predicate: manufactured_at, object_type: ManufacturingSite }
+  - { subject_type: ManufacturingSite, predicate: operated_by, object_type: Company }
+  - { subject_type: ManufacturingSite, predicate: certified_for, object_type: Regulation }
+  - { subject_type: ManufacturingSite, predicate: has_control, object_type: QualityControl }
+  - { subject_type: QualityControl, predicate: implements_regulation, object_type: Regulation }
+  - { subject_type: ManufacturingSite, predicate: inspected_by, object_type: Regulator }
+  - { subject_type: InspectionObservation, predicate: noted_at, object_type: ManufacturingSite }
+
+  # Broad regulatory coverage
+  - { subject_type: Company, predicate: regulated_by, object_type: Regulator }
+  - { subject_type: Company, predicate: subject_to, object_type: Regulation }
+  - { subject_type: Regulation, predicate: enforced_by, object_type: Regulator }

@@ -1,0 +1,402 @@
+# Fintech / public-issuer ontology — vocabulary for SEC-registered
+# companies, their filings, risk factors, corporate governance, and
+# SR 11-7 model-risk management.
+#
+# Grounded in:
+#   - SEC Form 10-K / 10-Q / 8-K structure (Items 1, 1A, 7, 8, 15; 8-K
+#     trigger events).
+#   - Federal Reserve SR 11-7 (Supervisory Guidance on Model Risk
+#     Management) vocabulary for Model + ModelControl entities.
+#   - Standard board-governance vocabulary (directors, officers,
+#     committees, auditors).
+#
+# Extraction target: everything here should be pullable from a real
+# public 10-K. Nothing speculative or "would be nice."
+#
+# See docs/design/m7.md for the design rationale and how the graded
+# questions in tests/verticals/test_fintech_graded.py map to these
+# entities and relations.
+
+version: "0.1"
+
+entity_types:
+  # ------------------------------------------------------------------
+  # People and organizations
+  # ------------------------------------------------------------------
+  - label: Person
+    description: >-
+      A natural person appearing in a filing — director, officer,
+      auditor, beneficial owner, or named individual.
+    properties:
+      - name: full_name
+        type: STRING
+        required: true
+
+  - label: Company
+    description: >-
+      A public-company issuer. `cik` is the SEC Central Index Key —
+      the load-bearing identity for cross-filing joins.
+    properties:
+      - name: legal_name
+        type: STRING
+        required: true
+      - name: cik
+        type: STRING
+      - name: ticker
+        type: STRING
+      - name: incorporation_state
+        type: STRING
+      - name: fiscal_year_end
+        type: STRING
+
+  - label: Auditor
+    description: >-
+      An accounting firm engaged as the independent registered public
+      accounting firm — PwC, EY, Deloitte, KPMG, BDO, Grant Thornton
+      and their peers.
+    properties:
+      - name: legal_name
+        type: STRING
+        required: true
+      - name: pcaob_registration_number
+        type: STRING
+
+  - label: Regulator
+    description: >-
+      A governmental agency exercising oversight — SEC, FDIC, OCC,
+      Federal Reserve, PCAOB, CFTC, FCA, PRA, ESMA, and so on.
+    properties:
+      - name: short_name
+        type: STRING
+        required: true
+      - name: full_name
+        type: STRING
+      - name: jurisdiction
+        type: STRING
+
+  # ------------------------------------------------------------------
+  # Filings and their internal structure
+  # ------------------------------------------------------------------
+  - label: Filing
+    description: >-
+      A specific SEC filing — a 10-K, 10-Q, 8-K, S-1, DEF 14A, etc.
+      `accession_number` is the SEC's identifier for the filing.
+    properties:
+      - name: form_type
+        type: STRING
+        required: true
+      - name: accession_number
+        type: STRING
+      - name: filed_at
+        type: DATETIME
+      - name: period_of_report
+        type: DATE
+      - name: fiscal_year
+        type: INTEGER
+      - name: fiscal_quarter
+        type: INTEGER
+
+  - label: FilingSection
+    description: >-
+      A named section within a Filing — "Item 1A Risk Factors",
+      "Item 7 MD&A", "Item 8 Financial Statements", etc.
+    properties:
+      - name: item_number
+        type: STRING
+        required: true
+      - name: title
+        type: STRING
+
+  # ------------------------------------------------------------------
+  # Risk, regulation, governance
+  # ------------------------------------------------------------------
+  - label: Risk
+    description: >-
+      A risk factor disclosed in a filing. `topic` is a normalized
+      category (e.g. "supply-chain", "cyber", "regulatory",
+      "credit", "geopolitical"); `geography` tags the region if
+      one is called out.
+    properties:
+      - name: topic
+        type: STRING
+        required: true
+      - name: geography
+        type: STRING
+      - name: severity
+        type: STRING
+
+  - label: Regulation
+    description: >-
+      A specific regulation, rule, or supervisory guidance. Examples:
+      Dodd-Frank, SR 11-7, MiFID II, GDPR, Basel III, Sarbanes-Oxley.
+    properties:
+      - name: short_name
+        type: STRING
+        required: true
+      - name: long_name
+        type: STRING
+      - name: jurisdiction
+        type: STRING
+
+  - label: BoardCommittee
+    description: >-
+      A standing board committee — Audit, Compensation, Nominating &
+      Governance, Risk, Technology, Finance.
+    properties:
+      - name: name
+        type: STRING
+        required: true
+
+  # ------------------------------------------------------------------
+  # Business structure
+  # ------------------------------------------------------------------
+  - label: BusinessSegment
+    description: >-
+      A reportable segment as disclosed in Item 1 / Note X of the
+      financial statements. Named per the company's own segmentation.
+    properties:
+      - name: name
+        type: STRING
+        required: true
+      - name: description
+        type: STRING
+
+  - label: Product
+    description: >-
+      A named product or service line offered by a company.
+    properties:
+      - name: name
+        type: STRING
+        required: true
+
+  - label: Jurisdiction
+    description: >-
+      A country, US state, or supranational region — the geographies
+      a company operates in or is regulated by.
+    properties:
+      - name: name
+        type: STRING
+        required: true
+      - name: iso_code
+        type: STRING
+
+  # ------------------------------------------------------------------
+  # SR 11-7 model-risk management
+  # ------------------------------------------------------------------
+  - label: Model
+    description: >-
+      A quantitative model subject to SR 11-7 governance — pricing,
+      credit-risk, market-risk, capital, AML, or AI/ML model.
+    properties:
+      - name: name
+        type: STRING
+        required: true
+      - name: model_class
+        type: STRING
+      - name: risk_tier
+        type: STRING
+      - name: deployed_at
+        type: DATE
+
+  - label: ModelControl
+    description: >-
+      A control mitigating model risk — independent validation,
+      performance monitoring, benchmarking, use limits, escalation
+      procedures.
+    properties:
+      - name: control_type
+        type: STRING
+        required: true
+      - name: description
+        type: STRING
+
+  # ------------------------------------------------------------------
+  # Events
+  # ------------------------------------------------------------------
+  - label: MaterialEvent
+    description: >-
+      An 8-K trigger event or other material corporate event —
+      acquisition, disposition, executive change, bankruptcy,
+      material contract, cyber incident.
+    properties:
+      - name: event_type
+        type: STRING
+        required: true
+      - name: announced_at
+        type: DATETIME
+      - name: summary
+        type: STRING
+
+relation_types:
+  # ------------------------------------------------------------------
+  # Governance
+  # ------------------------------------------------------------------
+  - label: serves_as_director_of
+    description: Board directorship.
+    cardinality: many_to_many
+    properties:
+      - name: since
+        type: DATE
+      - name: until
+        type: DATE
+      - name: is_independent
+        type: BOOLEAN
+
+  - label: serves_as_officer_of
+    description: Executive-officer role.
+    cardinality: many_to_many
+    properties:
+      - name: title
+        type: STRING
+      - name: since
+        type: DATE
+      - name: until
+        type: DATE
+
+  - label: has_committee
+    description: The company operates this board committee.
+    cardinality: one_to_many
+
+  - label: sits_on_committee
+    description: A director sits on this committee.
+    cardinality: many_to_many
+    properties:
+      - name: is_chair
+        type: BOOLEAN
+
+  - label: audited_by
+    description: The company's independent auditor.
+    cardinality: many_to_one
+    properties:
+      - name: since
+        type: DATE
+      - name: audit_fees_usd
+        type: FLOAT
+
+  # ------------------------------------------------------------------
+  # Filings
+  # ------------------------------------------------------------------
+  - label: filed
+    description: The company is the issuer of this filing.
+    cardinality: one_to_many
+
+  - label: contains_section
+    description: This filing contains this section.
+    cardinality: one_to_many
+
+  - label: discloses_risk
+    description: This filing section discloses this risk factor.
+    cardinality: many_to_many
+
+  # ------------------------------------------------------------------
+  # Corporate structure
+  # ------------------------------------------------------------------
+  - label: subsidiary_of
+    description: Corporate parent relationship.
+    cardinality: many_to_one
+
+  - label: acquired
+    description: One company acquired another.
+    cardinality: many_to_many
+    properties:
+      - name: announced_at
+        type: DATE
+      - name: closed_at
+        type: DATE
+      - name: consideration_usd
+        type: FLOAT
+
+  - label: competes_with
+    description: The two companies compete in overlapping markets.
+    cardinality: many_to_many
+
+  - label: has_segment
+    description: The company operates this business segment.
+    cardinality: one_to_many
+
+  - label: offers_product
+    description: The company offers this product or service.
+    cardinality: many_to_many
+
+  # ------------------------------------------------------------------
+  # Regulation
+  # ------------------------------------------------------------------
+  - label: regulated_by
+    description: The company is subject to this regulator's oversight.
+    cardinality: many_to_many
+    properties:
+      - name: since
+        type: DATE
+
+  - label: subject_to
+    description: The company is subject to this regulation.
+    cardinality: many_to_many
+
+  - label: enforced_by
+    description: The regulation is enforced by this regulator.
+    cardinality: many_to_many
+
+  - label: operates_in
+    description: The company operates in this jurisdiction.
+    cardinality: many_to_many
+
+  # ------------------------------------------------------------------
+  # SR 11-7 model risk
+  # ------------------------------------------------------------------
+  - label: operates_model
+    description: The company operates this model in production.
+    cardinality: one_to_many
+
+  - label: governed_by
+    description: The model is subject to this control.
+    cardinality: many_to_many
+
+  - label: references_regulation
+    description: The control implements or references this regulation.
+    cardinality: many_to_many
+
+  # ------------------------------------------------------------------
+  # Events
+  # ------------------------------------------------------------------
+  - label: announced_event
+    description: The company announced this material event.
+    cardinality: one_to_many
+
+  - label: disclosed_in
+    description: The event was disclosed in this filing.
+    cardinality: many_to_one
+
+patterns:
+  # Governance
+  - { subject_type: Person, predicate: serves_as_director_of, object_type: Company }
+  - { subject_type: Person, predicate: serves_as_officer_of, object_type: Company }
+  - { subject_type: Company, predicate: has_committee, object_type: BoardCommittee }
+  - { subject_type: Person, predicate: sits_on_committee, object_type: BoardCommittee }
+  - { subject_type: Company, predicate: audited_by, object_type: Auditor }
+
+  # Filings
+  - { subject_type: Company, predicate: filed, object_type: Filing }
+  - { subject_type: Filing, predicate: contains_section, object_type: FilingSection }
+  - { subject_type: FilingSection, predicate: discloses_risk, object_type: Risk }
+
+  # Corporate structure
+  - { subject_type: Company, predicate: subsidiary_of, object_type: Company }
+  - { subject_type: Company, predicate: acquired, object_type: Company }
+  - { subject_type: Company, predicate: competes_with, object_type: Company }
+  - { subject_type: Company, predicate: has_segment, object_type: BusinessSegment }
+  - { subject_type: Company, predicate: offers_product, object_type: Product }
+
+  # Regulation
+  - { subject_type: Company, predicate: regulated_by, object_type: Regulator }
+  - { subject_type: Company, predicate: subject_to, object_type: Regulation }
+  - { subject_type: Regulation, predicate: enforced_by, object_type: Regulator }
+  - { subject_type: Company, predicate: operates_in, object_type: Jurisdiction }
+
+  # SR 11-7 model risk
+  - { subject_type: Company, predicate: operates_model, object_type: Model }
+  - { subject_type: Model, predicate: governed_by, object_type: ModelControl }
+  - { subject_type: ModelControl, predicate: references_regulation, object_type: Regulation }
+
+  # Events
+  - { subject_type: Company, predicate: announced_event, object_type: MaterialEvent }
+  - { subject_type: MaterialEvent, predicate: disclosed_in, object_type: Filing }
