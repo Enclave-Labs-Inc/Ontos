@@ -1,0 +1,79 @@
+VANTA DEFENSE SYSTEMS CORPORATION
+FORM 10-K
+For the fiscal year ended September 30, 2024
+Commission File Number 001-99004
+SEC CIK: 0009900004
+NYSE ticker: VDS
+
+State of Incorporation: Delaware
+Fiscal Year End: September 30
+Independent Registered Public Accounting Firm: Cormorant Advisors LLP (engaged since 2015; audit fees $7,800,000 for FY2024)
+
+--- SYNTHETIC DEMONSTRATION DOCUMENT — NOT A REAL SEC FILING ---
+
+ITEM 1. BUSINESS
+
+Vanta Defense Systems Corporation ("VDS", "Vanta") is a prime contractor to the U.S. Department
+of Defense and select allied governments, designing and integrating aerospace platforms, ground
+combat systems, and defensive cyber solutions. We operate through three reportable segments:
+Aerospace, Ground Systems, and Cyber Solutions.
+
+We are subject to oversight by the U.S. Securities and Exchange Commission, the U.S. Department
+of Defense (including the Defense Contract Audit Agency and the Defense Contract Management
+Agency), and the U.S. Department of State (Directorate of Defense Trade Controls, DDTC) with
+respect to arms exports.
+
+We are subject to the International Traffic in Arms Regulations (ITAR), the Federal Acquisition
+Regulation (FAR), the Defense Federal Acquisition Regulation Supplement (DFARS), and the
+Sarbanes-Oxley Act.
+
+ITEM 1A. RISK FACTORS
+
+Customer concentration risk. Approximately 75% of fiscal 2024 revenue was derived directly or
+indirectly from the U.S. Department of Defense. A reduction in the U.S. defense budget or a
+shift in acquisition priorities could materially reduce our revenue.
+
+Export control risk. Our products are subject to ITAR and EAR. A violation could result in
+denial of export privileges, monetary fines, or debarment from future U.S. government contracts.
+
+Single-source supplier risk. Certain propulsion, sensor, and specialty-alloy components are
+sourced from a single qualified supplier. Loss of a single-source supplier without a qualified
+alternative could delay platform deliveries.
+
+Geopolitical risk. Sanctions and export restrictions on the People's Republic of China and the
+Russian Federation could reduce international sales.
+
+ITEM 7. MANAGEMENT'S DISCUSSION AND ANALYSIS
+
+Aerospace segment revenue grew 12% on continued next-generation fighter deliveries. Ground
+Systems declined 3%. Cyber Solutions grew 28% on classified program ramps.
+
+ITEM 8. FINANCIAL STATEMENTS
+
+Selected financial data (in $ millions):
+    Revenue                45,880
+    Net income              3,720
+    Total assets           58,240
+    Backlog                72,110
+
+ITEM 10. DIRECTORS, EXECUTIVE OFFICERS AND CORPORATE GOVERNANCE
+
+Board of Directors:
+    Gen. (Ret.) Harold F. Beckwith (Chair; independent)
+    Adm. (Ret.) Marlene Ortega (Audit Committee chair; independent)
+    Prof. Devon Halliburton (Risk Committee chair; independent)
+    Deborah Feinstein (Compensation Committee chair; independent)
+    Carter Whitfield (President and Chief Executive Officer)
+    (six additional independent directors)
+
+Standing Committees:
+    Audit Committee
+    Risk Committee
+    Compensation Committee
+    Nominating & Governance Committee
+    Classified Programs Committee
+
+Executive Officers:
+    Carter Whitfield — President and Chief Executive Officer (since 2017)
+    Andrea Delacroix — Chief Financial Officer (since 2019)
+    Rear Adm. (Ret.) Jonas Kim — Chief Operating Officer (since 2020)

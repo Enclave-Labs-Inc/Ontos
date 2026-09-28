@@ -1,0 +1,59 @@
+CLINICALTRIALS.GOV RECORD (excerpt) — NCT9999001
+--- SYNTHETIC DEMONSTRATION DOCUMENT — NOT A REAL TRIAL ---
+
+Study Title
+A Phase 3 Randomized, Double-Blind, Placebo-Controlled Trial of ORT-451 (Meraltacept) as
+First-Line Treatment for Adults With Unresectable or Metastatic Melanoma (MELIRA-3)
+
+NCT Number: NCT9999001
+
+Sponsor
+Orion Therapeutics, Inc.
+DUNS: 099001234
+
+Collaborator (Contract Research Organization)
+Bluewave Clinical Research, Ltd. — delegated activities: site management, monitoring,
+data management, medical writing, pharmacovigilance
+
+Principal Investigator
+Elena Marquez, M.D., Ph.D. — Coordinating Principal Investigator
+Massachusetts General Hospital, Boston, MA, United States
+
+Medical Monitor
+Robert Kingsley, M.D. — Bluewave Clinical Research (contract medical monitor)
+
+Study Design
+Phase: 3
+Status: Recruiting
+Estimated Enrollment: 640 participants (randomized 1:1)
+Actual Study Start: March 1, 2024
+Estimated Primary Completion: December 31, 2026
+
+Intervention (Investigational Product)
+Name: ORT-451
+International Nonproprietary Name (INN): meraltacept
+Sponsor Development Code: ORT-451
+Modality: Humanized IgG1 monoclonal antibody
+Molecular Target: PD-L1 (programmed death-ligand 1)
+Approval Status: Investigational (Phase 3)
+
+Condition (Indication)
+Metastatic Melanoma (MeSH: D008545; ICD-10: C43)
+
+Trial Sites (selected)
+    Massachusetts General Hospital — Boston, MA, United States
+    Mayo Clinic Rochester — Rochester, MN, United States
+    UCSF Helen Diller Family Comprehensive Cancer Center — San Francisco, CA, United States
+    Charité — Universitätsmedizin Berlin — Berlin, Germany
+    National Cancer Center Hospital — Tokyo, Japan
+    (36 additional sites globally)
+
+Protocol
+Protocol Version: 3.1
+Effective Date: June 15, 2024
+Governing Regulations: ICH E6 (R2) Good Clinical Practice; EU CTR 536/2014 (EU sites);
+21 CFR Part 11 (electronic records)
+
+Regulatory Submissions Referenced
+Investigational New Drug (IND) 199-045 — U.S. FDA (Orion Therapeutics)
+Clinical Trial Application EMEA/H/CTA/2023/091 — European Medicines Agency (Orion Therapeutics)

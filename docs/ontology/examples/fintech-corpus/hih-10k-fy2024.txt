@@ -1,0 +1,85 @@
+HALCYON INSURANCE HOLDINGS, LTD.
+FORM 10-K
+For the fiscal year ended December 31, 2024
+Commission File Number 001-99003
+SEC CIK: 0009900003
+NYSE ticker: HIH
+
+Jurisdiction of Incorporation: Bermuda
+Fiscal Year End: December 31
+Independent Registered Public Accounting Firm: Blackpine LLP (engaged since 2016; audit fees $9,100,000 for 2024)
+
+--- SYNTHETIC DEMONSTRATION DOCUMENT — NOT A REAL SEC FILING ---
+
+ITEM 1. BUSINESS
+
+Halcyon Insurance Holdings, Ltd. ("HIH", "the Company") is a Bermuda-domiciled global
+property-and-casualty insurance and reinsurance group. We operate through three reportable
+segments: Property, Casualty, and Life & Annuities. Our U.S. banking subsidiary, Halcyon
+Trust Bank, is separately supervised by the Federal Reserve.
+
+We are subject to oversight by the Bermuda Monetary Authority (BMA), the U.S. Securities and
+Exchange Commission (SEC), the New York Department of Financial Services and other state
+insurance regulators, and — for our banking subsidiary — the Board of Governors of the
+Federal Reserve System.
+
+We are subject to Sarbanes-Oxley, Solvency II (via our EU subsidiaries), and Federal Reserve
+Supervisory Letter SR 11-7 (Supervisory Guidance on Model Risk Management) with respect to
+our banking subsidiary and our internal capital models.
+
+ITEM 1A. RISK FACTORS
+
+Catastrophe risk. Increased frequency and severity of natural catastrophes — particularly
+Atlantic hurricanes and Pacific typhoons — driven in part by climate change trends may cause
+underwriting losses in excess of modeled expectations. In 2024 we recorded $2.4 billion in
+gross catastrophe losses.
+
+Model risk. Our pricing, reserving, and capital adequacy depend on quantitative models. Under
+SR 11-7 the Model Risk Management function (reporting to the Chief Risk Officer) maintains
+independent validation and performance monitoring of these models. Our tier-1 Property
+Catastrophe Pricer, Property-Catastrophe-Pricer-v2, was deployed on November 1, 2022.
+
+Regulatory risk. Divergent capital requirements across the U.S., Bermuda, and the EU may
+materially increase compliance cost.
+
+ITEM 7. MANAGEMENT'S DISCUSSION AND ANALYSIS
+
+Gross written premium grew 8% year-over-year. Combined ratio improved to 94.1% (2023: 96.7%)
+despite elevated catastrophe activity. Net investment income grew 22% on higher fixed-income
+yields.
+
+ITEM 8. FINANCIAL STATEMENTS
+
+Selected financial data (in $ millions):
+    Gross written premium     32,140
+    Net income                 4,880
+    Total assets             112,050
+    Shareholders' equity      21,760
+
+ITEM 10. DIRECTORS, EXECUTIVE OFFICERS AND CORPORATE GOVERNANCE
+
+Board of Directors:
+    The Rt. Hon. Sir Alistair Pemberton (Chair; independent)
+    Dr. Ingrid Larsson (Audit Committee chair; independent)
+    Rafael Nunes (Risk Committee chair; independent)
+    Charlotte Weyland (Nominating & Governance chair; independent)
+    Elena Rossi (President and Chief Executive Officer)
+    (five additional independent directors)
+
+Standing Committees:
+    Audit Committee
+    Risk Committee
+    Compensation Committee
+    Nominating & Governance Committee
+    Investment Committee
+
+Executive Officers:
+    Elena Rossi — President and Chief Executive Officer (since 2019)
+    Nathaniel Cross — Chief Financial Officer (since 2020)
+    Dr. Yohei Nakamura — Chief Risk Officer (since 2021)
+
+MODEL RISK MANAGEMENT DISCLOSURE (SR 11-7)
+
+Our Model Risk Management framework applies SR 11-7 principles to all material internal capital
+and pricing models. Controls include independent validation, benchmarking against challenger
+models, and quarterly outcome analysis reported to the Risk Committee.

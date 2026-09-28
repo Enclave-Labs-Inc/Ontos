@@ -1,0 +1,83 @@
+MERIDIAN BANK GROUP, INC.
+FORM 10-K
+ANNUAL REPORT PURSUANT TO SECTION 13 OR 15(d) OF THE SECURITIES EXCHANGE ACT OF 1934
+For the fiscal year ended December 31, 2024
+Commission File Number 000-99001
+SEC CIK: 0009900001
+NYSE ticker: MBG
+
+State of Incorporation: Delaware
+Fiscal Year End: December 31
+Independent Registered Public Accounting Firm: Blackpine LLP (engaged since 2019; audit fees $8,400,000 for 2024)
+
+--- SYNTHETIC DEMONSTRATION DOCUMENT — NOT A REAL SEC FILING ---
+
+ITEM 1. BUSINESS
+
+Meridian Bank Group, Inc. ("MBG", "we", "the Company") is a mid-capitalization U.S. regional bank
+holding company headquartered in Charlotte, North Carolina. We operate through three reportable
+business segments: Consumer Banking, Commercial Banking, and Wealth Management. As of December 31,
+2024, we operated 412 branches across New York, California, Texas, and North Carolina.
+
+We are supervised by the Board of Governors of the Federal Reserve System, the Office of the
+Comptroller of the Currency (OCC), and the Federal Deposit Insurance Corporation (FDIC). Our banking
+subsidiary is a national bank chartered by the OCC. We are also subject to the Sarbanes-Oxley Act
+of 2002, the Dodd-Frank Wall Street Reform and Consumer Protection Act, and Federal Reserve
+Supervisory Letter SR 11-7 (Supervisory Guidance on Model Risk Management).
+
+ITEM 1A. RISK FACTORS
+
+Credit risk. Deterioration in the commercial real estate portfolio, particularly in office and
+retail, materially increases our credit risk. As of December 31, 2024, non-performing loans in
+our Commercial Banking segment increased by 34% year-over-year.
+
+Model risk. We rely on quantitative models for credit underwriting, capital adequacy, and
+regulatory reporting. Under Federal Reserve SR 11-7 we maintain independent validation and
+performance monitoring of these models. Our tier-1 model, Wholesale-Credit-PD-v3, was deployed
+in production on April 15, 2023 and estimates probability-of-default for commercial loans; a
+tier-2 model, Consumer-Cross-Sell-Recommender-v1, ranks retail product recommendations.
+
+Cyber risk. A material cyber incident could disrupt banking services and expose customer data.
+
+ITEM 7. MANAGEMENT'S DISCUSSION AND ANALYSIS
+
+Net interest income declined 4% year-over-year due to funding-cost pressure. Non-interest income
+grew 11% driven by Wealth Management. Total assets stood at $187 billion at year end.
+
+ITEM 8. FINANCIAL STATEMENTS AND SUPPLEMENTARY DATA
+
+Selected financial data (in $ millions):
+    Revenue                7,842
+    Net income             1,203
+    Total assets         187,441
+    Total deposits       152,003
+    Tier-1 capital ratio    12.4%
+
+ITEM 10. DIRECTORS, EXECUTIVE OFFICERS AND CORPORATE GOVERNANCE
+
+Board of Directors:
+    Sarah A. Levinson (Chair; Audit Committee chair; independent)
+    Michael O. Okafor (Risk Committee chair; independent)
+    Priya Krishnan (Audit Committee, Nominating & Governance Committee; independent)
+    James R. Halvorsen (President and Chief Executive Officer)
+    (six additional independent directors)
+
+Standing Committees:
+    Audit Committee
+    Risk Committee
+    Compensation Committee
+    Nominating & Governance Committee
+
+Executive Officers:
+    James R. Halvorsen — President and Chief Executive Officer (since 2020)
+    Diane Xu — Chief Financial Officer (since 2021)
+    Terrence Blake — Chief Risk Officer (since 2019)
+
+MODEL RISK MANAGEMENT DISCLOSURE (SR 11-7)
+
+The Model Risk Management function reports to the Chief Risk Officer. In compliance with SR 11-7,
+each production model is subject to:
+    (i) independent model validation prior to production release,
+    (ii) ongoing performance monitoring against benchmark and challenger models,
+    (iii) periodic redevelopment based on outcome analysis,
+    (iv) documented use limits and escalation procedures.

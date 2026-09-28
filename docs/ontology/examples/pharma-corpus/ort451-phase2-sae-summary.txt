@@ -1,0 +1,55 @@
+PHASE 2 SERIOUS ADVERSE EVENT SUMMARY (excerpt)
+Trial NCT9999000 — ORT-451 (meraltacept) — MELIRA-2
+--- SYNTHETIC DEMONSTRATION DOCUMENT — NOT A REAL PHARMACOVIGILANCE SUMMARY ---
+
+Trial Metadata
+Trial: NCT9999000 (MELIRA-2, Phase 2, single-arm, open-label)
+Sponsor: Orion Therapeutics, Inc. (DUNS 099001234)
+Investigational Product: ORT-451 (INN meraltacept), humanized IgG1 mAb targeting PD-L1
+Indication under investigation: Metastatic melanoma (MeSH D008545)
+Enrollment: 96 participants across 6 sites (data cut May 31, 2023)
+
+Predecessor context: The Phase 3 successor trial NCT9999001 (MELIRA-3) uses the
+recommended-Phase-3-dose determined by MELIRA-2.
+
+Serious Adverse Events Reported (SAE Log excerpt)
+
+SAE-2023-004
+    Term: Immune-mediated colitis
+    CTCAE Grade: 3
+    Serious: Yes (required hospitalization)
+    Occurred: 2023-01-18
+    Site: Massachusetts General Hospital, Boston, MA
+    Attribution to ORT-451: PROBABLE
+    Action taken: Study drug held; managed with high-dose corticosteroids and infliximab;
+    patient resumed at reduced dose.
+
+SAE-2023-011 through SAE-2023-014 (aggregated)
+    Term: Immune-mediated colitis (across four additional patients)
+    CTCAE Grade: 3 in each case
+    Serious: Yes in each case (all four required hospitalization)
+    Sites: MGH (n=2), Mayo Clinic Rochester (n=1), UCSF (n=1)
+    Attribution to ORT-451: PROBABLE
+    Cumulative Grade 3 immune-mediated colitis: 5 of 96 (5.2%)
+
+SAE-2023-019 and SAE-2023-024 (aggregated)
+    Term: Immune-mediated pneumonitis
+    CTCAE Grade: 2 (both cases)
+    Serious: Yes (hospitalization for oxygen support)
+    Occurred: 2023-02-11 and 2023-03-05
+    Sites: Mayo Clinic Rochester; Charité Berlin
+    Attribution to ORT-451: PROBABLE
+
+SAE-2023-031
+    Term: Ventricular arrhythmia (torsades-de-pointes-like pattern)
+    CTCAE Grade: 3
+    Serious: Yes
+    Occurred: 2023-04-02
+    Site: Charité — Universitätsmedizin Berlin
+    Attribution to ORT-451: POSSIBLE (concurrent QT-prolonging medication)
+    Action taken: Study drug discontinued; patient recovered without long-term sequelae.
+
+Regulatory Reporting
+All SAEs reported to FDA (via IND 199-045 safety reports) and to EMA (via EudraVigilance)
+within 15 calendar days of sponsor awareness in compliance with 21 CFR 312.32 and
+Regulation (EU) 536/2014.
