@@ -1,0 +1,41 @@
+REGULATORY SUBMISSION SUMMARY (excerpt)
+NDA 224-567 — XYLEVA (halomectinib)
+--- SYNTHETIC DEMONSTRATION DOCUMENT — NOT A REAL FDA NDA SUMMARY ---
+
+Submission Metadata
+Submission Type: New Drug Application (NDA)
+Submission Number: NDA-224567
+Submitting Sponsor: Halcyon Bio Corp
+Reviewing Regulator: U.S. Food and Drug Administration (FDA), Center for Drug Evaluation and Research (CDER)
+Submitted: August 1, 2022
+Decision: APPROVED
+Decision Date: May 12, 2023
+Approval Pathway: Standard Review
+Pediatric Assessment: Waived (deferred under PREA; adult-only initial indication)
+
+Product Covered
+XYLEVA (halomectinib) 25 mg and 50 mg tablets
+Sponsor development code: HB-207
+Modality: Small molecule
+Proposed Indication (at submission): Type 2 diabetes mellitus in adults, as an adjunct to
+diet and exercise (approved as filed).
+
+Pivotal Clinical Program Cited
+Two Phase 3 trials formed the basis of approval:
+    NCT8888321 (XYLEVA-101) — Halcyon Bio-sponsored Phase 3, 1,204 randomized adults, 26-week
+    A1C reduction primary endpoint. Sponsor: Halcyon Bio Corp. Coordinating PI: Miguel Estrada,
+    M.D. (Cleveland Clinic).
+    NCT8888322 (XYLEVA-102) — Halcyon Bio-sponsored Phase 3, 998 randomized adults, 52-week
+    durability endpoint. Sponsor: Halcyon Bio Corp.
+
+Manufacturing Coverage
+Drug substance manufactured at: Halcyon Bio Corp — Andover, Massachusetts (FEI 3009123456).
+Drug product manufactured at: Meridian Biopharm, Inc. — Bedford, Massachusetts (FEI 3009654321;
+contract manufacturer).
+
+Post-Approval Supplemental Submissions
+    sNDA-224567/S-001  Submitted 2023-11-20, approved 2024-03-15 — labeling update
+    (revised warnings section — pancreatitis language)
+    sNDA-224567/S-002  Submitted 2024-04-08, approved 2024-09-12 — manufacturing supplement
+    (addition of secondary drug-product site)
+    sNDA-224567/S-003  Submitted 2024-08-05, under review — geriatric-use labeling update

@@ -1,0 +1,58 @@
+HIGHLIGHTS OF PRESCRIBING INFORMATION (excerpt)
+XYLEVA (halomectinib) tablets, for oral use
+Initial U.S. Approval: 2023
+
+--- SYNTHETIC DEMONSTRATION DOCUMENT — NOT A REAL FDA LABEL ---
+
+Marketing Authorization Holder
+Halcyon Bio Corp
+Andover, Massachusetts, United States
+DUNS: 099003321
+FDA Establishment Identifier (holder): 3009111000
+
+Active Ingredient
+Halomectinib (International Nonproprietary Name)
+Sponsor Development Code: HB-207
+Brand Name: XYLEVA
+Modality: Small molecule (sulfonyl-urea class successor)
+Approval Status: Approved
+
+INDICATIONS AND USAGE
+XYLEVA is a glucagon-suppressing agent indicated as an adjunct to diet and exercise to
+improve glycemic control in adults with type 2 diabetes mellitus (T2DM; MeSH: D003924).
+
+Approving Regulator: U.S. Food and Drug Administration
+Initial U.S. Approval: May 12, 2023
+Pediatric Use: Not established; not indicated for patients under 18.
+
+DOSAGE AND ADMINISTRATION
+Recommended starting dose: 25 mg orally once daily. Titrate at 4-week intervals to 50 mg or
+100 mg once daily based on glycemic response and tolerability.
+
+MANUFACTURING SITES
+Drug Substance:
+    Halcyon Bio Corp — Andover, Massachusetts, United States
+    FDA Establishment Identifier: 3009123456
+    cGMP Certified: 21 CFR Part 210 & 211 (certified July 2022; valid through July 2027)
+
+Drug Product (contract manufacturer):
+    Meridian Biopharm, Inc. — Bedford, Massachusetts, United States
+    FDA Establishment Identifier: 3009654321
+    cGMP Certified: 21 CFR Part 210 & 211 (certified January 2020; valid through January 2025)
+
+WARNINGS AND PRECAUTIONS
+Hypoglycemia. Hypoglycemia was reported in 12% of patients receiving XYLEVA in pivotal trials.
+Consider dose adjustment when co-administered with insulin or a sulfonylurea.
+
+Pancreatitis. Acute pancreatitis has been reported in less than 1% of patients receiving
+XYLEVA. Discontinue promptly if pancreatitis is suspected.
+
+Hypersensitivity. Serious hypersensitivity reactions including angioedema have been reported
+in clinical experience.
+
+ADVERSE REACTIONS (reported on label)
+    Hypoglycemia (common; ≥5% incidence)
+    Pancreatitis (rare; <1% incidence)
+    Angioedema (rare; hypersensitivity)
+    Nausea (common)
+    Headache (common)

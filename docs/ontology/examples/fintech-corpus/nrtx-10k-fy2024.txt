@@ -1,0 +1,76 @@
+NORTEX SEMICONDUCTOR CORPORATION
+FORM 10-K
+For the fiscal year ended June 30, 2024
+Commission File Number 000-99002
+SEC CIK: 0009900002
+NASDAQ ticker: NRTX
+
+State of Incorporation: Delaware
+Fiscal Year End: June 30
+Independent Registered Public Accounting Firm: Cormorant Advisors LLP (engaged since 2017; audit fees $6,200,000 for FY2024)
+
+--- SYNTHETIC DEMONSTRATION DOCUMENT — NOT A REAL SEC FILING ---
+
+ITEM 1. BUSINESS
+
+Nortex Semiconductor Corporation ("NRTX", "Nortex", "we") is a fabless designer of high-performance
+semiconductor products. We design, market, and support integrated circuits for three reportable
+segments: Datacenter GPU, Embedded, and Automotive. We do not own manufacturing facilities;
+we contract wafer fabrication to third-party foundries.
+
+Principal competitors include Cerulean Compute, Inc. and Halcyon Silicon Corp. in our datacenter
+segment, and multiple regional suppliers in embedded and automotive.
+
+We operate design centers in the United States, Taiwan, Japan, and Germany.
+
+ITEM 1A. RISK FACTORS
+
+Supply chain concentration risk — Taiwan. Approximately 68% of our wafer output for fiscal 2024
+was produced by two independent foundries located in Taiwan. Geopolitical instability affecting
+Taiwan, including cross-strait tensions with the People's Republic of China, would materially
+disrupt our supply of finished wafers and could result in extended production delays. We have
+begun qualifying alternative foundry capacity in Japan and Arizona but full qualification for
+our leading-edge process nodes is expected to take between 12 and 30 months.
+
+Export control risk. Our advanced-node datacenter GPU products are subject to U.S. Export
+Administration Regulations (EAR) administered by the Bureau of Industry and Security (BIS).
+Additional restrictions on advanced-chip exports to specified entities in the People's Republic
+of China could reduce addressable market and require product redesign.
+
+Competitive risk. The datacenter accelerator market is dominated by three vendors; we compete
+principally with Cerulean Compute for the largest workloads.
+
+ITEM 7. MANAGEMENT'S DISCUSSION AND ANALYSIS
+
+Datacenter GPU revenue grew 61% year-over-year on continued generative-AI workload demand.
+Embedded revenue was flat. Automotive revenue declined 8% due to inventory correction at
+key OEM customers.
+
+ITEM 8. FINANCIAL STATEMENTS
+
+Selected financial data (in $ millions):
+    Revenue                14,220
+    Net income              4,015
+    Total assets           27,890
+    Cash & short-term inv. 11,200
+
+ITEM 10. DIRECTORS, EXECUTIVE OFFICERS AND CORPORATE GOVERNANCE
+
+Board of Directors:
+    Dr. Anya Vasquez (Chair; independent)
+    William H. Chen (Audit Committee chair; independent)
+    Kimiko Tanaka (Compensation Committee chair; independent)
+    Rakesh Prahalad (Nominating & Governance chair; independent)
+    Dr. Marcus Feld (President and Chief Executive Officer)
+    (four additional independent directors)
+
+Standing Committees:
+    Audit Committee
+    Compensation Committee
+    Nominating & Governance Committee
+    Technology and Product Committee
+
+Executive Officers:
+    Dr. Marcus Feld — President and Chief Executive Officer (since 2018)
+    Jennifer Wu — Chief Financial Officer (since 2022)
+    Dr. Sanjay Rao — Chief Technology Officer (since 2020)

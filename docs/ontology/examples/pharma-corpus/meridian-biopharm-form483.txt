@@ -1,0 +1,55 @@
+U.S. FOOD AND DRUG ADMINISTRATION
+FORM FDA 483 — INSPECTIONAL OBSERVATIONS
+--- SYNTHETIC DEMONSTRATION DOCUMENT — NOT A REAL FDA-483 ---
+
+Inspected Site
+Meridian Biopharm, Inc. — Bedford Manufacturing Facility
+Bedford, Massachusetts, United States
+FDA Establishment Identifier (FEI): 3009654321
+
+Products Manufactured at This Site (in scope of inspection)
+    XYLEVA (halomectinib) drug product — contract manufacturer for Halcyon Bio Corp
+    (also produces drug product for two additional sponsors not disclosed here)
+
+Inspection Details
+Inspector Agency: U.S. Food and Drug Administration (FDA)
+Inspection Dates: September 9–15, 2024
+Inspection Type: Post-approval GMP surveillance (21 CFR Part 210 & 211)
+Overall Outcome: Voluntary Action Indicated (VAI) — 4 observations issued
+
+OBSERVATIONS
+
+Observation 1 [MAJOR]
+Batch production and control records for batches XL-2024-047 through XL-2024-053 did not
+document investigation of a 3-log excursion in aseptic-filling environmental monitoring
+observed on July 22, 2024. Deviation was closed without a documented root-cause analysis
+as required by written procedure.
+Citation basis: 21 CFR 211.192 (production record review) and 21 CFR 211.113 (control of
+microbiological contamination).
+
+Observation 2 [MAJOR]
+Environmental monitoring program for the Grade A/B aseptic filling area lacked defined
+alert and action limits for two of five sample points identified in the environmental
+monitoring plan (documents EMP-2023-004, EMP-2023-005). Corrective action for the July 22
+excursion referenced above was not extended to the two undefined sample points.
+Citation basis: 21 CFR 211.113.
+
+Observation 3 [OTHER]
+Standard operating procedure SOP-QC-018 (Out-of-Specification Result Handling) does not
+require documentation of the initial-vs.-retest evaluation logic for laboratory OOS
+results, and inspection observed three OOS records without documentation of the analyst's
+initial evaluation.
+Citation basis: 21 CFR 211.192.
+
+Observation 4 [MAJOR]
+Change-control procedure SOP-QA-004 was not applied to a modification of the filling-line
+peristaltic pump speed (September 3, 2024). The parameter change was implemented on the
+production floor without an approved change-control request. The parameter falls within
+the critical-process-parameter (CPP) list per validation report VR-XL-2023-002.
+Citation basis: 21 CFR 211.100 (written procedures; deviations).
+
+CORRECTIVE ACTION STATEMENT (submitted by firm October 2024)
+Firm has committed to (i) restrictive-batch review of all 2024 XYLEVA production against
+the environmental monitoring baseline, (ii) revision of SOP-QC-018 and SOP-QA-004,
+(iii) retraining of manufacturing and QA staff, and (iv) engagement of an independent GMP
+consultant. FDA review of the response is pending.
