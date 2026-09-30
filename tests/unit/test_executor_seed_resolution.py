@@ -178,6 +178,82 @@ async def test_type_strip_wins_over_search_when_both_would_hit(
     assert not any("keyword search fallback" in w for w in result.warnings)
 
 
+async def test_ambiguous_keyword_fallback_refuses_to_guess(
+    ontology: Ontology,
+) -> None:
+    """Multiple substring-matching candidates → ambiguity warning, no resolution.
+
+    Per @ALEKS0805's review on PR #20: silent wrong-entity resolution
+    is worse than an explicit failure. If the search fallback finds
+    "Acme Corp", "Acme Corp Europe", and "Acme Corp Holdings", the
+    executor must refuse to pick one and instead surface the ambiguity.
+    """
+    store = NetworkxStore()
+    now = datetime.now(UTC)
+
+    def _mk(subject: str, obj: str) -> Fact:
+        return Fact(
+            subject_id=subject,
+            predicate="works_at",
+            object_id=obj,
+            provenance=Provenance(
+                source_id="doc",
+                extractor_id="test",
+                extractor_version="0.0.0",
+                confidence=Confidence.EXTRACTED,
+                confidence_score=1.0,
+            ),
+            t_valid=now,
+            ingested_at=now,
+        )
+
+    # Three distinct entities all substring-matching "Acme Corp".
+    await store.add_fact(_mk("Alice", "Acme Corp"))
+    await store.add_fact(_mk("Bob", "Acme Corp Europe"))
+    await store.add_fact(_mk("Carol", "Acme Corp Holdings"))
+
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="acme corp"),  # lowercase → forces search
+        steps=[TraversalStep(depth=1)],
+        ontology=ontology,
+    )
+    result = await DeterministicExecutor().execute(plan, store)
+
+    assert result.hits == [], (
+        "ambiguous search fallback must not silently pick one candidate"
+    )
+    ambiguity_warnings = [
+        w for w in result.warnings if "matches multiple graph entities" in w
+    ]
+    assert ambiguity_warnings, (
+        "an ambiguous search fallback must surface an explicit "
+        f"ambiguity warning; got warnings={result.warnings}"
+    )
+    # The warning must name the candidates so the operator can pick one.
+    warning_body = ambiguity_warnings[0]
+    assert "Acme Corp" in warning_body
+    assert "Acme Corp Europe" in warning_body
+    assert "Acme Corp Holdings" in warning_body
+
+
+async def test_unambiguous_keyword_fallback_still_resolves(
+    alice_store: NetworkxStore, ontology: Ontology
+) -> None:
+    # Sanity check that the single-candidate path still resolves after
+    # the ambiguity guard was added — regression backstop for the
+    # already-passing `test_keyword_fallback_when_entity_id_only_partially_matches`
+    # under the changed logic.
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="alice"),
+        steps=[TraversalStep(depth=1)],
+        ontology=ontology,
+    )
+    result = await DeterministicExecutor().execute(plan, alice_store)
+
+    assert result.hits, "single-candidate substring should still resolve"
+    assert any("keyword search fallback" in w for w in result.warnings)
+
+
 async def test_legitimate_name_with_parens_not_clobbered(
     ontology: Ontology,
 ) -> None:

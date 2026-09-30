@@ -164,9 +164,13 @@ class DeterministicExecutor:
         operator can see resolution happened:
           1. Exact match — id is already correct, no warning.
           2. Strip trailing " (Type)" annotation and retry.
-          3. Search the store for the cleaned-up name; take the first
-             hit whose subject or object contains the name.
-        Returns None only if all three fail.
+          3. Search the store for the cleaned-up name. Resolve ONLY
+             when there is a single unambiguous candidate; on
+             multiple matches, emit an ambiguity warning naming the
+             candidates and return None instead of guessing.
+        Returns None if all three miss OR if the search fallback is
+        ambiguous — silent wrong-entity resolution is worse than an
+        explicit failure that surfaces the ambiguity.
         """
         # 1. Exact match — id is already what the store uses.
         if await store.facts_for_entity(
@@ -194,23 +198,43 @@ class DeterministicExecutor:
 
         # 3. Keyword-search fallback on the cleaned-up name.
         # Search does substring match; can still succeed after
-        # step 1's exact-id lookup missed.
+        # step 1's exact-id lookup missed. Collect every distinct
+        # substring-matching endpoint from the hits — if more than one,
+        # refuse to guess (silent wrong-entity resolution is a worse
+        # failure mode than an explicit ambiguity warning).
         needle = _TYPE_SUFFIX_RE.sub("", entity_id).strip() or entity_id
         hits = await store.search(
             needle,
             as_of=as_of,
-            k=5,
+            k=10,
             acl_subject=acl_subject,
             allowed_acls=allowed_acls,
         )
+        candidates: list[str] = []
+        seen_candidates: set[str] = set()
+        needle_lower = needle.lower()
         for f in hits:
-            for candidate in (f.subject_id, f.object_id):
-                if needle.lower() in candidate.lower():
-                    warnings.append(
-                        f"seed entity {entity_id!r} resolved to "
-                        f"{candidate!r} via keyword search fallback"
-                    )
-                    return candidate
+            for endpoint in (f.subject_id, f.object_id):
+                if needle_lower in endpoint.lower() and endpoint not in seen_candidates:
+                    candidates.append(endpoint)
+                    seen_candidates.add(endpoint)
+
+        if len(candidates) == 1:
+            warnings.append(
+                f"seed entity {entity_id!r} resolved to "
+                f"{candidates[0]!r} via keyword search fallback"
+            )
+            return candidates[0]
+        if len(candidates) > 1:
+            preview = ", ".join(repr(c) for c in candidates[:5])
+            tail = "" if len(candidates) <= 5 else f", ... ({len(candidates)} total)"
+            warnings.append(
+                f"seed entity {entity_id!r} matches multiple graph "
+                f"entities via keyword search ({preview}{tail}); "
+                "refusing to guess — pass an exact id or use "
+                "SeedByKeyword to enumerate candidates"
+            )
+            return None
 
         return None
 
