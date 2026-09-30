@@ -24,6 +24,7 @@ Nothing here calls an LLM. `same plan + same store = same ranking`.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -33,6 +34,13 @@ from ontos.executor.base import ExecutionHit, ExecutionResult
 from ontos.planner import Plan, SeedByEntity, SeedByKeyword
 from ontos.runtime.models import Fact
 from ontos.storage.base import GraphStore
+
+# Matches a trailing " (Word)" or " (Word_word2)" annotation — the
+# exact shape the LLM planner tends to append when it thinks it's
+# being helpful (e.g. "Alice Johnson (Person)"). We only strip when
+# the parenthesized content is a single identifier-shaped token to
+# avoid clobbering legitimate names like "Meridian (US) Inc.".
+_TYPE_SUFFIX_RE = re.compile(r"\s+\(([A-Za-z][A-Za-z0-9_-]*)\)\s*$")
 
 # HippoRAG uses damping 0.5; PathRAG uses α ∈ [0.6, 0.9] with θ = 0.05.
 # We pick middle-of-the-road defaults that make small in-memory graphs
@@ -60,7 +68,9 @@ class DeterministicExecutor:
         as_of: datetime | None = plan.as_of
         warnings: list[str] = []
 
-        seed_entities = await self._seed(plan, store, as_of, acl_subject, allowed_acls)
+        seed_entities = await self._seed(
+            plan, store, as_of, acl_subject, allowed_acls, warnings
+        )
         if not seed_entities:
             warnings.append("plan.seed produced no entities — nothing to rank")
             return ExecutionResult(hits=[], warnings=warnings)
@@ -104,9 +114,18 @@ class DeterministicExecutor:
         as_of: datetime | None,
         acl_subject: str | None,
         allowed_acls: list[str] | None,
+        warnings: list[str],
     ) -> list[str]:
         if isinstance(plan.seed, SeedByEntity):
-            return [plan.seed.entity_id]
+            resolved = await self._resolve_seed_entity(
+                plan.seed.entity_id,
+                store,
+                as_of,
+                acl_subject,
+                allowed_acls,
+                warnings,
+            )
+            return [resolved] if resolved is not None else []
         if isinstance(plan.seed, SeedByKeyword):
             hits = await store.search(
                 plan.seed.keyword,
@@ -123,6 +142,77 @@ class DeterministicExecutor:
                     ids.append(f.object_id)
             return ids[: plan.seed.k]
         raise TypeError(f"unknown seed variant: {plan.seed!r}")
+
+    async def _resolve_seed_entity(
+        self,
+        entity_id: str,
+        store: GraphStore,
+        as_of: datetime | None,
+        acl_subject: str | None,
+        allowed_acls: list[str] | None,
+        warnings: list[str],
+    ) -> str | None:
+        """Resolve a planner-supplied entity_id to one that lives in the graph.
+
+        The LLM planner can drift — appending "(Person)" or other type
+        annotations to what should be a bare entity id, wrapping in
+        quotes, adding whitespace. Relying on exact-string identity
+        between planner output and stored id turns those drifts into
+        silent "no facts" outcomes (github issue #16).
+
+        Fallback chain, each step emits a warning on match so the
+        operator can see resolution happened:
+          1. Exact match — id is already correct, no warning.
+          2. Strip trailing " (Type)" annotation and retry.
+          3. Search the store for the cleaned-up name; take the first
+             hit whose subject or object contains the name.
+        Returns None only if all three fail.
+        """
+        # 1. Exact match — id is already what the store uses.
+        if await store.facts_for_entity(
+            entity_id,
+            as_of=as_of,
+            acl_subject=acl_subject,
+            allowed_acls=allowed_acls,
+        ):
+            return entity_id
+
+        # 2. Strip trailing " (Type)" annotation.
+        if _TYPE_SUFFIX_RE.search(entity_id):
+            stripped = _TYPE_SUFFIX_RE.sub("", entity_id).strip()
+            if stripped and await store.facts_for_entity(
+                stripped,
+                as_of=as_of,
+                acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
+            ):
+                warnings.append(
+                    f"seed entity {entity_id!r} resolved to {stripped!r} "
+                    "via type-suffix strip"
+                )
+                return stripped
+
+        # 3. Keyword-search fallback on the cleaned-up name.
+        # Search does substring match; can still succeed after
+        # step 1's exact-id lookup missed.
+        needle = _TYPE_SUFFIX_RE.sub("", entity_id).strip() or entity_id
+        hits = await store.search(
+            needle,
+            as_of=as_of,
+            k=5,
+            acl_subject=acl_subject,
+            allowed_acls=allowed_acls,
+        )
+        for f in hits:
+            for candidate in (f.subject_id, f.object_id):
+                if needle.lower() in candidate.lower():
+                    warnings.append(
+                        f"seed entity {entity_id!r} resolved to "
+                        f"{candidate!r} via keyword search fallback"
+                    )
+                    return candidate
+
+        return None
 
     async def _expand(
         self,
