@@ -23,8 +23,9 @@ You comment; you never push to, approve, merge, close, or rewrite the PR.
 List open PRs (`mcp__github__list_pull_requests`, state `open`). Skip:
 - drafts;
 - PRs whose author is a bot, unless explicitly named;
-- PRs already reviewed at the current head: a review whose body contains
-  `<!-- ontos-pr-review sha=<head sha> -->`. A new push = a new head sha = review again,
+- PRs already reviewed at the current head: a review body *or* a PR (issue)
+  comment containing `<!-- ontos-pr-review sha=<head sha> -->` — the GitHub
+  Action posts its summary as a PR comment. A new push = a new head sha = review again,
   focusing on what changed since the last reviewed sha.
 
 ## 2. Gather context (issue → repo → diff)
