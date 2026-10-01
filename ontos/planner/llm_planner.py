@@ -16,11 +16,14 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from ontos.ontology import Ontology
 from ontos.planner.base import PlannerError
 from ontos.planner.plan import Plan, Seed, SeedByEntity, SeedByKeyword, TraversalStep
+
+log = structlog.get_logger()
 
 
 class RawPlan(BaseModel):
@@ -77,7 +80,7 @@ class LlmPlanner:
             raise PlannerError(question, f"LLM backend failed: {exc}") from exc
 
         try:
-            return Plan.build(
+            plan = Plan.build(
                 seed=raw.seed,
                 steps=raw.steps,
                 limit=raw.limit,
@@ -85,6 +88,18 @@ class LlmPlanner:
             )
         except (ValueError, Exception) as exc:
             raise PlannerError(question, f"ontology validation failed: {exc}") from exc
+
+        # Surface planner drift so operators notice when the LLM
+        # emits consecutive-identical steps (which `Plan.build` drops).
+        if len(plan.steps) < len(raw.steps):
+            log.warning(
+                "planner emitted duplicate steps",
+                planner_id=self.id,
+                raw_step_count=len(raw.steps),
+                canonical_step_count=len(plan.steps),
+            )
+
+        return plan
 
 
 __all__ = [

@@ -57,6 +57,10 @@ Example: if the schema says Person - works_at -> Company and the
 question is "Who works at Acme Corp?", seed Acme Corp and traverse
 works_at with direction="in".
 
+Each TraversalStep must be unique — never repeat the same
+(relations, depth, direction) combination across steps. A single-hop
+query is one step, not the same step twice.
+
 Return valid JSON matching the requested plan schema exactly.
 """
 
