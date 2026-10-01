@@ -86,6 +86,20 @@ class Plan(BaseModel):
 
         A referenced relation that's not declared is a schema
         violation — fail loud here, not in the executor.
+
+        Also canonicalizes `steps`: exact-duplicate TraversalSteps
+        (same relations list, same depth, same direction) are deduped
+        with first-occurrence order preserved. The LLM planner can
+        non-deterministically repeat a step (issue #18) and the
+        executor would then issue redundant `store.traverse` calls
+        and the Article-12 audit record would carry the inflated
+        plan verbatim. Canonicalizing at the single `Plan.build`
+        chokepoint fixes it for every current and future planner.
+
+        Dedupe is EXACT-key only: `relations=["a","b"]` and
+        `relations=["b","a"]` at the same depth/direction are NOT
+        treated as duplicates. Executor iterates relations in order
+        and silently reordering could mask real planner bugs.
         """
         actual_steps = list(steps or [])
         declared_relations = {rt.label for rt in ontology.relation_types}
@@ -96,7 +110,17 @@ class Plan(BaseModel):
                         f"plan step[{i}] references relation {rel!r} "
                         "which is not declared in the ontology"
                     )
-        return cls(seed=seed, steps=actual_steps, as_of=as_of, limit=limit)
+        # Order-preserving dedupe. TraversalStep.relations is a list
+        # (unhashable), so key on a tuple-of-fields. Reuses the same
+        # `dict.fromkeys` idiom the executor uses on `current_frontier`
+        # (ontos/executor/deterministic.py).
+        seen: dict[tuple[tuple[str, ...], int, str], TraversalStep] = {}
+        for step in actual_steps:
+            key = (tuple(step.relations), step.depth, step.direction)
+            if key not in seen:
+                seen[key] = step
+        canonical_steps = list(seen.values())
+        return cls(seed=seed, steps=canonical_steps, as_of=as_of, limit=limit)
 
     def total_depth(self) -> int:
         return sum(step.depth for step in self.steps)
