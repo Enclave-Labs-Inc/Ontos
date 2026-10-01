@@ -82,6 +82,25 @@ async def test_traverse_respects_depth(store: NetworkxStore) -> None:
     assert len(depth2) == 2
 
 
+async def test_traverse_incoming_direction(store: NetworkxStore) -> None:
+    fact = _make_fact("person:alice", "works_at", "company:acme")
+    await store.add_fact(fact)
+
+    results = list(
+        await store.traverse(
+            "company:acme",
+            relation="works_at",
+            direction="in",
+            depth=1,
+        )
+    )
+
+    assert len(results) == 1
+    assert results[0].subject_id == "person:alice"
+    assert results[0].predicate == "works_at"
+    assert results[0].object_id == "company:acme"
+
+
 async def test_acl_blocks_forbidden_facts_from_search(store: NetworkxStore) -> None:
     public = _make_fact("A", "knows", "B")
     private = _make_fact("A", "knows", "C", acl_ref="alice")

@@ -223,6 +223,79 @@ async def test_result_and_hit_are_frozen(
             result.hits[0].combined_score = 0.0  # type: ignore[misc]
 
 
+async def test_executor_honors_incoming_traversal_direction(
+    populated_store: NetworkxStore, ontology: Ontology
+) -> None:
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="company:acme"),
+        steps=[
+            TraversalStep(
+                relations=["works_at"],
+                depth=1,
+                direction="in",
+            )
+        ],
+        ontology=ontology,
+    )
+
+    result = await DeterministicExecutor().execute(plan, populated_store)
+
+    assert any(
+        hit.fact.subject_id == "person:alice"
+        and hit.fact.predicate == "works_at"
+        and hit.fact.object_id == "company:acme"
+        for hit in result.hits
+    )
+
+
+async def test_multi_step_respects_directional_frontier(
+    populated_store: NetworkxStore, ontology: Ontology
+) -> None:
+    now = datetime.now(UTC)
+    await populated_store.add_fact(
+        Fact(
+            subject_id="person:david",
+            predicate="works_at",
+            object_id="company:widget",
+            provenance=Provenance(
+                source_id="t",
+                extractor_id="t",
+                extractor_version="0.0.0",
+                confidence=Confidence.EXTRACTED,
+                confidence_score=1.0,
+            ),
+            t_valid=now,
+            ingested_at=now,
+        )
+    )
+
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="company:acme"),
+        steps=[
+            TraversalStep(
+                relations=["acquired"],
+                depth=1,
+                direction="out",
+            ),
+            TraversalStep(
+                relations=["works_at"],
+                depth=1,
+                direction="in",
+            ),
+        ],
+        ontology=ontology,
+    )
+
+    result = await DeterministicExecutor().execute(plan, populated_store)
+
+    works_at_subjects = {
+        hit.fact.subject_id for hit in result.hits if hit.fact.predicate == "works_at"
+    }
+
+    assert "person:david" in works_at_subjects
+    assert "person:alice" not in works_at_subjects
+
+
 async def test_multi_step_expansion_accumulates_hops(
     populated_store: NetworkxStore, ontology: Ontology
 ) -> None:

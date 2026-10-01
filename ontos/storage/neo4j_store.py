@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
@@ -222,6 +222,7 @@ class Neo4jStore:
         start: str,
         *,
         relation: str | None = None,
+        direction: Literal["out", "in", "both"] = "out",
         depth: int = 2,
         as_of: datetime | None = None,
         acl_subject: str | None = None,
@@ -231,8 +232,16 @@ class Neo4jStore:
         # variable-length pattern syntax requires literal bounds. We
         # cap it defensively before interpolation.
         depth = max(1, min(depth, _MAX_TRAVERSAL_DEPTH))
+
+        path_patterns = {
+            "out": f"(start:Entity {{id: $start_id}})-[rels:RELATES*1..{depth}]->(end:Entity)",
+            "in": f"(start:Entity {{id: $start_id}})<-[rels:RELATES*1..{depth}]-(end:Entity)",
+            "both": f"(start:Entity {{id: $start_id}})-[rels:RELATES*1..{depth}]-(end:Entity)",
+        }
+        path_pattern = path_patterns[direction]
+
         cypher = f"""
-        MATCH path = (start:Entity {{id: $start_id}})-[rels:RELATES*1..{depth}]->(end:Entity)
+        MATCH path = {path_pattern}
         WHERE ALL(r IN rels WHERE
             (
                 ($as_of IS NULL AND r.t_invalid IS NULL)
