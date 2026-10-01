@@ -107,9 +107,7 @@ class IngestPipeline:
 
             if self._resolver is not None and extraction.entities:
                 resolution = await self._resolver.resolve(list(extraction.entities))
-                entities_merged += sum(
-                    max(len(m.merged_ids) - 1, 0) for m in resolution.merges
-                )
+                entities_merged += sum(max(len(m.merged_ids) - 1, 0) for m in resolution.merges)
 
             for fact in extraction.facts:
                 write_fact: Fact = fact

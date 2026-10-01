@@ -180,8 +180,9 @@ def load_ontology(path: Path | str) -> Ontology:
 
     if not isinstance(raw, dict):
         raise OntologyLoadError(
-            p, "top-level YAML value must be a mapping with keys "
-            "'entity_types', 'relation_types', 'patterns'"
+            p,
+            "top-level YAML value must be a mapping with keys "
+            "'entity_types', 'relation_types', 'patterns'",
         )
 
     try:
@@ -191,8 +192,6 @@ def load_ontology(path: Path | str) -> Ontology:
 
     problems = ontology.check_referential_integrity()
     if problems:
-        raise OntologyLoadError(
-            p, "referential integrity failed:\n  - " + "\n  - ".join(problems)
-        )
+        raise OntologyLoadError(p, "referential integrity failed:\n  - " + "\n  - ".join(problems))
 
     return ontology

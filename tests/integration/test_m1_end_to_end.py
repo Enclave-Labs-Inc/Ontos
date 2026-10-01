@@ -66,9 +66,9 @@ def _unwrap(call_result: Any) -> dict[str, Any]:
             return parsed
     raise AssertionError(f"could not extract payload from {call_result!r}")
 
+
 STARTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "starter.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
 )
 
 
@@ -86,9 +86,7 @@ class ScriptedLLM:
     def __init__(self, script: dict[str, list[RawTriple]]) -> None:
         self._script = script
 
-    async def structured_extract(
-        self, text: str, ontology: Ontology
-    ) -> list[RawTriple]:
+    async def structured_extract(self, text: str, ontology: Ontology) -> list[RawTriple]:
         return list(self._script.get(text, []))
 
 
@@ -158,23 +156,35 @@ def _triple(
 CORPUS = {
     "Alice Smith works at Acme Corp.": [
         _triple(
-            "person:alice", "Person", "Alice Smith",
+            "person:alice",
+            "Person",
+            "Alice Smith",
             "works_at",
-            "company:acme", "Company", "Acme Corp",
+            "company:acme",
+            "Company",
+            "Acme Corp",
         )
     ],
     "Acme Corp acquired Widget Inc.": [
         _triple(
-            "company:acme", "Company", "Acme Corp",
+            "company:acme",
+            "Company",
+            "Acme Corp",
             "acquired",
-            "company:widget", "Company", "Widget Inc",
+            "company:widget",
+            "Company",
+            "Widget Inc",
         )
     ],
     "Widget Inc is a subsidiary of Foo Holdings.": [
         _triple(
-            "company:widget", "Company", "Widget Inc",
+            "company:widget",
+            "Company",
+            "Widget Inc",
             "subsidiary_of",
-            "company:foo", "Company", "Foo Holdings",
+            "company:foo",
+            "Company",
+            "Foo Holdings",
         )
     ],
 }
@@ -284,9 +294,7 @@ async def test_permission_aware_traversal_does_not_leak_through_mcp(
     await _ingest_corpus(LlmExtractor(public_llm, ontology), store, public_docs)
 
     private_llm = ScriptedLLM(private_docs)
-    await _ingest_corpus(
-        LlmExtractor(private_llm, ontology), store, private_docs, acl_ref="alice"
-    )
+    await _ingest_corpus(LlmExtractor(private_llm, ontology), store, private_docs, acl_ref="alice")
 
     server: FastMCP = build_server(store=store, audit=audit)
 
@@ -336,12 +344,8 @@ async def test_audit_chain_stays_hash_linked_across_multiple_tool_calls(
     server = build_server(store=store, audit=audit)
 
     async with Client(server) as client:
-        await client.call_tool(
-            "search", {"query": "acquired", "agent_identity": "agent:x"}
-        )
-        await client.call_tool(
-            "search", {"query": "works_at", "agent_identity": "agent:x"}
-        )
+        await client.call_tool("search", {"query": "acquired", "agent_identity": "agent:x"})
+        await client.call_tool("search", {"query": "works_at", "agent_identity": "agent:x"})
         await client.call_tool(
             "traverse",
             {"start": "person:alice", "agent_identity": "agent:x", "depth": 2},

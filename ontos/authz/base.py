@@ -30,9 +30,7 @@ class AuthzBackend(Protocol):
         """Return True iff `subject` has `relation` on `object_`."""
         ...
 
-    async def list_authorized_objects(
-        self, subject: str, relation: str
-    ) -> list[str]:
+    async def list_authorized_objects(self, subject: str, relation: str) -> list[str]:
         """Return the ids of every object the subject has this relation on.
 
         In OpenFGA this maps directly to the `ListObjects` API. Ontos's

@@ -65,8 +65,7 @@ def ontology() -> Ontology:
     from pathlib import Path
 
     return load_ontology(
-        Path(__file__).resolve().parents[2]
-        / "docs" / "ontology" / "examples" / "starter.yaml"
+        Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
     )
 
 
@@ -88,15 +87,11 @@ async def test_synthetic_benchmark_runs_and_finds_seed_neighbors(
     questions = [
         GradedQuestion(
             question="What does Alice do at Acme?",
-            expected_fact_ids=frozenset(
-                {fact_ids["person:alice-works_at-company:acme"]}
-            ),
+            expected_fact_ids=frozenset({fact_ids["person:alice-works_at-company:acme"]}),
         ),
         GradedQuestion(
             question="Where did Acme acquire?",
-            expected_fact_ids=frozenset(
-                {fact_ids["company:acme-acquired-company:widget"]}
-            ),
+            expected_fact_ids=frozenset({fact_ids["company:acme-acquired-company:widget"]}),
         ),
     ]
     result = await run_benchmark(ask, questions, k=5)

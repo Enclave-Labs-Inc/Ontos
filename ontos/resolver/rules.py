@@ -70,9 +70,7 @@ class ExactMatchResolver:
                 )
             )
 
-        return ResolutionResult(
-            entities=canonical, merges=merges, unresolved=unresolved
-        )
+        return ResolutionResult(entities=canonical, merges=merges, unresolved=unresolved)
 
 
 __all__ = ["ExactMatchResolver", "Resolver"]

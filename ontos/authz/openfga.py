@@ -88,9 +88,7 @@ class OpenFGAAuthz:
         allowed = getattr(response, "allowed", None)
         return bool(allowed)
 
-    async def list_authorized_objects(
-        self, subject: str, relation: str
-    ) -> list[str]:
+    async def list_authorized_objects(self, subject: str, relation: str) -> list[str]:
         body = {
             "user": subject,
             "relation": relation,
@@ -99,8 +97,6 @@ class OpenFGAAuthz:
         try:
             response = await self._client.list_objects(body=body)
         except Exception as exc:  # noqa: BLE001
-            raise AuthzError(
-                f"OpenFGA list_objects failed for {subject}/{relation}"
-            ) from exc
+            raise AuthzError(f"OpenFGA list_objects failed for {subject}/{relation}") from exc
         objects = getattr(response, "objects", []) or []
         return list(objects)

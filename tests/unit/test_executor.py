@@ -25,8 +25,7 @@ from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.networkx_store import NetworkxStore
 
 STARTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "starter.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
 )
 
 
@@ -154,8 +153,7 @@ async def test_ppr_boosts_facts_near_the_seed(
     assert "works_at" in by_predicate
     if "subsidiary_of" in by_predicate:
         assert (
-            by_predicate["works_at"].combined_score
-            >= by_predicate["subsidiary_of"].combined_score
+            by_predicate["works_at"].combined_score >= by_predicate["subsidiary_of"].combined_score
         )
 
 

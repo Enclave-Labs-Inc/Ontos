@@ -137,12 +137,8 @@ def query(
             resolve_path=True,
         ),
     ],
-    ollama_model: Annotated[
-        str, typer.Option("--ollama-model")
-    ] = "llama3.1:8b",
-    ollama_url: Annotated[
-        str, typer.Option("--ollama-url")
-    ] = "http://localhost:11434",
+    ollama_model: Annotated[str, typer.Option("--ollama-model")] = "llama3.1:8b",
+    ollama_url: Annotated[str, typer.Option("--ollama-url")] = "http://localhost:11434",
 ) -> None:
     """Run one NL question through planner + executor locally; print ranked hits."""
     from ontos.executor import DeterministicExecutor
@@ -161,11 +157,17 @@ def query(
     async def _run() -> None:
         plan = await planner.plan(question, ontology)
         result = await executor.execute(plan, store)
-        typer.echo(json.dumps({
-            "plan": plan.model_dump(mode="json"),
-            "hits": [h.model_dump(mode="json") for h in result.hits],
-            "warnings": result.warnings,
-        }, indent=2, default=str))
+        typer.echo(
+            json.dumps(
+                {
+                    "plan": plan.model_dump(mode="json"),
+                    "hits": [h.model_dump(mode="json") for h in result.hits],
+                    "warnings": result.warnings,
+                },
+                indent=2,
+                default=str,
+            )
+        )
 
     asyncio.run(_run())
 
@@ -204,9 +206,7 @@ def audit_verify(
         )
         raise typer.Exit(code=2)
 
-    emitter = PostgresAuditEmitter.from_url(
-        resolved_url, signing_key_env=signing_key_env
-    )
+    emitter = PostgresAuditEmitter.from_url(resolved_url, signing_key_env=signing_key_env)
 
     async def _run() -> None:
         ok = await emitter.verify_chain_async()

@@ -43,7 +43,5 @@ class SlackConnector:
         )
 
     async def iter_documents(self) -> AsyncIterator[SourceDocument]:
-        raise ConnectorError(
-            "SlackConnector.iter_documents is not implemented in this milestone"
-        )
+        raise ConnectorError("SlackConnector.iter_documents is not implemented in this milestone")
         yield  # pragma: no cover — keeps the type-checker happy about async iterator

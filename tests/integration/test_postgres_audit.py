@@ -26,9 +26,7 @@ def postgres_container():
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"Docker not reachable: {exc}")
 
-    container = testcontainers_postgres.PostgresContainer(
-        image="postgres:16", driver="asyncpg"
-    )
+    container = testcontainers_postgres.PostgresContainer(image="postgres:16", driver="asyncpg")
     container.start()
     try:
         yield container

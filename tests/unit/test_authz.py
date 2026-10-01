@@ -47,9 +47,7 @@ async def test_inmemory_list_authorized_objects_is_sorted() -> None:
     authz.grant("user:alice", VIEW, "acl:c")
     authz.grant("user:alice", VIEW, "acl:a")
     authz.grant("user:alice", VIEW, "acl:b")
-    assert await authz.list_authorized_objects("user:alice", VIEW) == [
-        "acl:a", "acl:b", "acl:c"
-    ]
+    assert await authz.list_authorized_objects("user:alice", VIEW) == ["acl:a", "acl:b", "acl:c"]
 
 
 async def test_revoke_removes_grant() -> None:
@@ -109,9 +107,7 @@ async def test_allowed_acls_takes_precedence_over_acl_subject() -> None:
 
     # M1 shim path would have matched via acl_subject="acl:hr"; but if
     # allowed_acls says otherwise, allowed_acls wins.
-    hits = await store.search(
-        "reports_to", acl_subject="acl:hr", allowed_acls=[]
-    )
+    hits = await store.search("reports_to", acl_subject="acl:hr", allowed_acls=[])
     assert hits == []
 
 

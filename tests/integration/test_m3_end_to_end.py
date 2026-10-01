@@ -37,8 +37,7 @@ from ontos.storage.neo4j_store import Neo4jStore
 pytestmark = pytest.mark.integration
 
 STARTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "starter.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
 )
 
 
@@ -243,9 +242,7 @@ async def test_ask_with_no_planner_returns_clear_error(
     monkeypatch.setenv("ONTOS_ONTOLOGY_PATH", str(STARTER_PATH))
     await _seed_graph(store)
 
-    server = build_server(
-        RuntimeConfig.from_env(), store=store, audit=audit
-    )  # no planner
+    server = build_server(RuntimeConfig.from_env(), store=store, audit=audit)  # no planner
 
     async with Client(server) as client:
         result = await client.call_tool(
@@ -263,9 +260,7 @@ async def test_ask_with_no_ontology_returns_clear_error(
     """Even with a planner, running ask() without an ontology on the runtime
     is a hard fail — the planner can't validate without one."""
     planner = LlmPlanner(ScriptedPlannerLLM({}), ontology)
-    server = build_server(
-        RuntimeConfig.from_env(), store=store, audit=audit, planner=planner
-    )
+    server = build_server(RuntimeConfig.from_env(), store=store, audit=audit, planner=planner)
 
     async with Client(server) as client:
         result = await client.call_tool(
@@ -287,9 +282,7 @@ async def test_planner_error_surfaces_via_ask_without_crashing(
         ScriptedPlannerLLM({}),  # KeyError on any question
         ontology,
     )
-    server = build_server(
-        RuntimeConfig.from_env(), store=store, audit=audit, planner=planner
-    )
+    server = build_server(RuntimeConfig.from_env(), store=store, audit=audit, planner=planner)
 
     async with Client(server) as client:
         result = await client.call_tool(

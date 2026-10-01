@@ -14,8 +14,7 @@ from ontos.resolver import ExactMatchResolver
 from ontos.storage.networkx_store import NetworkxStore
 
 STARTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "starter.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
 )
 
 
@@ -31,16 +30,18 @@ class ScriptedLLM:
     def __init__(self, script: dict[str, list[RawTriple]]) -> None:
         self._script = script
 
-    async def structured_extract(
-        self, text: str, ontology: Ontology
-    ) -> list[RawTriple]:
+    async def structured_extract(self, text: str, ontology: Ontology) -> list[RawTriple]:
         return list(self._script.get(text, []))
 
 
 def _triple(
-    subject: str, s_type: str, s_name: str,
+    subject: str,
+    s_type: str,
+    s_name: str,
     predicate: str,
-    obj: str, o_type: str, o_name: str,
+    obj: str,
+    o_type: str,
+    o_name: str,
 ) -> RawTriple:
     return RawTriple(
         subject_id=subject,
@@ -62,16 +63,24 @@ async def test_run_writes_facts_to_store(ontology: Ontology) -> None:
     script = {
         "Alice at Acme.": [
             _triple(
-                "person:alice", "Person", "Alice",
+                "person:alice",
+                "Person",
+                "Alice",
                 "works_at",
-                "company:acme", "Company", "Acme",
+                "company:acme",
+                "Company",
+                "Acme",
             )
         ],
         "Acme acquired Widget.": [
             _triple(
-                "company:acme", "Company", "Acme",
+                "company:acme",
+                "Company",
+                "Acme",
                 "acquired",
-                "company:widget", "Company", "Widget",
+                "company:widget",
+                "Company",
+                "Widget",
             )
         ],
     }
@@ -100,9 +109,13 @@ async def test_acl_ref_from_source_propagates_to_facts(ontology: Ontology) -> No
     script = {
         "Alice at Acme.": [
             _triple(
-                "person:alice", "Person", "Alice",
+                "person:alice",
+                "Person",
+                "Alice",
                 "works_at",
-                "company:acme", "Company", "Acme",
+                "company:acme",
+                "Company",
+                "Acme",
             )
         ]
     }
@@ -149,9 +162,13 @@ async def test_skip_and_log_continues_past_errors(ontology: Ontology) -> None:
     script = {
         "Alice at Acme.": [
             _triple(
-                "person:alice", "Person", "Alice",
+                "person:alice",
+                "Person",
+                "Alice",
                 "works_at",
-                "company:acme", "Company", "Acme",
+                "company:acme",
+                "Company",
+                "Acme",
             )
         ],
     }
@@ -183,9 +200,13 @@ async def test_report_captures_extractor_warnings(ontology: Ontology) -> None:
             # LlmExtractor doesn't raise here (raw_triples was non-empty);
             # it just drops the invalid one and emits a warning.
             _triple(
-                "company:a", "Company", "A",
+                "company:a",
+                "Company",
+                "A",
                 "works_at",  # works_at from Company to Person is not declared
-                "person:b", "Person", "B",
+                "person:b",
+                "Person",
+                "B",
             ),
         ]
     }
@@ -214,9 +235,13 @@ async def test_no_resolver_skips_merges_but_still_writes_facts(
     script = {
         "Alice at Acme.": [
             _triple(
-                "person:alice", "Person", "Alice",
+                "person:alice",
+                "Person",
+                "Alice",
                 "works_at",
-                "company:acme", "Company", "Acme",
+                "company:acme",
+                "Company",
+                "Acme",
             )
         ]
     }
@@ -258,7 +283,10 @@ async def test_pipeline_report_is_frozen(ontology: Ontology) -> None:
     extractor = LlmExtractor(ScriptedLLM({}), ontology)
     store = NetworkxStore()
     pipeline = IngestPipeline(
-        connector=connector, extractor=extractor, resolver=None, store=store,
+        connector=connector,
+        extractor=extractor,
+        resolver=None,
+        store=store,
     )
     report = await pipeline.run()
     with pytest.raises(pydantic.ValidationError):

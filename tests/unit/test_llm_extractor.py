@@ -30,8 +30,7 @@ from ontos.ontology import Ontology, load_ontology
 from ontos.runtime.models import Confidence
 
 STARTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "starter.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
 )
 
 
@@ -49,9 +48,7 @@ class FakeLLM:
     def __init__(self, responses: list[list[RawTriple] | Exception]) -> None:
         self._responses = list(responses)
 
-    async def structured_extract(
-        self, text: str, ontology: Ontology
-    ) -> list[RawTriple]:
+    async def structured_extract(self, text: str, ontology: Ontology) -> list[RawTriple]:
         if not self._responses:
             raise AssertionError("FakeLLM ran out of programmed responses")
         response = self._responses.pop(0)
@@ -131,16 +128,18 @@ async def test_schema_violation_drops_triple_with_warning(ontology: Ontology) ->
     # `works_at` from Company to Person is not a declared pattern —
     # only Person -works_at-> Company is.
     llm = FakeLLM(
-        [[
-            _valid_triple(
-                subject_id="company:acme",
-                subject_type="Company",
-                subject_canonical_name="Acme Corp",
-                object_id="person:alice",
-                object_type="Person",
-                object_canonical_name="Alice Smith",
-            )
-        ]]
+        [
+            [
+                _valid_triple(
+                    subject_id="company:acme",
+                    subject_type="Company",
+                    subject_canonical_name="Acme Corp",
+                    object_id="person:alice",
+                    object_type="Person",
+                    object_canonical_name="Alice Smith",
+                )
+            ]
+        ]
     )
     extractor = LlmExtractor(llm, ontology)
     result = await extractor.extract(ExtractionInput(source_id="doc-4", text="Acme employs Alice."))
@@ -151,14 +150,16 @@ async def test_schema_violation_drops_triple_with_warning(ontology: Ontology) ->
 
 async def test_out_of_ontology_predicate_drops_triple(ontology: Ontology) -> None:
     llm = FakeLLM(
-        [[
-            _valid_triple(
-                predicate="haunts",  # not declared
-                object_type="Person",
-                object_id="person:bob",
-                object_canonical_name="Bob",
-            )
-        ]]
+        [
+            [
+                _valid_triple(
+                    predicate="haunts",  # not declared
+                    object_type="Person",
+                    object_id="person:bob",
+                    object_canonical_name="Bob",
+                )
+            ]
+        ]
     )
     extractor = LlmExtractor(llm, ontology)
     result = await extractor.extract(ExtractionInput(source_id="doc-5", text="Alice haunts Bob."))
@@ -201,10 +202,12 @@ async def test_confidence_calibration(
 async def test_entities_are_deduped_across_triples(ontology: Ontology) -> None:
     # Alice appears in two triples; result should have one Alice entity.
     llm = FakeLLM(
-        [[
-            _valid_triple(object_id="company:acme"),
-            _valid_triple(object_id="company:foo", object_canonical_name="Foo Inc"),
-        ]]
+        [
+            [
+                _valid_triple(object_id="company:acme"),
+                _valid_triple(object_id="company:foo", object_canonical_name="Foo Inc"),
+            ]
+        ]
     )
     extractor = LlmExtractor(llm, ontology)
     result = await extractor.extract(ExtractionInput(source_id="d", text="t"))
