@@ -161,6 +161,118 @@ async def test_traverse_filters_by_relation(store: Neo4jStore) -> None:
     assert knows_only[0].predicate == "knows"
 
 
+async def test_traverse_incoming_direction(store: Neo4jStore) -> None:
+    fact = _make_fact("person:alice", "works_at", "company:acme")
+    await store.add_fact(fact)
+
+    results = list(
+        await store.traverse(
+            "company:acme",
+            relation="works_at",
+            direction="in",
+            depth=1,
+        )
+    )
+
+    assert len(results) == 1
+    assert results[0].subject_id == "person:alice"
+    assert results[0].predicate == "works_at"
+    assert results[0].object_id == "company:acme"
+
+
+async def test_incoming_traversal_does_not_cross_forbidden_acl(
+    store: Neo4jStore,
+) -> None:
+    await store.add_fact(
+        _make_fact(
+            "person:alice",
+            "works_at",
+            "company:acme",
+            acl_ref="acl:confidential",
+        )
+    )
+
+    results = list(
+        await store.traverse(
+            "company:acme",
+            relation="works_at",
+            direction="in",
+            depth=1,
+            allowed_acls=["acl:public"],
+        )
+    )
+
+    assert results == []
+
+
+async def test_bidirectional_traversal_does_not_expand_through_forbidden_edge(
+    store: Neo4jStore,
+) -> None:
+    await store.add_fact(
+        _make_fact(
+            "person:alice",
+            "works_at",
+            "company:acme",
+            acl_ref="acl:confidential",
+        )
+    )
+    await store.add_fact(
+        _make_fact(
+            "person:alice",
+            "knows",
+            "person:bob",
+        )
+    )
+
+    results = list(
+        await store.traverse(
+            "company:acme",
+            direction="both",
+            depth=2,
+            allowed_acls=["acl:public"],
+        )
+    )
+
+    assert results == []
+
+
+async def test_incoming_traversal_respects_as_of(store: Neo4jStore) -> None:
+    t_valid = datetime.now(UTC) - timedelta(days=30)
+    t_invalid = datetime.now(UTC) - timedelta(days=10)
+
+    fact = _make_fact(
+        "person:alice",
+        "works_at",
+        "company:acme",
+        t_valid=t_valid,
+    )
+    await store.add_fact(fact)
+    await store.close_fact(fact.id, t_invalid=t_invalid)
+
+    current = list(
+        await store.traverse(
+            "company:acme",
+            relation="works_at",
+            direction="in",
+            depth=1,
+        )
+    )
+
+    historical = list(
+        await store.traverse(
+            "company:acme",
+            relation="works_at",
+            direction="in",
+            depth=1,
+            as_of=datetime.now(UTC) - timedelta(days=20),
+        )
+    )
+
+    assert current == []
+    assert len(historical) == 1
+    assert historical[0].id == fact.id
+
+
 async def test_acl_blocks_forbidden_facts_from_search(store: Neo4jStore) -> None:
     public = _make_fact("A", "knows", "B")
     private = _make_fact("A", "knows", "C", acl_ref="alice")

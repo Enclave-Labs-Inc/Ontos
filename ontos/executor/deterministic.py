@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import networkx as nx
 
@@ -284,24 +284,40 @@ class DeterministicExecutor:
                             await store.traverse(
                                 start,
                                 relation=relation,
+                                direction=step.direction,
                                 depth=step_depth,
                                 as_of=as_of,
                                 acl_subject=acl_subject,
                                 allowed_acls=allowed_acls,
                             )
                         )
-                        _absorb(facts, collected, hops_by_fact, current_hop + 1, next_frontier)
+                        _absorb(
+                            facts,
+                            collected,
+                            hops_by_fact,
+                            current_hop + 1,
+                            next_frontier,
+                            step.direction,
+                        )
                 else:
                     facts = list(
                         await store.traverse(
                             start,
+                            direction=step.direction,
                             depth=step_depth,
                             as_of=as_of,
                             acl_subject=acl_subject,
                             allowed_acls=allowed_acls,
                         )
                     )
-                    _absorb(facts, collected, hops_by_fact, current_hop + 1, next_frontier)
+                    _absorb(
+                        facts,
+                        collected,
+                        hops_by_fact,
+                        current_hop + 1,
+                        next_frontier,
+                        step.direction,
+                    )
             current_hop += step_depth
             current_frontier = list(next_frontier)
             if not current_frontier:
@@ -362,13 +378,17 @@ def _absorb(
     hops_by_fact: dict[Any, int],
     hop_distance: int,
     next_frontier: set[str],
+    direction: Literal["out", "in", "both"],
 ) -> None:
-    """Merge a batch of facts from one traversal call into the running state."""
+    """Merge traversal facts and advance the frontier in traversal direction."""
     for f in facts:
         if f.id not in collected:
             collected[f.id] = f
             hops_by_fact[f.id] = hop_distance
         else:
             hops_by_fact[f.id] = min(hops_by_fact[f.id], hop_distance)
-        next_frontier.add(f.subject_id)
-        next_frontier.add(f.object_id)
+
+        if direction in ("out", "both"):
+            next_frontier.add(f.object_id)
+        if direction in ("in", "both"):
+            next_frontier.add(f.subject_id)

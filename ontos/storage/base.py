@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from ontos.runtime.models import Fact
@@ -60,6 +60,7 @@ class GraphStore(Protocol):
         start: str,
         *,
         relation: str | None = None,
+        direction: Literal["out", "in", "both"] = "out",
         depth: int = 2,
         as_of: datetime | None = None,
         acl_subject: str | None = None,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 import networkx as nx
@@ -88,6 +89,7 @@ class NetworkxStore:
         start: str,
         *,
         relation: str | None = None,
+        direction: Literal["out", "in", "both"] = "out",
         depth: int = 2,
         as_of: datetime | None = None,
         acl_subject: str | None = None,
@@ -99,25 +101,47 @@ class NetworkxStore:
         frontier: set[str] = {start}
         seen: set[str] = {start}
         allowed_set = set(allowed_acls) if allowed_acls is not None else None
+
         for _ in range(depth):
             next_frontier: set[str] = set()
+
             for node in frontier:
-                for _, target, _, data in self._graph.out_edges(node, keys=True, data=True):
-                    fact: Fact = data["fact"]
-                    if not _fact_alive_at(fact, as_of):
-                        continue
-                    if relation and fact.predicate != relation:
-                        continue
-                    if not _acl_allows(fact, acl_subject, allowed_set):
-                        # Skip during traversal (not post-filter) — target node not expanded.
-                        continue
-                    collected.append(fact)
-                    if target not in seen:
-                        seen.add(target)
-                        next_frontier.add(target)
+                if direction in ("out", "both"):
+                    for _, target, _, data in self._graph.out_edges(node, keys=True, data=True):
+                        fact: Fact = data["fact"]
+                        if not _fact_alive_at(fact, as_of):
+                            continue
+                        if relation and fact.predicate != relation:
+                            continue
+                        if not _acl_allows(fact, acl_subject, allowed_set):
+                            continue
+
+                        collected.append(fact)
+
+                        if target not in seen:
+                            seen.add(target)
+                            next_frontier.add(target)
+
+                if direction in ("in", "both"):
+                    for source, _, _, data in self._graph.in_edges(node, keys=True, data=True):
+                        fact = data["fact"]
+                        if not _fact_alive_at(fact, as_of):
+                            continue
+                        if relation and fact.predicate != relation:
+                            continue
+                        if not _acl_allows(fact, acl_subject, allowed_set):
+                            continue
+
+                        collected.append(fact)
+
+                        if source not in seen:
+                            seen.add(source)
+                            next_frontier.add(source)
+
             frontier = next_frontier
             if not frontier:
                 break
+
         return collected
 
     async def facts_for_entity(

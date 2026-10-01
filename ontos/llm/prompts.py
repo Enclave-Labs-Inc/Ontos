@@ -37,6 +37,26 @@ add articles or other decoration. If you are unsure of the exact
 stored id, prefer SeedByKeyword — the executor will substring-search
 for you.
 
+Choose traversal direction from the ontology pattern, where relations
+are written as:
+
+  subject_type - predicate -> object_type
+
+Direction is relative to the current frontier entity:
+- Use direction="out" when traversing from the subject side toward the
+  object side.
+- Use direction="in" when traversing from the object side toward the
+  subject side.
+- Use direction="both" only when the question genuinely requires both
+  directions or the endpoint role cannot be determined.
+
+For multi-step plans, choose the direction independently for each step
+based on which side of that relation the current frontier occupies.
+
+Example: if the schema says Person - works_at -> Company and the
+question is "Who works at Acme Corp?", seed Acme Corp and traverse
+works_at with direction="in".
+
 Each TraversalStep must be unique — never repeat the same
 (relations, depth, direction) combination across steps. A single-hop
 query is one step, not the same step twice.
