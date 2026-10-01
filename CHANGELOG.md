@@ -16,6 +16,109 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 Nothing yet. New work between releases lands here.
 
+## [0.2.0] - 2026-10-01 - correctness and vertical content
+
+Four externally-reported bug fixes, the fintech + pharma vertical
+ontologies with sample corpora and graded questions, and the
+compliance posture now hardened against bitemporal drift and
+permission-aware traversal edge cases.
+
+### Added
+- **Fintech + pharma vertical ontologies** — `docs/ontology/examples/fintech.yaml`
+  (SEC 10-K structure + SR 11-7 model-risk vocabulary) and
+  `docs/ontology/examples/pharma.yaml` (ClinicalTrials.gov +
+  FDA submission ladder + ICH E6 GCP + GxP). ~15-16 entities,
+  22-25 relations, 22-25 patterns each; cardinality tuned from
+  real corporate / clinical reality.
+- **10 synthetic sample documents** under `docs/ontology/examples/fintech-corpus/`
+  and `pharma-corpus/` — all carry a `SYNTHETIC DEMONSTRATION DOCUMENT`
+  marker so a swap for a real filing fails CI.
+- **40 graded natural-language questions** (20 per vertical) with
+  expected multi-hop path shapes, expected source documents, and
+  expected answer entities. Static-validation harness pins every
+  hop against the ontology and every entity against the corpus.
+- **`SupersessionPolicy` Protocol + `CardinalitySupersessionPolicy`
+  default** — closes conflicting active facts at ingest when the
+  ontology's cardinality says the relation allows at most one object
+  per subject. Same-ACL scope only. Idempotent on same-source
+  re-ingest; preserves second-source corroboration.
+- **`IngestReport.facts_superseded`, `facts_reaffirmed`,
+  `facts_historical`, `supersession_records`** — audit visibility
+  for every supersession decision the pipeline made.
+- **Backfill handling** — new fact whose `t_valid` precedes an
+  existing active fact is written pre-closed with `t_invalid`
+  pointing at the newer active fact; the current fact stays active.
+- **Direction-aware graph traversal** — executor now honors
+  `TraversalStep.direction` (`in` / `out` / `both`); both
+  NetworkxStore and Neo4jStore implement all three. Inverse queries
+  (`Who works at Acme?`) work for the first time.
+- **Seed-id resolution fallback chain** on `SeedByEntity` —
+  exact match → type-suffix strip (`"Alice (Person)"` → `"Alice"`)
+  → keyword search with ambiguity guard. Every resolution emits
+  an operator-visible structlog warning.
+- **Plan canonicalization** — `Plan.build()` drops
+  consecutive-duplicate `TraversalStep`s with first-occurrence
+  order preserved. Non-adjacent repeats pass through unchanged.
+- **CI/CD polish** — Claude PR review action, PR review sandbox
+  isolated from the review credential, PR comment dedup.
+
+### Fixed
+- `#16` — planner-emitted `(Type)` suffix on `SeedByEntity` no longer
+  returns zero hits. Executor resolves via type-suffix strip or
+  keyword search; refuses to guess on ambiguous substring matches.
+- `#17` — inverse queries (`Who works at X?`) now return results.
+  `TraversalStep.direction="in"` and `"both"` are honored by the
+  executor and both store backends.
+- `#18` — LLM planner's non-deterministic duplicate
+  `TraversalStep`s are canonicalized at `Plan.build()`. Audit
+  records show the canonical plan the executor actually ran.
+- `#21` — conflicting facts at ingest now trigger supersession.
+  `David Lee works_at Beta Systems` followed by `David Lee works_at
+  Acme Corp` closes the Beta fact (`t_invalid` set, `superseded_by`
+  pointing at Acme) instead of leaving both active. Bitemporal
+  `as_of` queries return the correct historical answer.
+
+### Compliance
+- New gate-blocking suite under `tests/compliance/`:
+  `test_seed_resolution_acl_leak.py`,
+  `test_supersession_compliance.py`,
+  `test_traversal_direction_security.py`. All three cover ACL
+  isolation, bitemporal correctness, and the invariants a regulated
+  buyer evaluates against during due diligence.
+- `IngestPipeline` now requires `ontology`; default supersession is
+  active unless the operator explicitly passes `NullSupersessionPolicy()`.
+  Compliance-first default; no silent opt-out.
+
+### Changed — API surface
+- `IngestPipeline.__init__` now requires `ontology: Ontology`
+  (was absent) and accepts optional `supersession: SupersessionPolicy`.
+- `SeedByEntity.entity_id` is now resolved by the executor; direct
+  consumers of `plan.steps` are unaffected.
+- `TraversalStep.direction` is now consumed by the executor
+  (previously ignored, effectively always `"out"`).
+
+### Known caveats carried from 0.1.0 (still true in 0.2.0)
+- `OpenAIBackend` is BRIDGE-only — violates sovereignty. Use
+  `OllamaBackend` for regulated deploys.
+- `SlackConnector` is a placeholder.
+- Entity resolution ships the Rules tier only.
+- No Prometheus / OTel emission.
+- Single-arch amd64 image.
+
+### Known 0.2.0 limitations (tracked for 0.3.0)
+- `#28` CLI does not accept PDF files — `_read_source_dir` filters
+  to `.txt / .md`.
+- `#29` CLI default `storage_backend=networkx` loses facts between
+  `ontos ingest` and `ontos query` invocations.
+- `#30` No CLI flag to tune the Ollama timeout; cold-start on large
+  docs can hit `httpx.ReadTimeout`.
+
+### Numbers
+- 281 unit + compliance tests pass (up from 183).
+- 47 integration tests pass against real Neo4j 5.24 via
+  testcontainers.
+- `ruff` + `ruff format --check` + `mypy --strict ontos` all clean.
+
 ## [0.1.0] - 2026-09-26 - first public release
 
 First tagged release. Encompasses milestones M0 → M5 from the design plan.
