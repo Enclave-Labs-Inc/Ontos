@@ -30,8 +30,7 @@ from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.networkx_store import NetworkxStore
 
 STARTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "starter.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
 )
 
 
@@ -102,8 +101,7 @@ async def test_issue_16_type_suffix_seed_resolves_via_strip(
         for h in result.hits
     )
     assert any(
-        "resolved to 'Alice Johnson'" in w and "type-suffix strip" in w
-        for w in result.warnings
+        "resolved to 'Alice Johnson'" in w and "type-suffix strip" in w for w in result.warnings
     ), (
         "resolution must be visible in the ExecutionResult.warnings so "
         f"operators can see it happened; got warnings={result.warnings}"
@@ -138,10 +136,7 @@ async def test_keyword_fallback_when_entity_id_only_partially_matches(
     result = await DeterministicExecutor().execute(plan, alice_store)
 
     assert result.hits, "case-mismatched seed should resolve via search fallback"
-    assert any(
-        "keyword search fallback" in w and "Alice Johnson" in w
-        for w in result.warnings
-    )
+    assert any("keyword search fallback" in w and "Alice Johnson" in w for w in result.warnings)
 
 
 async def test_genuinely_unknown_entity_still_returns_empty_cleanly(
@@ -155,9 +150,7 @@ async def test_genuinely_unknown_entity_still_returns_empty_cleanly(
     result = await DeterministicExecutor().execute(plan, alice_store)
 
     assert result.hits == []
-    assert any(
-        "plan.seed produced no entities" in w for w in result.warnings
-    ), (
+    assert any("plan.seed produced no entities" in w for w in result.warnings), (
         "an entity that genuinely isn't in the graph must still surface "
         "as an explicit warning, not a silent empty result"
     )
@@ -219,12 +212,8 @@ async def test_ambiguous_keyword_fallback_refuses_to_guess(
     )
     result = await DeterministicExecutor().execute(plan, store)
 
-    assert result.hits == [], (
-        "ambiguous search fallback must not silently pick one candidate"
-    )
-    ambiguity_warnings = [
-        w for w in result.warnings if "matches multiple graph entities" in w
-    ]
+    assert result.hits == [], "ambiguous search fallback must not silently pick one candidate"
+    ambiguity_warnings = [w for w in result.warnings if "matches multiple graph entities" in w]
     assert ambiguity_warnings, (
         "an ambiguous search fallback must surface an explicit "
         f"ambiguity warning; got warnings={result.warnings}"
@@ -251,6 +240,81 @@ async def test_unambiguous_keyword_fallback_still_resolves(
     result = await DeterministicExecutor().execute(plan, alice_store)
 
     assert result.hits, "single-candidate substring should still resolve"
+    assert any("keyword search fallback" in w for w in result.warnings)
+
+
+async def test_saturated_search_window_still_resolves_with_warning(
+    ontology: Ontology,
+) -> None:
+    """A popular entity crowding the search window emits a saturation warning.
+
+    Per the reviewer's PR #20 follow-up: the ambiguity guard only sees
+    endpoints inside the top-k search window. If the window is saturated
+    by one popular entity, a longer-named sibling could be beyond it and
+    get silently excluded from the candidate set. We now emit an extra
+    "possibly-incomplete" warning on top of the resolution so operators
+    see the risk.
+    """
+    store = NetworkxStore()
+    now = datetime.now(UTC)
+    # 60 facts about "Acme Corp" — well over k=50 so the window saturates.
+    for i in range(60):
+        await store.add_fact(
+            Fact(
+                subject_id=f"Person-{i}",
+                predicate="works_at",
+                object_id="Acme Corp",
+                provenance=Provenance(
+                    source_id=f"doc-{i}",
+                    extractor_id="test",
+                    extractor_version="0.0.0",
+                    confidence=Confidence.EXTRACTED,
+                    confidence_score=1.0,
+                ),
+                t_valid=now,
+                ingested_at=now,
+            )
+        )
+
+    # Add one outgoing edge from Acme Corp so expansion has something to
+    # walk — the point of this test is seed resolution, not whether
+    # traversal from Acme Corp finds things.
+    await store.add_fact(
+        Fact(
+            subject_id="Acme Corp",
+            predicate="acquired",
+            object_id="Widget Inc",
+            provenance=Provenance(
+                source_id="doc-outgoing",
+                extractor_id="test",
+                extractor_version="0.0.0",
+                confidence=Confidence.EXTRACTED,
+                confidence_score=1.0,
+            ),
+            t_valid=now,
+            ingested_at=now,
+        )
+    )
+
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="acme corp"),  # lowercase → forces search
+        steps=[TraversalStep(depth=1)],
+        ontology=ontology,
+    )
+    result = await DeterministicExecutor().execute(plan, store)
+
+    # Resolution still succeeds — only one entity is in the window.
+    assert result.hits
+    # But the saturation warning must fire so the operator can see a
+    # longer-named sibling could have been crowded out.
+    saturation_warnings = [
+        w for w in result.warnings if "search window was saturated" in w and "k=50" in w
+    ]
+    assert saturation_warnings, (
+        "a saturated search window must surface a 'possibly-incomplete' "
+        f"warning alongside the resolution; got warnings={result.warnings}"
+    )
+    # And the normal resolution warning still fires.
     assert any("keyword search fallback" in w for w in result.warnings)
 
 

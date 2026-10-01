@@ -42,6 +42,15 @@ from ontos.storage.base import GraphStore
 # avoid clobbering legitimate names like "Meridian (US) Inc.".
 _TYPE_SUFFIX_RE = re.compile(r"\s+\(([A-Za-z][A-Za-z0-9_-]*)\)\s*$")
 
+# Search window for the keyword-fallback ambiguity check. Deliberately
+# large so a popular entity (many facts about "Acme Corp") can't crowd
+# a longer-named sibling ("Acme Corp Europe") out of the window and
+# cause a silent wrong-entity resolution. If the window still comes
+# back saturated, we add a "possibly-incomplete" warning rather than
+# refuse — refusing on saturation would break resolution for any
+# entity with ≥50 facts, which is routine in production.
+_SEED_FALLBACK_SEARCH_K: int = 50
+
 # HippoRAG uses damping 0.5; PathRAG uses α ∈ [0.6, 0.9] with θ = 0.05.
 # We pick middle-of-the-road defaults that make small in-memory graphs
 # behave sensibly; production tuning is a Scribe-era concern.
@@ -68,9 +77,7 @@ class DeterministicExecutor:
         as_of: datetime | None = plan.as_of
         warnings: list[str] = []
 
-        seed_entities = await self._seed(
-            plan, store, as_of, acl_subject, allowed_acls, warnings
-        )
+        seed_entities = await self._seed(plan, store, as_of, acl_subject, allowed_acls, warnings)
         if not seed_entities:
             warnings.append("plan.seed produced no entities — nothing to rank")
             return ExecutionResult(hits=[], warnings=warnings)
@@ -191,8 +198,7 @@ class DeterministicExecutor:
                 allowed_acls=allowed_acls,
             ):
                 warnings.append(
-                    f"seed entity {entity_id!r} resolved to {stripped!r} "
-                    "via type-suffix strip"
+                    f"seed entity {entity_id!r} resolved to {stripped!r} via type-suffix strip"
                 )
                 return stripped
 
@@ -202,11 +208,17 @@ class DeterministicExecutor:
         # substring-matching endpoint from the hits — if more than one,
         # refuse to guess (silent wrong-entity resolution is a worse
         # failure mode than an explicit ambiguity warning).
+        #
+        # Window size is _SEED_FALLBACK_SEARCH_K (50); if the window
+        # comes back saturated (len(hits) == k), a longer-named sibling
+        # could be beyond it, so we emit an extra "possibly-incomplete"
+        # warning on top of whatever we resolve. Refusing to resolve on
+        # saturation would break every entity with ≥50 facts.
         needle = _TYPE_SUFFIX_RE.sub("", entity_id).strip() or entity_id
         hits = await store.search(
             needle,
             as_of=as_of,
-            k=10,
+            k=_SEED_FALLBACK_SEARCH_K,
             acl_subject=acl_subject,
             allowed_acls=allowed_acls,
         )
@@ -219,11 +231,21 @@ class DeterministicExecutor:
                     candidates.append(endpoint)
                     seen_candidates.add(endpoint)
 
+        window_saturated = len(hits) >= _SEED_FALLBACK_SEARCH_K
+
         if len(candidates) == 1:
             warnings.append(
                 f"seed entity {entity_id!r} resolved to "
                 f"{candidates[0]!r} via keyword search fallback"
             )
+            if window_saturated:
+                warnings.append(
+                    f"seed entity {entity_id!r} search window was "
+                    f"saturated (k={_SEED_FALLBACK_SEARCH_K}) — "
+                    "additional substring-matching entities may exist "
+                    "beyond the window; use SeedByKeyword or pass an "
+                    "exact id if the resolved entity is wrong"
+                )
             return candidates[0]
         if len(candidates) > 1:
             preview = ", ".join(repr(c) for c in candidates[:5])
@@ -286,9 +308,7 @@ class DeterministicExecutor:
                 break
         return collected, hops_by_fact
 
-    def _ppr(
-        self, collected: dict[Any, Fact], seed_entities: list[str]
-    ) -> dict[str, float]:
+    def _ppr(self, collected: dict[Any, Fact], seed_entities: list[str]) -> dict[str, float]:
         """Personalized PageRank over the fetched subgraph."""
         g: nx.DiGraph[str] = nx.DiGraph()
         for fact in collected.values():
