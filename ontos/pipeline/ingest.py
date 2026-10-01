@@ -30,7 +30,11 @@ from ontos.ontology import Ontology
 from ontos.resolver import Resolver
 from ontos.runtime.models import Fact
 from ontos.storage.base import GraphStore
-from ontos.supersession import CardinalitySupersessionPolicy, SupersessionPolicy
+from ontos.supersession import (
+    CardinalitySupersessionPolicy,
+    SupersessionPolicy,
+    SupersessionRecord,
+)
 
 log = structlog.get_logger()
 
@@ -56,8 +60,10 @@ class IngestReport(BaseModel):
     entities_merged: int = 0
     facts_superseded: int = 0
     facts_reaffirmed: int = 0
+    facts_historical: int = 0
     warnings: list[str] = Field(default_factory=list)
     errors: list[IngestError] = Field(default_factory=list)
+    supersession_records: list[SupersessionRecord] = Field(default_factory=list)
 
     model_config = ConfigDict(frozen=True)
 
@@ -93,7 +99,7 @@ class IngestPipeline:
         self._store = store
         self._ontology = ontology
         self._supersession: SupersessionPolicy = (
-            supersession if supersession is not None else CardinalitySupersessionPolicy(ontology)
+            supersession if supersession is not None else CardinalitySupersessionPolicy()
         )
         self._error_policy = error_policy
 
@@ -103,9 +109,11 @@ class IngestPipeline:
         facts_written = 0
         facts_superseded = 0
         facts_reaffirmed = 0
+        facts_historical = 0
         entities_merged = 0
         warnings: list[str] = []
         errors: list[IngestError] = []
+        supersession_records: list[SupersessionRecord] = []
 
         async for doc in self._connector.iter_documents():
             documents_seen += 1
@@ -137,29 +145,78 @@ class IngestPipeline:
 
                 decision = await self._supersession.decide(write_fact, self._store, self._ontology)
 
+                if decision.record is not None:
+                    supersession_records.append(decision.record)
+
                 if decision.skip_add:
                     facts_reaffirmed += 1
+                    log.info(
+                        "fact re-affirmed (idempotent re-ingest)",
+                        new_fact_id=str(write_fact.id),
+                        subject_id=write_fact.subject_id,
+                        predicate=write_fact.predicate,
+                        object_id=write_fact.object_id,
+                        source_id=write_fact.provenance.source_id,
+                        policy_id=self._supersession.id,
+                        reason=decision.record.reason if decision.record else "",
+                    )
                     continue
+
+                # Historical-ingest override — write the new fact pre-closed.
+                if decision.new_fact_t_invalid is not None:
+                    write_fact = write_fact.model_copy(
+                        update={
+                            "t_invalid": decision.new_fact_t_invalid,
+                            "superseded_by": decision.new_fact_superseded_by,
+                        }
+                    )
+                    facts_historical += 1
+                    log.warning(
+                        "fact ingested as historical (backfill / out-of-order)",
+                        new_fact_id=str(write_fact.id),
+                        subject_id=write_fact.subject_id,
+                        predicate=write_fact.predicate,
+                        superseded_by=str(decision.new_fact_superseded_by),
+                        t_invalid=str(decision.new_fact_t_invalid),
+                        policy_id=self._supersession.id,
+                        reason=decision.record.reason if decision.record else "",
+                    )
 
                 await self._store.add_fact(write_fact)
                 facts_written += 1
 
                 for old in decision.facts_to_close:
-                    await self._store.close_fact(
-                        old.id,
-                        t_invalid=write_fact.ingested_at,
-                        superseded_by=write_fact.id,
-                    )
+                    try:
+                        await self._store.close_fact(
+                            old.id,
+                            t_invalid=write_fact.ingested_at,
+                            superseded_by=write_fact.id,
+                        )
+                    except Exception as exc:
+                        # Non-atomic add+close (deferred follow-up: a
+                        # supersede() atomic store method). Make partial
+                        # failure loud so operators can repair state.
+                        log.error(
+                            "close_fact failed after add_fact — "
+                            "store may be in double-active state for this scope",
+                            new_fact_id=str(write_fact.id),
+                            old_fact_id=str(old.id),
+                            subject_id=write_fact.subject_id,
+                            predicate=write_fact.predicate,
+                            error=str(exc),
+                        )
+                        raise
                     facts_superseded += 1
 
-                if decision.record is not None:
+                if decision.facts_to_close:
                     log.warning(
                         "fact superseded",
                         new_fact_id=str(write_fact.id),
-                        closed_fact_ids=[str(fid) for fid in decision.record.closed_fact_ids],
+                        closed_fact_ids=[str(f.id) for f in decision.facts_to_close],
                         subject_id=write_fact.subject_id,
                         predicate=write_fact.predicate,
-                        policy_id=decision.record.policy_id,
+                        policy_id=self._supersession.id,
+                        reason=decision.record.reason if decision.record else "",
                     )
 
         return IngestReport(
@@ -169,6 +226,8 @@ class IngestPipeline:
             entities_merged=entities_merged,
             facts_superseded=facts_superseded,
             facts_reaffirmed=facts_reaffirmed,
+            facts_historical=facts_historical,
             warnings=warnings,
             errors=errors,
+            supersession_records=supersession_records,
         )

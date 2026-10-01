@@ -42,13 +42,21 @@ class SupersessionDecision(BaseModel):
 
     - `facts_to_close`: pre-existing active facts the pipeline must
       close via `store.close_fact(...)` AFTER adding the new fact.
-    - `skip_add`: if True, the new fact is a re-affirmation of a
-      currently-active identical fact and must NOT be written.
-    - `record`: the audit breadcrumb (None when no supersession fires).
+    - `skip_add`: if True, the new fact is an idempotent re-ingest
+      from the same source and must NOT be written again.
+    - `new_fact_t_invalid` / `new_fact_superseded_by`: when a newer
+      active fact already exists for the same (subject, predicate)
+      scope, the ingest is historical (backfill). The pipeline writes
+      the new fact with these overrides so bitemporal reads stay
+      honest: the new fact is immediately-closed, superseded by the
+      existing newer one, without touching the newer one.
+    - `record`: audit breadcrumb (None when the policy did nothing).
     """
 
     facts_to_close: list[Fact] = Field(default_factory=list)
     skip_add: bool = False
+    new_fact_t_invalid: datetime | None = None
+    new_fact_superseded_by: UUID | None = None
     record: SupersessionRecord | None = None
 
     model_config = ConfigDict(frozen=True)
