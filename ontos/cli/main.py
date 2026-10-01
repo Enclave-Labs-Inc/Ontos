@@ -118,6 +118,7 @@ def ingest(
         extractor=extractor,
         resolver=resolver,
         store=store,
+        ontology=ontology,
         error_policy=ErrorPolicy(error_policy),
     )
     report = asyncio.run(pipeline.run())
