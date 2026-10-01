@@ -16,11 +16,14 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from ontos.ontology import Ontology
 from ontos.planner.base import PlannerError
 from ontos.planner.plan import Plan, Seed, SeedByEntity, SeedByKeyword, TraversalStep
+
+log = structlog.get_logger()
 
 
 class RawPlan(BaseModel):
@@ -77,7 +80,7 @@ class LlmPlanner:
             raise PlannerError(question, f"LLM backend failed: {exc}") from exc
 
         try:
-            return Plan.build(
+            plan = Plan.build(
                 seed=raw.seed,
                 steps=raw.steps,
                 limit=raw.limit,
@@ -85,6 +88,20 @@ class LlmPlanner:
             )
         except (ValueError, Exception) as exc:
             raise PlannerError(question, f"ontology validation failed: {exc}") from exc
+
+        # If Plan.build canonicalized duplicate steps away, surface it
+        # — same operator-visibility pattern as the issue #16 fix.
+        # LLM nondeterminism (issue #18) stays observable without
+        # polluting the audit record or costing extra traversal calls.
+        if len(plan.steps) < len(raw.steps):
+            log.warning(
+                "planner emitted duplicate steps",
+                planner_id=self.id,
+                raw_step_count=len(raw.steps),
+                canonical_step_count=len(plan.steps),
+            )
+
+        return plan
 
 
 __all__ = [

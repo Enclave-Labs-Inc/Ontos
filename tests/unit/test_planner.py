@@ -160,3 +160,52 @@ def test_planner_error_carries_question_prefix() -> None:
     err = PlannerError("a" * 1000, "x")
     assert len(err.question) == 500
     assert "planner failed" in str(err)
+
+
+async def test_llm_planner_warns_when_dedupe_fires(ontology: Ontology) -> None:
+    """Issue #18 — if the LLM emits duplicate steps, operators see it.
+
+    Plan.build silently canonicalizes to avoid an inflated audit
+    record and redundant store calls (test_plan_canonicalization.py
+    pins the semantics). This test pins the operator-visibility
+    layer: the planner emits a WARNING-level structlog event when
+    canonicalization actually drops a step, with the raw and
+    canonical counts and the planner id.
+    """
+    from structlog.testing import capture_logs
+
+    dup = TraversalStep(relations=["works_at"], depth=1, direction="out")
+    raw = RawPlan(seed=SeedByEntity(entity_id="person:alice"), steps=[dup, dup])
+    planner = LlmPlanner(FakePlannerBackend([raw]), ontology)
+
+    with capture_logs() as logs:
+        plan = await planner.plan("Where does Alice work?", ontology)
+
+    assert len(plan.steps) == 1, "canonicalization should have fired"
+    dedupe_events = [
+        e for e in logs if e.get("event") == "planner emitted duplicate steps"
+    ]
+    assert dedupe_events, f"expected dedupe-warning event; got {logs}"
+    event = dedupe_events[0]
+    assert event["log_level"] == "warning"
+    assert event["raw_step_count"] == 2
+    assert event["canonical_step_count"] == 1
+    assert "fake-planner-llm" in event["planner_id"]
+
+
+async def test_llm_planner_does_not_warn_on_clean_plan(ontology: Ontology) -> None:
+    """No duplicate-step warning fires when the LLM output is already clean."""
+    from structlog.testing import capture_logs
+
+    raw = RawPlan(
+        seed=SeedByEntity(entity_id="person:alice"),
+        steps=[TraversalStep(relations=["works_at"], depth=1)],
+    )
+    planner = LlmPlanner(FakePlannerBackend([raw]), ontology)
+
+    with capture_logs() as logs:
+        await planner.plan("Where does Alice work?", ontology)
+
+    assert not any(
+        e.get("event") == "planner emitted duplicate steps" for e in logs
+    ), f"should not fire on a clean plan; got {logs}"
