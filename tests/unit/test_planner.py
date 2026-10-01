@@ -182,9 +182,7 @@ async def test_llm_planner_warns_when_dedupe_fires(ontology: Ontology) -> None:
         plan = await planner.plan("Where does Alice work?", ontology)
 
     assert len(plan.steps) == 1, "canonicalization should have fired"
-    dedupe_events = [
-        e for e in logs if e.get("event") == "planner emitted duplicate steps"
-    ]
+    dedupe_events = [e for e in logs if e.get("event") == "planner emitted duplicate steps"]
     assert dedupe_events, f"expected dedupe-warning event; got {logs}"
     event = dedupe_events[0]
     assert event["log_level"] == "warning"
@@ -206,6 +204,6 @@ async def test_llm_planner_does_not_warn_on_clean_plan(ontology: Ontology) -> No
     with capture_logs() as logs:
         await planner.plan("Where does Alice work?", ontology)
 
-    assert not any(
-        e.get("event") == "planner emitted duplicate steps" for e in logs
-    ), f"should not fire on a clean plan; got {logs}"
+    assert not any(e.get("event") == "planner emitted duplicate steps" for e in logs), (
+        f"should not fire on a clean plan; got {logs}"
+    )

@@ -37,6 +37,10 @@ add articles or other decoration. If you are unsure of the exact
 stored id, prefer SeedByKeyword — the executor will substring-search
 for you.
 
+Each TraversalStep must be unique — never repeat the same
+(relations, depth, direction) combination across steps. A single-hop
+query is one step, not the same step twice.
+
 Return valid JSON matching the requested plan schema exactly.
 """
 
