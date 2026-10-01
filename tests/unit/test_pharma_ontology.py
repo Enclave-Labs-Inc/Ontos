@@ -11,10 +11,7 @@ from pathlib import Path
 
 from ontos.ontology import Ontology, load_ontology
 
-PHARMA_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "pharma.yaml"
-)
+PHARMA_PATH = Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "pharma.yaml"
 
 
 def test_pharma_ontology_loads() -> None:

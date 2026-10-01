@@ -190,9 +190,7 @@ async def test_acl_prunes_forbidden_paths_during_traversal(store: Neo4jStore) ->
 
 
 @pytest.mark.parametrize("depth", [1, 5])
-async def test_traverse_returns_empty_for_unknown_start(
-    store: Neo4jStore, depth: int
-) -> None:
+async def test_traverse_returns_empty_for_unknown_start(store: Neo4jStore, depth: int) -> None:
     result = list(await store.traverse("nonexistent-entity", depth=depth))
     assert result == []
 

@@ -121,8 +121,7 @@ class PostgresAuditEmitter:
         raw = os.environ.get(signing_key_env)
         if not raw:
             raise RuntimeError(
-                f"{signing_key_env} not set — audit emitter refuses to boot "
-                "without a signing key"
+                f"{signing_key_env} not set — audit emitter refuses to boot without a signing key"
             )
         # Ensure the URL uses an async driver — reject sync-only shapes early.
         if "+asyncpg" not in db_url and "+aiosqlite" not in db_url:
@@ -195,9 +194,7 @@ class PostgresAuditEmitter:
         }
         async with self._engine.begin() as conn:
             prev_hash_result = await conn.execute(
-                select(_audit_table.c.hash)
-                .order_by(_audit_table.c.ordinal.desc())
-                .limit(1)
+                select(_audit_table.c.hash).order_by(_audit_table.c.ordinal.desc()).limit(1)
             )
             prev_hash_row = prev_hash_result.first()
             prev_hash: str | None = prev_hash_row[0] if prev_hash_row else None
@@ -253,9 +250,7 @@ class PostgresAuditEmitter:
         remains internally consistent, so this returns True for what's kept.
         """
         async with self._engine.connect() as conn:
-            result = await conn.execute(
-                select(_audit_table).order_by(_audit_table.c.ordinal.asc())
-            )
+            result = await conn.execute(select(_audit_table).order_by(_audit_table.c.ordinal.asc()))
             expected_prev: str | None = None
             first = True
             for row in result.mappings():
@@ -288,9 +283,7 @@ class PostgresAuditEmitter:
 
     async def count_async(self) -> int:
         async with self._engine.connect() as conn:
-            result = await conn.execute(
-                text(f"SELECT COUNT(*) FROM {_audit_table.name}")
-            )
+            result = await conn.execute(text(f"SELECT COUNT(*) FROM {_audit_table.name}"))
             row = result.first()
             return int(row[0]) if row else 0
 

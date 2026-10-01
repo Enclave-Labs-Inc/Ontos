@@ -51,9 +51,7 @@ def build_store(config: RuntimeConfig) -> GraphStore:
         user = os.environ.get("NEO4J_USER", "neo4j")
         password = os.environ.get("NEO4J_PASSWORD")
         if not uri or not password:
-            raise RuntimeError(
-                "ONTOS_STORAGE_BACKEND=neo4j requires NEO4J_URI + NEO4J_PASSWORD"
-            )
+            raise RuntimeError("ONTOS_STORAGE_BACKEND=neo4j requires NEO4J_URI + NEO4J_PASSWORD")
         database = os.environ.get("NEO4J_DATABASE", "neo4j")
         return Neo4jStore.from_uri(uri, auth=(user, password), database=database)
     raise NotImplementedError(
@@ -83,8 +81,7 @@ def build_authz(config: RuntimeConfig) -> AuthzBackend | None:
 
         return OpenFGAAuthz.from_env()
     raise RuntimeError(
-        f"ONTOS_AUTHZ_BACKEND={backend!r} not supported. "
-        "Use 'none', 'inmemory', or 'openfga'."
+        f"ONTOS_AUTHZ_BACKEND={backend!r} not supported. Use 'none', 'inmemory', or 'openfga'."
     )
 
 
@@ -102,9 +99,7 @@ def build_server(
     audit = audit if audit is not None else AuditEmitter.from_env(cfg.audit_signing_key_env)
     # Note: authz is opt-in — passing None disables authz and falls back
     # to the M1 `acl_subject == fact.acl_ref` shim in the store.
-    resolved_authz: AuthzBackend | None = (
-        authz if authz is not None else build_authz(cfg)
-    )
+    resolved_authz: AuthzBackend | None = authz if authz is not None else build_authz(cfg)
     # Executor is always available (deterministic, no config). Planner is
     # opt-in — if no planner is wired, the `ask` tool is disabled (the
     # store tools still work). This lets M0/M1 deployments run without
@@ -337,9 +332,7 @@ def build_server(
                 tool_arguments={},
                 result_fact_ids=[],
                 latency_ms=(time.perf_counter() - started) * 1000,
-                policy_decisions=[
-                    {"policy": "planner", "result": "not_configured"}
-                ],
+                policy_decisions=[{"policy": "planner", "result": "not_configured"}],
             )
             return ToolResponse(
                 query_id=record.query_id,
@@ -358,9 +351,7 @@ def build_server(
                 tool_arguments={},
                 result_fact_ids=[],
                 latency_ms=(time.perf_counter() - started) * 1000,
-                policy_decisions=[
-                    {"policy": "ontology", "result": "not_configured"}
-                ],
+                policy_decisions=[{"policy": "ontology", "result": "not_configured"}],
             )
             return ToolResponse(
                 query_id=record.query_id,
@@ -443,9 +434,7 @@ def build_server(
 def main() -> None:
     """CLI entry — boots the server with streamable-HTTP transport."""
     # Dev-only: default a signing key if operator did not set one; refuse in prod.
-    if os.environ.get("ONTOS_ENV") != "prod" and not os.environ.get(
-        "ONTOS_AUDIT_SIGNING_KEY"
-    ):
+    if os.environ.get("ONTOS_ENV") != "prod" and not os.environ.get("ONTOS_AUDIT_SIGNING_KEY"):
         os.environ["ONTOS_AUDIT_SIGNING_KEY"] = "dev-only-signing-key-do-not-use"
         log.warning("using dev signing key — never do this in prod")
 

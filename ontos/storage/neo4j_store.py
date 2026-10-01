@@ -114,10 +114,8 @@ class Neo4jStore:
         """Create indexes idempotently. Safe to call on every boot."""
         statements = [
             "CREATE INDEX entity_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.id)",
-            "CREATE INDEX fact_id_idx IF NOT EXISTS "
-            "FOR ()-[r:RELATES]-() ON (r.fact_id)",
-            "CREATE INDEX fact_predicate_idx IF NOT EXISTS "
-            "FOR ()-[r:RELATES]-() ON (r.predicate)",
+            "CREATE INDEX fact_id_idx IF NOT EXISTS FOR ()-[r:RELATES]-() ON (r.fact_id)",
+            "CREATE INDEX fact_predicate_idx IF NOT EXISTS FOR ()-[r:RELATES]-() ON (r.predicate)",
             "CREATE INDEX fact_validity_idx IF NOT EXISTS "
             "FOR ()-[r:RELATES]-() ON (r.t_valid, r.t_invalid)",
         ]

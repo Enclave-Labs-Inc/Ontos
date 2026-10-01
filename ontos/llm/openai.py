@@ -87,9 +87,7 @@ class OpenAIBackend:
         self._client = AsyncOpenAI(api_key=self._api_key)
         return self._client
 
-    async def structured_extract(
-        self, text: str, ontology: Ontology
-    ) -> list[RawTriple]:
+    async def structured_extract(self, text: str, ontology: Ontology) -> list[RawTriple]:
         system, user = extraction_prompt(text, ontology)
         client = self._get_client()
         completion = await client.chat.completions.parse(

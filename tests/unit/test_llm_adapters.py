@@ -19,8 +19,7 @@ from ontos.ontology import Ontology, load_ontology
 from ontos.planner import LLMPlannerBackend, SeedByEntity, SeedByKeyword
 
 STARTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "starter.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
 )
 
 
@@ -84,9 +83,7 @@ async def test_ollama_structured_extract_returns_raw_triples(
 
 
 async def test_ollama_empty_triples_returns_empty(ontology: Ontology) -> None:
-    backend = OllamaBackend(
-        "llama3.1:8b", client=_ollama_client('{"triples": []}')
-    )
+    backend = OllamaBackend("llama3.1:8b", client=_ollama_client('{"triples": []}'))
     assert await backend.structured_extract("anything", ontology) == []
 
 
@@ -105,10 +102,7 @@ async def test_ollama_structured_plan_by_entity(ontology: Ontology) -> None:
 
 
 async def test_ollama_structured_plan_by_keyword(ontology: Ontology) -> None:
-    canned = (
-        '{"seed": {"kind": "by_keyword", "keyword": "acme", "k": 3}, '
-        '"steps": []}'
-    )
+    canned = '{"seed": {"kind": "by_keyword", "keyword": "acme", "k": 3}, "steps": []}'
     backend = OllamaBackend("llama3.1:8b", client=_ollama_client(canned))
     plan = await backend.structured_plan("acme?", ontology)
     assert isinstance(plan.seed, SeedByKeyword)

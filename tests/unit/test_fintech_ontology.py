@@ -18,8 +18,7 @@ from pathlib import Path
 from ontos.ontology import Ontology, load_ontology
 
 FINTECH_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "fintech.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "fintech.yaml"
 )
 
 

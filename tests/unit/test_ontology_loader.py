@@ -16,8 +16,7 @@ from ontos.ontology import (
 )
 
 STARTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "starter.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
 )
 
 
@@ -48,24 +47,14 @@ def test_top_level_must_be_mapping(tmp_path: Path) -> None:
 
 def test_ontology_needs_entity_types(tmp_path: Path) -> None:
     bad = tmp_path / "no_entities.yaml"
-    bad.write_text(
-        "entity_types: []\n"
-        "relation_types:\n"
-        "  - label: r\n"
-        "patterns: []\n"
-    )
+    bad.write_text("entity_types: []\nrelation_types:\n  - label: r\npatterns: []\n")
     with pytest.raises(OntologyLoadError):
         load_ontology(bad)
 
 
 def test_ontology_needs_relation_types(tmp_path: Path) -> None:
     bad = tmp_path / "no_rels.yaml"
-    bad.write_text(
-        "entity_types:\n"
-        "  - label: E\n"
-        "relation_types: []\n"
-        "patterns: []\n"
-    )
+    bad.write_text("entity_types:\n  - label: E\nrelation_types: []\npatterns: []\n")
     with pytest.raises(OntologyLoadError):
         load_ontology(bad)
 

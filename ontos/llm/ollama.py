@@ -58,9 +58,7 @@ class OllamaBackend:
     def version(self) -> str:
         return self._model
 
-    async def structured_extract(
-        self, text: str, ontology: Ontology
-    ) -> list[RawTriple]:
+    async def structured_extract(self, text: str, ontology: Ontology) -> list[RawTriple]:
         system, user = extraction_prompt(text, ontology)
         response = await self._chat(system, user, _EXTRACTION_SCHEMA)
         raw_items = response.get("triples") or []
@@ -71,9 +69,7 @@ class OllamaBackend:
         response = await self._chat(system, user, _PLANNER_SCHEMA)
         return _reify_plan(response)
 
-    async def _chat(
-        self, system: str, user: str, json_schema: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _chat(self, system: str, user: str, json_schema: dict[str, Any]) -> dict[str, Any]:
         body = {
             "model": self._model,
             "messages": [
@@ -92,9 +88,7 @@ class OllamaBackend:
                 response.raise_for_status()
                 data = response.json()
         else:
-            response = await self._client.post(
-                f"{self._base_url}/api/chat", json=body
-            )
+            response = await self._client.post(f"{self._base_url}/api/chat", json=body)
             response.raise_for_status()
             data = response.json()
         content = data.get("message", {}).get("content", "{}")

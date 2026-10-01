@@ -32,8 +32,7 @@ from ontos.storage.neo4j_store import Neo4jStore
 pytestmark = pytest.mark.integration
 
 STARTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs" / "ontology" / "examples" / "starter.yaml"
+    Path(__file__).resolve().parents[2] / "docs" / "ontology" / "examples" / "starter.yaml"
 )
 
 
@@ -61,9 +60,7 @@ class ScriptedLLM:
     def __init__(self, script: dict[str, list[RawTriple]]) -> None:
         self._script = script
 
-    async def structured_extract(
-        self, text: str, ontology: Ontology
-    ) -> list[RawTriple]:
+    async def structured_extract(self, text: str, ontology: Ontology) -> list[RawTriple]:
         return list(self._script.get(text, []))
 
 
@@ -109,9 +106,13 @@ def audit() -> AuditEmitter:
 
 
 def _triple(
-    subject_id: str, subject_type: str, subject_name: str,
+    subject_id: str,
+    subject_type: str,
+    subject_name: str,
     predicate: str,
-    object_id: str, object_type: str, object_name: str,
+    object_id: str,
+    object_type: str,
+    object_name: str,
 ) -> RawTriple:
     return RawTriple(
         subject_id=subject_id,
@@ -128,16 +129,24 @@ def _triple(
 CORPUS = {
     "Alice at Acme.": [
         _triple(
-            "person:alice", "Person", "Alice Smith",
+            "person:alice",
+            "Person",
+            "Alice Smith",
             "works_at",
-            "company:acme", "Company", "Acme Corp",
+            "company:acme",
+            "Company",
+            "Acme Corp",
         )
     ],
     "Acme acquired Widget.": [
         _triple(
-            "company:acme", "Company", "Acme Corp",
+            "company:acme",
+            "Company",
+            "Acme Corp",
             "acquired",
-            "company:widget", "Company", "Widget Inc",
+            "company:widget",
+            "Company",
+            "Widget Inc",
         )
     ],
 }
@@ -334,9 +343,7 @@ def postgres_container():
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"Docker not reachable: {exc}")
 
-    container = testcontainers_postgres.PostgresContainer(
-        image="postgres:16", driver="asyncpg"
-    )
+    container = testcontainers_postgres.PostgresContainer(image="postgres:16", driver="asyncpg")
     container.start()
     try:
         yield container

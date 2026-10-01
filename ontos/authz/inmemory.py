@@ -31,7 +31,5 @@ class InMemoryAuthz:
     async def check(self, subject: str, relation: str, object_: str) -> bool:
         return object_ in self._grants.get((subject, relation), set())
 
-    async def list_authorized_objects(
-        self, subject: str, relation: str
-    ) -> list[str]:
+    async def list_authorized_objects(self, subject: str, relation: str) -> list[str]:
         return sorted(self._grants.get((subject, relation), set()))

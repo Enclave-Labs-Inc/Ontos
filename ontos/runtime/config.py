@@ -32,7 +32,5 @@ class RuntimeConfig:
             ),
             listen_host=os.getenv("ONTOS_LISTEN_HOST", "127.0.0.1"),
             listen_port=int(os.getenv("ONTOS_LISTEN_PORT", "8765")),
-            ontology_path=(
-                Path(p) if (p := os.getenv("ONTOS_ONTOLOGY_PATH")) else None
-            ),
+            ontology_path=(Path(p) if (p := os.getenv("ONTOS_ONTOLOGY_PATH")) else None),
         )
