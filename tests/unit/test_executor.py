@@ -223,6 +223,24 @@ async def test_result_and_hit_are_frozen(
             result.hits[0].combined_score = 0.0  # type: ignore[misc]
 
 
+async def test_executor_honors_default_bidirectional_traversal(
+    populated_store: NetworkxStore, ontology: Ontology
+) -> None:
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="company:acme"),
+        steps=[TraversalStep(depth=1)],
+        ontology=ontology,
+    )
+
+    assert plan.steps[0].direction == "both"
+
+    result = await DeterministicExecutor().execute(plan, populated_store)
+
+    predicates = {hit.fact.predicate for hit in result.hits}
+    assert "works_at" in predicates
+    assert "acquired" in predicates
+
+
 async def test_executor_honors_incoming_traversal_direction(
     populated_store: NetworkxStore, ontology: Ontology
 ) -> None:
