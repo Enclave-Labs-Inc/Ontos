@@ -89,10 +89,8 @@ class LlmPlanner:
         except (ValueError, Exception) as exc:
             raise PlannerError(question, f"ontology validation failed: {exc}") from exc
 
-        # If Plan.build canonicalized duplicate steps away, surface it
-        # — same operator-visibility pattern as the issue #16 fix.
-        # LLM nondeterminism (issue #18) stays observable without
-        # polluting the audit record or costing extra traversal calls.
+        # Surface planner drift so operators notice when the LLM
+        # emits consecutive-identical steps (which `Plan.build` drops).
         if len(plan.steps) < len(raw.steps):
             log.warning(
                 "planner emitted duplicate steps",
