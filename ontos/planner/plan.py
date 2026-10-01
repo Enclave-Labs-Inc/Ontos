@@ -81,11 +81,18 @@ class Plan(BaseModel):
         limit: int = 20,
         ontology: Ontology,
     ) -> Plan:
-        """Construct a Plan and validate every referenced relation
-        against the ontology.
+        """Construct a Plan, validate relations against the ontology,
+        and drop consecutive-duplicate TraversalSteps.
 
         A referenced relation that's not declared is a schema
         violation — fail loud here, not in the executor.
+
+        Non-consecutive repeats are legitimate traversals and must
+        pass through unchanged: `[knows, works_at, knows]` is a real
+        3-hop plan ("friend's employer's other friends"). Only an
+        adjacent repeat is treated as redundant — the planner prompt
+        tells the LLM to express multi-hop via `depth=N`, not by
+        repeating the same step.
         """
         actual_steps = list(steps or [])
         declared_relations = {rt.label for rt in ontology.relation_types}
@@ -96,7 +103,20 @@ class Plan(BaseModel):
                         f"plan step[{i}] references relation {rel!r} "
                         "which is not declared in the ontology"
                     )
-        return cls(seed=seed, steps=actual_steps, as_of=as_of, limit=limit)
+        canonical_steps: list[TraversalStep] = []
+        for step in actual_steps:
+            if canonical_steps and _same_step(canonical_steps[-1], step):
+                continue
+            canonical_steps.append(step)
+        return cls(seed=seed, steps=canonical_steps, as_of=as_of, limit=limit)
 
     def total_depth(self) -> int:
         return sum(step.depth for step in self.steps)
+
+
+def _same_step(a: TraversalStep, b: TraversalStep) -> bool:
+    return (
+        tuple(a.relations) == tuple(b.relations)
+        and a.depth == b.depth
+        and a.direction == b.direction
+    )
