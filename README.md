@@ -71,6 +71,21 @@ Then point any MCP-speaking client (Claude Code, Cursor, Codex, Gemini CLI) at t
 
 The CLI also ships `ontos ingest <dir>`, `ontos query "<question>"`, and `ontos audit verify` — see [CHANGELOG.md](CHANGELOG.md) for what's in each release and [RELEASING.md](RELEASING.md) for the release process.
 
+### PDF ingest (0.3.0+)
+
+`ontos ingest` reads `.txt`, `.md`, and `.pdf` files from a directory. PDFs route through LlamaCloud's hosted vision API via the `[llama]` extra:
+
+```bash
+pip install 'enclave-ontos[llama]'
+export LLAMA_CLOUD_API_KEY=llx-...
+ontos ingest \
+    --source-dir ./corpus \
+    --ontology ./starter.yaml \
+    --pdf-backend llamaparse
+```
+
+`--pdf-backend llamaparse` is a **BRIDGE** connector — document bytes leave the customer VPC on their way to `api.cloud.llamaindex.ai`. For in-VPC compliance, [#39](https://github.com/Enclave-Labs-Inc/Ontos/issues/39) tracks a sovereign `pypdf` backend (text-only PDFs; local parsing). Pure `.txt`/`.md` ingest requires no flag and no extra.
+
 ## Design pillars
 
 1. **Every fact carries provenance** — `(source_id, extractor_version, confidence, t_valid, t_invalid)` on every triple.

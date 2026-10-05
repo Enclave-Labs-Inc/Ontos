@@ -23,7 +23,11 @@ dependencies = [
 
 [project.optional-dependencies]
 neo4j = ["neo4j>=5.20"]
-llama = ["llama-index>=0.11", "llama-index-graph-stores-neo4j>=0.3"]
+# `llama` pulls the LlamaCloud hosted PDF→markdown parser used by
+# `LlamaParsePdfConnector`. BRIDGE connector — see docs/architecture.md
+# for the sovereignty posture. For in-VPC compliant PDF ingest, follow
+# the sovereign-pypdf-connector follow-up on GitHub.
+llama = ["llama-cloud-services>=0.2"]
 langchain = ["langchain>=0.3", "langchain-experimental>=0.3"]
 authz = ["openfga-sdk>=0.6"]
 openai = ["openai>=1.50"]
