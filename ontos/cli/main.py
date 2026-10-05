@@ -18,6 +18,7 @@ until the command that needs them, so `ontos --help` stays fast.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,17 @@ import typer
 
 if TYPE_CHECKING:
     from ontos.ingest import Connector, MultiConnector
+    from ontos.runtime.config import RuntimeConfig
+
+
+# When the operator runs the CLI without overriding storage, we want
+# "ontos ingest ...; ontos query ..." to Just Work on first install.
+# Facts land under the user's home dir; override via --storage-path or
+# ONTOS_STORAGE_PATH; opt out with --storage-path "". Computed per-call
+# (not at import time) so tests can monkeypatch Path.home().
+def _default_cli_storage_path() -> Path:
+    return Path.home() / ".ontos" / "dev-store.pkl"
+
 
 app = typer.Typer(
     name="ontos",
@@ -39,6 +51,17 @@ app = typer.Typer(
 def serve(
     host: Annotated[str | None, typer.Option(help="Bind host; overrides env.")] = None,
     port: Annotated[int | None, typer.Option(help="Bind port; overrides env.")] = None,
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Boot the FastMCP server on streamable-HTTP transport."""
     # Deferred import so `ontos --help` doesn't drag in fastmcp.
@@ -48,6 +71,16 @@ def serve(
         os.environ["ONTOS_LISTEN_HOST"] = host
     if port is not None:
         os.environ["ONTOS_LISTEN_PORT"] = str(port)
+    # Thread the CLI's resolved storage path through the env so the
+    # server picks it up via RuntimeConfig.from_env() — serve is a
+    # long-running process, so there's no CLI-side close() hook to
+    # flush the store; writes happen in-process throughout its life.
+    resolved = _resolve_storage_path(storage_path)
+    if resolved is not None:
+        os.environ["ONTOS_STORAGE_PATH"] = str(resolved)
+    elif storage_path == "":
+        # Explicit opt-out: clear any inherited env.
+        os.environ.pop("ONTOS_STORAGE_PATH", None)
     _serve_main()
 
 
@@ -113,6 +146,18 @@ def ingest(
             help="Env var holding the LlamaCloud API key.",
         ),
     ] = "LLAMA_CLOUD_API_KEY",
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral "
+                "in-memory (facts die with the process). Ignored for "
+                "ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Ingest a directory of .txt / .md / .pdf files via Ollama + the resolver cascade."""
     # Deferred imports keep --help fast.
@@ -121,7 +166,6 @@ def ingest(
     from ontos.ontology import load_ontology
     from ontos.pipeline import ErrorPolicy, IngestPipeline
     from ontos.resolver import ExactMatchResolver
-    from ontos.runtime.config import RuntimeConfig
     from ontos.runtime.server import build_store
 
     connector, document_count = _build_source_connector(
@@ -131,11 +175,15 @@ def ingest(
     )
     typer.echo(f"discovered {document_count} document(s) in {source_dir}")
 
+    resolved_path = _resolve_storage_path(storage_path)
+    cfg = _build_cli_runtime_config(resolved_path)
+    _warn_if_ephemeral(resolved_path, cfg.storage_backend)
+
     ontology = load_ontology(ontology_path)
     llm = OllamaBackend(ollama_model, base_url=ollama_url)
     extractor = LlmExtractor(llm, ontology)
     resolver = ExactMatchResolver()
-    store = build_store(RuntimeConfig.from_env())
+    store = build_store(cfg)
 
     pipeline = IngestPipeline(
         connector=connector,
@@ -145,8 +193,21 @@ def ingest(
         ontology=ontology,
         error_policy=ErrorPolicy(error_policy),
     )
-    report = asyncio.run(pipeline.run())
-    typer.echo(report.model_dump_json(indent=2))
+
+    async def _run_pipeline() -> None:
+        try:
+            report = await pipeline.run()
+            typer.echo(report.model_dump_json(indent=2))
+        finally:
+            # Explicit close so NetworkxStore(path=...) flushes the
+            # pickle to disk. #29: pre-fix, process exit happened
+            # before any save and new ingest/query processes started
+            # from an empty graph.
+            await store.close()
+
+    asyncio.run(_run_pipeline())
+    if resolved_path is not None and cfg.storage_backend == "networkx":
+        typer.secho(f"facts persisted to {resolved_path}", fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -164,35 +225,53 @@ def query(
     ],
     ollama_model: Annotated[str, typer.Option("--ollama-model")] = "llama3.1:8b",
     ollama_url: Annotated[str, typer.Option("--ollama-url")] = "http://localhost:11434",
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl (same default as "
+                "`ontos ingest`). Pass '' for ephemeral in-memory. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run one NL question through planner + executor locally; print ranked hits."""
     from ontos.executor import DeterministicExecutor
     from ontos.llm import OllamaBackend
     from ontos.ontology import load_ontology
     from ontos.planner import LlmPlanner
-    from ontos.runtime.config import RuntimeConfig
     from ontos.runtime.server import build_store
+
+    resolved_path = _resolve_storage_path(storage_path)
+    cfg = _build_cli_runtime_config(resolved_path)
+    _warn_if_ephemeral(resolved_path, cfg.storage_backend)
 
     ontology = load_ontology(ontology_path)
     llm = OllamaBackend(ollama_model, base_url=ollama_url)
     planner = LlmPlanner(llm, ontology)
     executor = DeterministicExecutor()
-    store = build_store(RuntimeConfig.from_env())
+    store = build_store(cfg)
 
     async def _run() -> None:
-        plan = await planner.plan(question, ontology)
-        result = await executor.execute(plan, store)
-        typer.echo(
-            json.dumps(
-                {
-                    "plan": plan.model_dump(mode="json"),
-                    "hits": [h.model_dump(mode="json") for h in result.hits],
-                    "warnings": result.warnings,
-                },
-                indent=2,
-                default=str,
+        try:
+            plan = await planner.plan(question, ontology)
+            result = await executor.execute(plan, store)
+            typer.echo(
+                json.dumps(
+                    {
+                        "plan": plan.model_dump(mode="json"),
+                        "hits": [h.model_dump(mode="json") for h in result.hits],
+                        "warnings": result.warnings,
+                    },
+                    indent=2,
+                    default=str,
+                )
             )
-        )
+        finally:
+            await store.close()
 
     asyncio.run(_run())
 
@@ -250,6 +329,57 @@ def audit_verify(
             raise typer.Exit(code=1)
 
     asyncio.run(_run())
+
+
+def _resolve_storage_path(cli_flag: str | None) -> Path | None:
+    """Precedence: CLI flag → ONTOS_STORAGE_PATH env → sensible default.
+
+    - ``cli_flag is None``: operator didn't pass ``--storage-path``.
+      Fall through to env, then to the default.
+    - ``cli_flag == ""``: explicit in-memory opt-out. Returns None.
+    - ``cli_flag`` otherwise: use that path.
+
+    The sensible default (``~/.ontos/dev-store.pkl``) applies ONLY when
+    the backend is networkx; other backends ignore storage_path.
+    """
+    if cli_flag is not None:
+        if cli_flag == "":
+            return None
+        return Path(cli_flag).expanduser().resolve()
+
+    env_raw = os.environ.get("ONTOS_STORAGE_PATH")
+    if env_raw is not None:
+        return Path(env_raw).expanduser().resolve() if env_raw else None
+
+    if os.environ.get("ONTOS_STORAGE_BACKEND", "networkx") == "networkx":
+        return _default_cli_storage_path()
+    return None
+
+
+def _build_cli_runtime_config(storage_path: Path | None) -> RuntimeConfig:
+    """Produce a RuntimeConfig that overrides from_env's storage_path.
+
+    Keeps from_env() strictly env-driven so tests that call it directly
+    stay in-memory; the "sensible default" layer lives in the CLI only.
+    """
+    from ontos.runtime.config import RuntimeConfig
+
+    base = RuntimeConfig.from_env()
+    return dataclasses.replace(base, storage_path=storage_path)
+
+
+def _warn_if_ephemeral(storage_path: Path | None, backend: str) -> None:
+    """Loud warning for operators who opted out of persistence."""
+    if backend == "networkx" and storage_path is None:
+        typer.secho(
+            "WARNING: storage backend is in-memory (networkx, no path). "
+            "Facts written by this process will NOT be visible to future "
+            "`ontos query` invocations. For persistent dev storage pass "
+            "--storage-path PATH, set ONTOS_STORAGE_PATH, or configure "
+            "ONTOS_STORAGE_BACKEND=neo4j for production.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
 
 
 TEXT_EXTENSIONS = frozenset({".txt", ".md"})

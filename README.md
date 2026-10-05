@@ -86,6 +86,10 @@ ontos ingest \
 
 `--pdf-backend llamaparse` is a **BRIDGE** connector — document bytes leave the customer VPC on their way to `api.cloud.llamaindex.ai`. For in-VPC compliance, [#39](https://github.com/Enclave-Labs-Inc/Ontos/issues/39) tracks a sovereign `pypdf` backend (text-only PDFs; local parsing). Pure `.txt`/`.md` ingest requires no flag and no extra.
 
+### Dev-store persistence (0.3.0+)
+
+By default the CLI persists dev-store facts to `~/.ontos/dev-store.pkl`, so `ontos ingest ...` followed by `ontos query ...` works out of the box without an external database. Override the location with `--storage-path PATH` or `ONTOS_STORAGE_PATH`; pass `--storage-path ""` for ephemeral in-memory (what pre-0.3.0 did silently — operators who opt out see a loud warning). Regulated deploys continue to use `ONTOS_STORAGE_BACKEND=neo4j`; the dev-store pickle is Python-version-specific, single-process, and not a wire format.
+
 ## Design pillars
 
 1. **Every fact carries provenance** — `(source_id, extractor_version, confidence, t_valid, t_invalid)` on every triple.

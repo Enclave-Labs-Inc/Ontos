@@ -250,6 +250,137 @@ def test_build_source_connector_empty_dir_exits(tmp_path: Path) -> None:
     assert exc.value.exit_code == 2
 
 
+# --- #29: storage-path resolution + CLI persistence ---
+
+
+def test_resolve_storage_path_cli_flag_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ontos.cli.main import _resolve_storage_path
+
+    monkeypatch.setenv("ONTOS_STORAGE_PATH", "/env/path/store.pkl")
+    cli = str(tmp_path / "cli.pkl")
+    assert _resolve_storage_path(cli) == Path(cli).resolve()
+
+
+def test_resolve_storage_path_empty_cli_means_ephemeral(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ontos.cli.main import _resolve_storage_path
+
+    monkeypatch.setenv("ONTOS_STORAGE_PATH", "/env/path/store.pkl")
+    assert _resolve_storage_path("") is None
+
+
+def test_resolve_storage_path_env_used_when_cli_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ontos.cli.main import _resolve_storage_path
+
+    env_path = tmp_path / "env.pkl"
+    monkeypatch.setenv("ONTOS_STORAGE_PATH", str(env_path))
+    assert _resolve_storage_path(None) == env_path.resolve()
+
+
+def test_resolve_storage_path_empty_env_means_ephemeral(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ontos.cli.main import _resolve_storage_path
+
+    monkeypatch.setenv("ONTOS_STORAGE_PATH", "")
+    assert _resolve_storage_path(None) is None
+
+
+def test_resolve_storage_path_default_used_when_nothing_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default is ~/.ontos/dev-store.pkl. Monkeypatch Path.home() so tests
+    don't touch the real home directory."""
+    from ontos.cli import main as cli_main
+
+    monkeypatch.delenv("ONTOS_STORAGE_PATH", raising=False)
+    monkeypatch.delenv("ONTOS_STORAGE_BACKEND", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    # Re-evaluate via the fresh home dir.
+    resolved = cli_main._resolve_storage_path(None)
+    assert resolved == tmp_path / ".ontos" / "dev-store.pkl"
+
+
+def test_resolve_storage_path_no_default_for_non_networkx_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ontos.cli.main import _resolve_storage_path
+
+    monkeypatch.delenv("ONTOS_STORAGE_PATH", raising=False)
+    monkeypatch.setenv("ONTOS_STORAGE_BACKEND", "neo4j")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    assert _resolve_storage_path(None) is None
+
+
+def test_build_cli_runtime_config_overrides_only_storage_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ontos.cli.main import _build_cli_runtime_config
+
+    monkeypatch.setenv("ONTOS_LISTEN_PORT", "9999")
+    pkl = tmp_path / "x.pkl"
+    cfg = _build_cli_runtime_config(pkl)
+    assert cfg.storage_path == pkl
+    assert cfg.listen_port == 9999  # other fields untouched
+
+
+def test_warn_if_ephemeral_fires_for_networkx_with_no_path(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from ontos.cli.main import _warn_if_ephemeral
+
+    _warn_if_ephemeral(None, "networkx")
+    captured = capsys.readouterr()
+    assert "WARNING" in captured.err
+    assert "in-memory" in captured.err
+    assert "--storage-path" in captured.err
+
+
+def test_warn_if_ephemeral_silent_for_persistent_networkx(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from ontos.cli.main import _warn_if_ephemeral
+
+    _warn_if_ephemeral(tmp_path / "x.pkl", "networkx")
+    captured = capsys.readouterr()
+    assert "WARNING" not in captured.err
+
+
+def test_warn_if_ephemeral_silent_for_neo4j(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from ontos.cli.main import _warn_if_ephemeral
+
+    _warn_if_ephemeral(None, "neo4j")
+    captured = capsys.readouterr()
+    assert "WARNING" not in captured.err
+
+
+def test_ingest_help_documents_storage_path() -> None:
+    result = runner.invoke(app, ["ingest", "--help"])
+    assert result.exit_code == 0
+    assert "--storage-path" in result.stdout
+
+
+def test_query_help_documents_storage_path() -> None:
+    result = runner.invoke(app, ["query", "--help"])
+    assert result.exit_code == 0
+    assert "--storage-path" in result.stdout
+
+
+def test_serve_help_documents_storage_path() -> None:
+    result = runner.invoke(app, ["serve", "--help"])
+    assert result.exit_code == 0
+    assert "--storage-path" in result.stdout
+
+
 def test_no_args_prints_help() -> None:
     result = runner.invoke(app, [])
     # Typer's no_args_is_help sends the help output and exits with 2 (usage).

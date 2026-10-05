@@ -1,19 +1,40 @@
-"""In-memory NetworkX store for M0 dev/iteration.
+"""NetworkX store for dev / local iteration, with optional file persistence.
 
-DEV ONLY. Not for regulated deploy — no persistence, no crash safety,
-no concurrency guarantees. M1 replaces this with Neo4j.
+DEV ONLY. Not for regulated deploy — single-process, pickle-based
+on-disk format, no crash safety beyond an atomic save, no concurrency
+guarantees. Neo4j is the production backend.
+
+Persistence format
+------------------
+
+When constructed with ``path=``, the store transparently loads from
+and saves to that file. The on-disk payload is:
+
+    b"ONTOS-NX-STORE-V1\\n" + pickle.dumps({"graph": ..., "facts": ...})
+
+``pickle`` is a Python-version-specific binary format, NOT a wire
+format. The file is intended to live under the operator's own home
+directory and be read + written only by the same user's `ontos` CLI.
+A format bump (V2 and beyond) will fail loud on load with
+``StorageError`` rather than silently reset state.
+
+Save is atomic: ``write_bytes`` to ``<path>.tmp`` then ``replace``.
+A crash mid-save leaves the previous valid file intact.
 """
 
 from __future__ import annotations
 
+import pickle
 from collections.abc import Iterable
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
 import networkx as nx
 
 from ontos.runtime.models import Fact
+from ontos.storage.base import StorageError
 
 
 def _fact_alive_at(fact: Fact, ts: datetime | None) -> bool:
@@ -29,11 +50,60 @@ class NetworkxStore:
 
     Each edge key is the fact UUID so multiple facts between the same pair
     of entities can coexist.
+
+    Pass ``path`` to persist state across process invocations (fixes #29).
+    Omit ``path`` for an ephemeral in-memory store (what tests use).
     """
 
-    def __init__(self) -> None:
+    _MAGIC_HEADER = b"ONTOS-NX-STORE-V1\n"
+
+    def __init__(self, path: Path | None = None) -> None:
         self._graph: nx.MultiDiGraph[str] = nx.MultiDiGraph()
         self._facts: dict[UUID, Fact] = {}
+        self._path: Path | None = path
+        if path is not None and path.exists() and path.stat().st_size > 0:
+            self._load_from(path)
+
+    def _load_from(self, path: Path) -> None:
+        """Load state from path. Fail loud on magic mismatch or corrupt payload."""
+        raw = path.read_bytes()
+        if not raw.startswith(self._MAGIC_HEADER):
+            raise StorageError(
+                f"{path} is not an Ontos NetworkxStore v1 file "
+                f"(missing {self._MAGIC_HEADER!r} header). Delete it or "
+                "point at a different --storage-path."
+            )
+        try:
+            payload = pickle.loads(raw[len(self._MAGIC_HEADER) :])
+        except (pickle.UnpicklingError, EOFError, AttributeError, ValueError) as exc:
+            raise StorageError(
+                f"{path} has valid header but corrupt payload: {exc!r}. "
+                "Delete it to start fresh, or restore from a backup."
+            ) from exc
+        try:
+            self._graph = payload["graph"]
+            self._facts = payload["facts"]
+        except (KeyError, TypeError) as exc:
+            raise StorageError(
+                f"{path} payload shape is not recognised: {exc!r}. "
+                "File may be from a different Ontos version."
+            ) from exc
+
+    def flush(self) -> None:
+        """Persist state to self._path right now. No-op if path is None."""
+        if self._path is None:
+            return
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
+        tmp.write_bytes(
+            self._MAGIC_HEADER + pickle.dumps({"graph": self._graph, "facts": self._facts})
+        )
+        tmp.replace(self._path)  # atomic swap
+
+    @property
+    def path(self) -> Path | None:
+        """The persistence path for this store, or None for in-memory."""
+        return self._path
 
     async def add_fact(self, fact: Fact) -> None:
         self._graph.add_node(fact.subject_id)
@@ -167,6 +237,10 @@ class NetworkxStore:
         return out
 
     async def close(self) -> None:
+        self.flush()
+        # Keep the clear so existing in-memory callers see close() as a
+        # reset. Persisted callers already have their state on disk; the
+        # next NetworkxStore(path=same) rebuilds from the file.
         self._graph.clear()
         self._facts.clear()
 

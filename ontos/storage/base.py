@@ -77,3 +77,14 @@ class GraphStore(Protocol):
     ) -> list[Fact]: ...
 
     async def close(self) -> None: ...
+
+
+class StorageError(RuntimeError):
+    """Raised when a store cannot load, persist, or recover state.
+
+    Used by backends that persist to a local file (e.g. the dev-only
+    pickle format of ``NetworkxStore``) to fail loud on magic-header
+    mismatch, corrupt payloads, or version drift. Fail-loud is the
+    right posture here: silent reset of persisted facts would quietly
+    violate the provenance invariant.
+    """
