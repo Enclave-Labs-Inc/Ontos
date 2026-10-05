@@ -138,7 +138,34 @@ class LlmExtractor:
         return self._llm.version
 
     async def extract(self, input: ExtractionInput) -> ExtractionResult:
-        raw_triples = await self._llm.structured_extract(input.text, self._ontology)
+        # Wrap backend exceptions as ExtractionError so IngestPipeline's
+        # existing ErrorPolicy (FAIL_FAST / SKIP_AND_LOG) handles them
+        # cleanly instead of leaking raw httpx / provider stack traces.
+        # OllamaTimeoutError gets a dedicated branch so its message (which
+        # already names --ollama-timeout) survives verbatim; other
+        # exceptions get a generic wrap. Parallels LlmPlanner.plan().
+        try:
+            raw_triples = await self._llm.structured_extract(input.text, self._ontology)
+        except ExtractionError:
+            raise
+        except Exception as exc:
+            # Deferred import to avoid pulling the Ollama module into every
+            # extractor construction (keeps the Scribe-drop-in boundary
+            # clean — this except-case is Ollama-specific sugar, not an
+            # ontology-wide dependency).
+            from ontos.llm.ollama import OllamaTimeoutError
+
+            if isinstance(exc, OllamaTimeoutError):
+                raise ExtractionError(
+                    source_id=input.source_id,
+                    message=str(exc),
+                    sample=input.text,
+                ) from exc
+            raise ExtractionError(
+                source_id=input.source_id,
+                message=f"LLM backend failed: {exc!r}",
+                sample=input.text,
+            ) from exc
 
         if not raw_triples and input.text.strip():
             raise ExtractionError(

@@ -34,6 +34,29 @@ from ontos.planner import (
 )
 
 
+class OllamaTimeoutError(RuntimeError):
+    """Raised when Ollama does not respond within ``timeout_s``.
+
+    Lets ``LlmExtractor`` / ``LlmPlanner`` translate the backend-layer
+    timeout into their typed Protocol errors (``ExtractionError``,
+    ``PlannerError``) with a message that names the operator-facing
+    knob (``--ollama-timeout`` / ``OllamaBackend(timeout_s=...)``).
+
+    Pre-#30 a raw ``httpx.ReadTimeout`` stack trace escaped to the CLI
+    with no actionable hint; the operator could not tell "model
+    cold-start" from "doc too long" from "server unreachable."
+    """
+
+    def __init__(self, timeout_s: float, endpoint: str) -> None:
+        self.timeout_s = timeout_s
+        self.endpoint = endpoint
+        super().__init__(
+            f"Ollama did not respond within {timeout_s:.1f}s ({endpoint}). "
+            "Pass --ollama-timeout <seconds> to raise it, warm the model "
+            "first (`ollama run <model>`), or try a shorter document."
+        )
+
+
 class OllamaBackend:
     """Extraction + planning against a local Ollama server."""
 
@@ -82,15 +105,28 @@ class OllamaBackend:
             # a JSON blob on `message.content` we parse below.
             "format": json_schema,
         }
-        if self._client is None:
-            async with httpx.AsyncClient(timeout=self._timeout_s) as client:
-                response = await client.post(f"{self._base_url}/api/chat", json=body)
+        url = f"{self._base_url}/api/chat"
+        # Translate httpx.ReadTimeout into our typed OllamaTimeoutError so
+        # LlmExtractor / LlmPlanner can produce actionable messages
+        # (naming --ollama-timeout) instead of leaking an httpx stack
+        # trace to the operator. Both the self-constructed-client and
+        # injected-client branches funnel through this except; note
+        # that the injected-client branch respects whatever timeout
+        # the caller baked into their httpx.AsyncClient, not
+        # self._timeout_s — tests use this to simulate a timeout
+        # without actually waiting.
+        try:
+            if self._client is None:
+                async with httpx.AsyncClient(timeout=self._timeout_s) as client:
+                    response = await client.post(url, json=body)
+                    response.raise_for_status()
+                    data = response.json()
+            else:
+                response = await self._client.post(url, json=body)
                 response.raise_for_status()
                 data = response.json()
-        else:
-            response = await self._client.post(f"{self._base_url}/api/chat", json=body)
-            response.raise_for_status()
-            data = response.json()
+        except httpx.ReadTimeout as exc:
+            raise OllamaTimeoutError(self._timeout_s, url) from exc
         content = data.get("message", {}).get("content", "{}")
         parsed = json.loads(content)
         assert isinstance(parsed, dict)

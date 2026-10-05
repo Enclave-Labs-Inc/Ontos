@@ -46,6 +46,17 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   (dead weight from an abandoned PropertyGraphIndex design).
 
 ### Fixed
+- `#30` — `httpx.ReadTimeout` from the Ollama backend no longer
+  escapes as a raw stack trace to the CLI. The operator sees a
+  clean `ExtractionError: Ollama did not respond within 60.0s
+  (http://localhost:11434/api/chat). Pass --ollama-timeout
+  <seconds> to raise it, warm the model first (ollama run
+  <model>), or try a shorter document.` This was the UX issue
+  that broke the #28 real-PDF smoke test.
+- `LlmExtractor.extract` now wraps unexpected backend exceptions
+  as `ExtractionError` (parallels `LlmPlanner.plan`'s existing
+  wrap). Pre-#30, any non-`ExtractionError` from
+  `structured_extract` propagated raw.
 - `#29` — CLI default `NetworkxStore` no longer loses facts between
   `ontos ingest` and `ontos query` invocations. Facts now persist to
   `~/.ontos/dev-store.pkl` by default; override via `--storage-path
@@ -54,6 +65,16 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   stderr warning naming the data-loss consequence. Format is
   Python-pickle, dev-only — regulated deploys still use the Neo4j
   backend.
+
+### Added — Ollama timeout UX (#30)
+- `OllamaTimeoutError` typed exception in `ontos.llm` — the backend
+  raises it when a request exceeds the configured `timeout_s`.
+  Translated into `ExtractionError` / `PlannerError` by the extractor
+  / planner so the operator sees an actionable message naming the
+  `--ollama-timeout` knob instead of a raw httpx stack trace.
+- `ontos ingest --ollama-timeout SECONDS` and `ontos query
+  --ollama-timeout SECONDS` (default 60). Long docs or cold-start
+  model loads may need 180–300.
 
 ### Added — storage persistence (#29)
 - `NetworkxStore(path=...)` — optional persistence to a local pickle
