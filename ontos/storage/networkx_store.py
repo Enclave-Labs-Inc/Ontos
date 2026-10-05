@@ -24,6 +24,7 @@ A crash mid-save leaves the previous valid file intact.
 
 from __future__ import annotations
 
+import contextlib
 import pickle
 from collections.abc import Iterable
 from datetime import datetime
@@ -61,6 +62,10 @@ class NetworkxStore:
         self._graph: nx.MultiDiGraph[str] = nx.MultiDiGraph()
         self._facts: dict[UUID, Fact] = {}
         self._path: Path | None = path
+        # Set by any state-mutating method; checked by `flush()` so that
+        # read-only callers (e.g. `ontos query`) never rewrite the file —
+        # that would clobber a concurrent writer's newer snapshot.
+        self._dirty: bool = False
         if path is not None and path.exists() and path.stat().st_size > 0:
             self._load_from(path)
 
@@ -75,10 +80,24 @@ class NetworkxStore:
             )
         try:
             payload = pickle.loads(raw[len(self._MAGIC_HEADER) :])
-        except (pickle.UnpicklingError, EOFError, AttributeError, ValueError) as exc:
+        except (
+            # Broadened to cover realistic version-drift cases where a
+            # pickled module / class moved or was renamed between releases;
+            # without ImportError / IndexError / TypeError here the raw
+            # exception escapes and the "fail loud with StorageError"
+            # contract is violated. Reported on PR #41.
+            pickle.UnpicklingError,
+            EOFError,
+            AttributeError,
+            ImportError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as exc:
             raise StorageError(
                 f"{path} has valid header but corrupt payload: {exc!r}. "
-                "Delete it to start fresh, or restore from a backup."
+                "Delete it to start fresh, or restore from a backup. "
+                "(Likely an Ontos version drift — pickled class moved or renamed.)"
             ) from exc
         try:
             self._graph = payload["graph"]
@@ -89,16 +108,35 @@ class NetworkxStore:
                 "File may be from a different Ontos version."
             ) from exc
 
-    def flush(self) -> None:
-        """Persist state to self._path right now. No-op if path is None."""
+    def flush(self, *, force: bool = False) -> None:
+        """Persist state to self._path right now.
+
+        No-op if path is None, or if nothing has mutated since the last
+        load/flush (``self._dirty is False``). The dirty-gate stops
+        read-only callers (`ontos query`) from rewriting the file —
+        without it, a stale-snapshot query would clobber a concurrent
+        ingest's newer facts on exit. Pass ``force=True`` to override
+        (useful for tests and explicit "snapshot now" semantics).
+        """
         if self._path is None:
+            return
+        if not self._dirty and not force:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_bytes(
             self._MAGIC_HEADER + pickle.dumps({"graph": self._graph, "facts": self._facts})
         )
+        # Dev-store file: single-user, same-process-writer. Lock down
+        # mode so a shared machine doesn't let other users plant a
+        # malicious pickle at the predictable default path (pickle.loads
+        # executes arbitrary code).
+        # chmod not supported on this filesystem (rare, e.g. some mounts
+        # on Windows); carry on.
+        with contextlib.suppress(OSError):
+            tmp.chmod(0o600)
         tmp.replace(self._path)  # atomic swap
+        self._dirty = False
 
     @property
     def path(self) -> Path | None:
@@ -110,6 +148,7 @@ class NetworkxStore:
         self._graph.add_node(fact.object_id)
         self._graph.add_edge(fact.subject_id, fact.object_id, key=fact.id, fact=fact)
         self._facts[fact.id] = fact
+        self._dirty = True
 
     async def close_fact(
         self, fact_id: UUID, t_invalid: datetime, superseded_by: UUID | None = None
@@ -124,6 +163,7 @@ class NetworkxStore:
         # The stubs type edge keys as str, but MultiDiGraph accepts any hashable
         # (see networkx MultiDiGraph.add_edge docs); we key on the UUID at runtime.
         self._graph[current.subject_id][current.object_id][fact_id]["fact"] = replacement  # type: ignore[index]
+        self._dirty = True
 
     async def get_fact(self, fact_id: UUID) -> Fact | None:
         return self._facts.get(fact_id)

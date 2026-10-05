@@ -385,3 +385,172 @@ def test_no_args_prints_help() -> None:
     result = runner.invoke(app, [])
     # Typer's no_args_is_help sends the help output and exits with 2 (usage).
     assert "serve" in result.stdout or "ingest" in result.stdout
+
+
+def test_cli_ingest_persists_facts_through_full_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: invoke `ontos ingest --storage-path PATH` through typer's
+    CliRunner with a stubbed extractor; verify the pickle lands + holds the
+    expected fact. Locks in the #29 fix the review-comment flagged as
+    untested — the `_run_pipeline` + close() wiring that is the actual fix.
+    """
+    from datetime import datetime
+
+    import ontos.extraction
+    import ontos.llm
+    from ontos.runtime.models import Confidence, Entity, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    source_dir = tmp_path / "corpus"
+    source_dir.mkdir()
+    (source_dir / "notes.md").write_text("Alice works at Acme Corporation.")
+    pkl = tmp_path / "store.pkl"
+
+    class _StubLLM:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    class _StubExtractor:
+        def __init__(self, llm: object, ontology: object) -> None:
+            pass
+
+        async def extract(self, inp: object) -> object:
+            fact = Fact(
+                subject_id="Alice",
+                predicate="works_at",
+                object_id="Acme",
+                provenance=Provenance(
+                    source_id="notes.md",
+                    extractor_id="stub",
+                    extractor_version="0",
+                    confidence=Confidence.EXTRACTED,
+                    confidence_score=1.0,
+                ),
+                t_valid=datetime(2026, 1, 1),
+                ingested_at=datetime(2026, 1, 1),
+            )
+            entity = Entity(
+                id="Alice",
+                type="Person",
+                canonical_name="Alice",
+                provenance=fact.provenance,
+            )
+            import types
+
+            return types.SimpleNamespace(facts=[fact], entities=[entity], warnings=[])
+
+    monkeypatch.setattr(ontos.extraction, "LlmExtractor", _StubExtractor)
+    monkeypatch.setattr(ontos.llm, "OllamaBackend", _StubLLM)
+    # Keep from_env from touching real envs:
+    monkeypatch.delenv("ONTOS_STORAGE_PATH", raising=False)
+    monkeypatch.delenv("ONTOS_STORAGE_BACKEND", raising=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "ingest",
+            "--source-dir",
+            str(source_dir),
+            "--ontology",
+            str(STARTER_PATH),
+            "--storage-path",
+            str(pkl),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert pkl.exists(), "store file was not created by the ingest run"
+    assert str(pkl) in result.stdout, "ingest did not report where facts were persisted"
+
+    # Second process (same runner) reads back the facts.
+    reader = NetworkxStore(path=pkl)
+
+    import asyncio
+
+    hits = asyncio.run(reader.facts_for_entity("Alice"))
+    assert len(hits) == 1
+    assert hits[0].predicate == "works_at"
+    assert hits[0].object_id == "Acme"
+
+
+def test_cli_query_does_not_rewrite_the_store_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Read-only `ontos query` must not touch the pickle's mtime.
+
+    Review-flagged correctness bug: without the dirty-flag gate, query
+    rewrites the file on close() and can clobber a concurrent ingest
+    with its stale snapshot. This test fails on main-pre-PR-review-fix.
+    """
+    import asyncio
+    import time
+    from datetime import datetime
+
+    import ontos.llm
+    import ontos.planner
+    from ontos.planner import Plan, SeedByEntity
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    pkl = tmp_path / "concurrent.pkl"
+
+    # Prime the file with one fact.
+    writer = NetworkxStore(path=pkl)
+    asyncio.run(
+        writer.add_fact(
+            Fact(
+                subject_id="Alice",
+                predicate="works_at",
+                object_id="Acme",
+                provenance=Provenance(
+                    source_id="s",
+                    extractor_id="e",
+                    extractor_version="0",
+                    confidence=Confidence.EXTRACTED,
+                    confidence_score=1.0,
+                ),
+                t_valid=datetime(2026, 1, 1),
+                ingested_at=datetime(2026, 1, 1),
+            )
+        )
+    )
+    asyncio.run(writer.close())
+    before_mtime = pkl.stat().st_mtime_ns
+    before_bytes = pkl.read_bytes()
+
+    class _StubLLM:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    class _StubPlanner:
+        def __init__(self, llm: object, ontology: object) -> None:
+            pass
+
+        async def plan(self, question: str, ontology: object) -> Plan:
+            return Plan.build(
+                seed=SeedByEntity(entity_id="Alice"),
+                steps=[],
+                ontology=ontology,  # type: ignore[arg-type]
+            )
+
+    monkeypatch.setattr(ontos.llm, "OllamaBackend", _StubLLM)
+    monkeypatch.setattr(ontos.planner, "LlmPlanner", _StubPlanner)
+
+    time.sleep(0.01)  # ensure any accidental rewrite would bump mtime
+
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "Who works at Acme?",
+            "--ontology",
+            str(STARTER_PATH),
+            "--storage-path",
+            str(pkl),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    # File untouched.
+    assert pkl.stat().st_mtime_ns == before_mtime, "query rewrote the store file"
+    assert pkl.read_bytes() == before_bytes

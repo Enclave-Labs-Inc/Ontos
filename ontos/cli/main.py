@@ -72,9 +72,13 @@ def serve(
     if port is not None:
         os.environ["ONTOS_LISTEN_PORT"] = str(port)
     # Thread the CLI's resolved storage path through the env so the
-    # server picks it up via RuntimeConfig.from_env() — serve is a
-    # long-running process, so there's no CLI-side close() hook to
-    # flush the store; writes happen in-process throughout its life.
+    # server picks it up via RuntimeConfig.from_env(). `serve` is
+    # read-only against the dev store today — the MCP tools in
+    # runtime/server.py (search / traverse / facts_for_entity /
+    # get_fact) do not write — so no explicit flush is needed. The
+    # dirty-flag gate on NetworkxStore.flush() makes this safe even
+    # if a future write-capable tool lands: an unmodified store will
+    # not clobber a concurrent writer's snapshot.
     resolved = _resolve_storage_path(storage_path)
     if resolved is not None:
         os.environ["ONTOS_STORAGE_PATH"] = str(resolved)
@@ -202,8 +206,9 @@ def ingest(
             # Explicit close so NetworkxStore(path=...) flushes the
             # pickle to disk. #29: pre-fix, process exit happened
             # before any save and new ingest/query processes started
-            # from an empty graph.
-            await store.close()
+            # from an empty graph. Flush errors are logged, not
+            # re-raised — a pipeline exception, if any, must survive.
+            await _close_store_without_masking(store)
 
     asyncio.run(_run_pipeline())
     if resolved_path is not None and cfg.storage_backend == "networkx":
@@ -271,7 +276,12 @@ def query(
                 )
             )
         finally:
-            await store.close()
+            # Query is read-only. The dirty-flag gate on
+            # NetworkxStore.flush() ensures close() does NOT rewrite
+            # the pickle here — important to avoid clobbering a
+            # concurrent `ontos ingest` with this process's stale
+            # snapshot.
+            await _close_store_without_masking(store)
 
     asyncio.run(_run())
 
@@ -366,6 +376,31 @@ def _build_cli_runtime_config(storage_path: Path | None) -> RuntimeConfig:
 
     base = RuntimeConfig.from_env()
     return dataclasses.replace(base, storage_path=storage_path)
+
+
+async def _close_store_without_masking(store: object) -> None:
+    """Call ``await store.close()`` without letting flush errors mask
+    an in-flight pipeline exception.
+
+    Pre-#41-review, `await store.close()` inside a `finally` block would
+    replace the pipeline's original exception if close itself raised
+    (e.g. an `OSError` from the pickle write). The pipeline exception
+    is the one the operator needs to see; swallow + log the close
+    failure instead.
+    """
+    try:
+        await store.close()  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001 — intentional, logged
+        import structlog
+
+        structlog.get_logger().error(
+            "store-close-failed",
+            error=repr(exc),
+            message=(
+                "store.close() raised; in-memory data may not have been "
+                "persisted. Original pipeline result (if any) stands."
+            ),
+        )
 
 
 def _warn_if_ephemeral(storage_path: Path | None, backend: str) -> None:

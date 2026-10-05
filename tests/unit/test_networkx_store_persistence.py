@@ -191,3 +191,91 @@ async def test_persistence_creates_parent_directory(tmp_path: Path) -> None:
     store.flush()
     assert deep.exists()
     assert deep.parent.is_dir()
+
+
+# --- PR #41 review fixes: dirty-flag gate, broadened StorageError,
+# file mode 0o600, exception-masking in close() ---
+
+
+async def test_flush_is_no_op_when_store_is_clean(tmp_path: Path) -> None:
+    """Read-only use (close() with no writes) must NOT rewrite the file.
+
+    Regression test for the review-flagged bug: query → close → clobber
+    of a concurrent ingest's newer snapshot.
+    """
+    pkl = tmp_path / "readonly.pkl"
+
+    # Prime a known-good file via a writer.
+    writer = NetworkxStore(path=pkl)
+    await writer.add_fact(_fact("alice", "works_at", "acme"))
+    await writer.close()
+    original_mtime = pkl.stat().st_mtime_ns
+    original_bytes = pkl.read_bytes()
+
+    # Now simulate a read-only process: open at same path, read, close.
+    import asyncio
+
+    await asyncio.sleep(0.01)  # ensure mtime would differ if we did write
+
+    reader = NetworkxStore(path=pkl)
+    _ = await reader.facts_for_entity("alice")
+    await reader.close()
+
+    # File untouched: same mtime, same bytes.
+    assert pkl.stat().st_mtime_ns == original_mtime
+    assert pkl.read_bytes() == original_bytes
+
+
+async def test_read_only_close_creates_no_file_when_missing(tmp_path: Path) -> None:
+    """A process that only reads an absent file must not create one on close()."""
+    pkl = tmp_path / "never-existed.pkl"
+    store = NetworkxStore(path=pkl)
+    _ = await store.facts_for_entity("alice")  # no-op on empty graph
+    await store.close()
+    assert not pkl.exists()
+
+
+async def test_flush_force_overrides_dirty_gate(tmp_path: Path) -> None:
+    """``force=True`` lets callers snapshot even when nothing changed."""
+    pkl = tmp_path / "forced.pkl"
+
+    writer = NetworkxStore(path=pkl)
+    await writer.add_fact(_fact("alice", "works_at", "acme"))
+    writer.flush()
+    first_mtime = pkl.stat().st_mtime_ns
+
+    import asyncio
+
+    await asyncio.sleep(0.01)
+    writer.flush(force=True)
+    assert pkl.stat().st_mtime_ns > first_mtime
+
+
+def test_persisted_file_has_restrictive_mode(tmp_path: Path) -> None:
+    """Dev-store at a predictable path should not be group/world-readable."""
+    import os
+
+    pkl = tmp_path / "mode.pkl"
+    store = NetworkxStore(path=pkl)
+    store._dirty = True  # bypass gate for the test
+    store.flush()
+    mode = pkl.stat().st_mode & 0o777
+    # On POSIX we expect 0o600. On platforms where chmod silently
+    # fails (rare) the file still exists; assert we at least don't
+    # grant world-write.
+    if os.name == "posix":
+        assert mode == 0o600, f"expected 0o600, got {oct(mode)}"
+    else:
+        assert mode & 0o002 == 0  # no world-write
+
+
+def test_load_wraps_import_error_as_storage_error(tmp_path: Path) -> None:
+    """Review-flagged version-drift case: pickle naming a missing module."""
+    pkl = tmp_path / "drift.pkl"
+    # Hand-crafted pickle that references a nonexistent module. The
+    # bytes below spell out: load class `Thing` from module `nosuchmod`,
+    # instantiate, pop → but Unpickler raises ModuleNotFoundError first.
+    pkl.write_bytes(NetworkxStore._MAGIC_HEADER + b"cnosuchmod\nThing\n.")
+
+    with pytest.raises(StorageError, match="version drift"):
+        NetworkxStore(path=pkl)
