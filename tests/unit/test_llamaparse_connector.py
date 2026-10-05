@@ -166,3 +166,79 @@ async def test_connector_passes_result_type_to_llamaparse(pdf_path: Path) -> Non
     _ = [d async for d in conn.iter_documents()]
     assert _StubLlamaParse.last_init_kwargs["result_type"] == "text"
     assert _StubLlamaParse.last_init_kwargs["api_key"] == "llx-fake"
+
+
+async def test_connector_uses_relative_source_id_when_root_set(tmp_path: Path) -> None:
+    """Same-named PDFs in different subdirs must get unique source_ids.
+
+    Regression test for PR #40 review: `source_id = path.name` collided on
+    `a/report.pdf` vs `b/report.pdf`, producing identical `provenance.source_id`
+    for facts extracted from different files. The `root` parameter now keys
+    on `path.relative_to(root)` so collisions become impossible.
+    """
+    _install_stub_module(_StubLlamaParse)
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    pdf_a = tmp_path / "a" / "report.pdf"
+    pdf_b = tmp_path / "b" / "report.pdf"
+    pdf_a.write_bytes(b"%PDF-1.4\n")
+    pdf_b.write_bytes(b"%PDF-1.4\n")
+
+    conn = LlamaParsePdfConnector([pdf_a, pdf_b], api_key="llx-fake", root=tmp_path)
+    docs = [d async for d in conn.iter_documents()]
+
+    assert len(docs) == 2
+    ids = [d.source_id for d in docs]
+    assert ids == ["a/report.pdf", "b/report.pdf"]
+    assert len(set(ids)) == 2  # explicit uniqueness assertion
+
+
+async def test_connector_metadata_source_path_is_relative_not_absolute(
+    tmp_path: Path,
+) -> None:
+    """`source_path` metadata must not leak absolute filesystem paths.
+
+    Absolute paths carry customer directory layout + usernames into the
+    extraction input and (via Provenance / audit) into persisted records.
+    Keep it to the relative path the operator already sees as source_id.
+    """
+    _install_stub_module(_StubLlamaParse)
+    pdf = tmp_path / "docs" / "quarterly.pdf"
+    pdf.parent.mkdir()
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    conn = LlamaParsePdfConnector([pdf], api_key="llx-fake", root=tmp_path)
+    doc = await anext(conn.iter_documents())
+
+    assert doc.metadata["source_path"] == "docs/quarterly.pdf"
+    # Nothing in metadata or source_id should contain the tmp_path prefix.
+    assert str(tmp_path) not in doc.source_id
+    assert str(tmp_path) not in doc.metadata["source_path"]
+
+
+async def test_connector_falls_back_to_basename_without_root(tmp_path: Path) -> None:
+    _install_stub_module(_StubLlamaParse)
+    pdf = tmp_path / "notes.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    conn = LlamaParsePdfConnector([pdf], api_key="llx-fake")  # no root
+    doc = await anext(conn.iter_documents())
+    assert doc.source_id == "notes.pdf"
+
+
+async def test_connector_exercises_vendored_sample_pdf_fixture() -> None:
+    """`tests/fixtures/pdfs/sample.pdf` is a real file we ship; use it.
+
+    Review feedback flagged that the fixture wasn't referenced anywhere.
+    This test runs the full iter_documents path against the vendored
+    316-byte PDF (parser mocked) so the fixture is live, not dormant.
+    """
+    _install_stub_module(_StubLlamaParse)
+    fixture_dir = Path(__file__).resolve().parents[1] / "fixtures" / "pdfs"
+    sample = fixture_dir / "sample.pdf"
+    assert sample.exists(), "vendored sample.pdf fixture is missing"
+
+    conn = LlamaParsePdfConnector([sample], api_key="llx-fake", root=fixture_dir)
+    docs = [d async for d in conn.iter_documents()]
+    assert len(docs) == 1
+    assert docs[0].source_id == "sample.pdf"

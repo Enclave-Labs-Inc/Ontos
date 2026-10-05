@@ -56,6 +56,7 @@ class LlamaParsePdfConnector:
         pdf_paths: list[Path],
         *,
         api_key: str,
+        root: Path | None = None,
         acl_ref_by_source: dict[str, str] | None = None,
         metadata_by_source: dict[str, dict[str, str]] | None = None,
         result_type: Literal["markdown", "text"] = "markdown",
@@ -67,16 +68,35 @@ class LlamaParsePdfConnector:
             )
         self._pdf_paths = list(pdf_paths)
         self._api_key = api_key
+        self._root = root
         self._acl_refs = dict(acl_ref_by_source or {})
         self._metadata = dict(metadata_by_source or {})
         self._result_type = result_type
         _emit_bridge_warning_once(len(self._pdf_paths))
 
+    def _source_id_for(self, path: Path) -> str:
+        """Stable, collision-free document key.
+
+        When ``root`` is set, use the path relative to it (matches what the
+        text slice does in ``_read_source_dir`` so provenance from mixed
+        directories is consistent). Falls back to the basename for callers
+        that don't pass a root — collisions become the caller's problem to
+        avoid, but the CLI always passes ``root``.
+        """
+        if self._root is not None:
+            try:
+                return path.relative_to(self._root).as_posix()
+            except ValueError:
+                # Path isn't actually under root — fall back to basename
+                # rather than silently stripping, so this surfaces.
+                pass
+        return path.name
+
     async def iter_documents(self) -> AsyncIterator[SourceDocument]:
         parser = _load_parser(api_key=self._api_key, result_type=self._result_type)
 
         for path in self._pdf_paths:
-            source_id = path.name
+            source_id = self._source_id_for(path)
             try:
                 docs = await parser.aload_data(str(path))
             except Exception as exc:  # noqa: BLE001 — wrap everything as ConnectorError
@@ -100,7 +120,12 @@ class LlamaParsePdfConnector:
             caller_metadata.setdefault("result_type", self._result_type)
             caller_metadata.setdefault("page_count", str(len(docs)))
             caller_metadata.setdefault("char_count", str(len(text)))
-            caller_metadata.setdefault("source_path", str(path))
+            # Record the RELATIVE path, not str(path): absolute paths would
+            # leak customer directory layout + usernames into provenance /
+            # audit records. source_id is already the relative path when
+            # root is set, so this is redundant but kept for operators who
+            # want "source_path" as a metadata key explicitly.
+            caller_metadata.setdefault("source_path", source_id)
 
             yield SourceDocument(
                 source_id=source_id,

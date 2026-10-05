@@ -318,7 +318,9 @@ def _build_source_connector(
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(code=2)
-            sub_connectors.append(LlamaParsePdfConnector(pdf_paths, api_key=api_key))
+            sub_connectors.append(
+                LlamaParsePdfConnector(pdf_paths, api_key=api_key, root=source_dir)
+            )
             document_count += len(pdf_paths)
         else:
             typer.secho(

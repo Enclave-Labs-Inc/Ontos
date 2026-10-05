@@ -189,6 +189,57 @@ def test_build_source_connector_unknown_backend_exits(tmp_path: Path) -> None:
     assert exc.value.exit_code == 2
 
 
+async def test_build_source_connector_pdf_dispatch_yields_unique_source_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E2E: CLI → MultiConnector → LlamaParsePdfConnector.iter_documents().
+
+    Covers the CLI-to-connector wiring with mocked LlamaParse, including
+    the fix for the PR #40 blocker: two same-named PDFs in different
+    subdirectories must emit distinct `source_id`s so provenance stays
+    citable per file.
+    """
+    import sys
+    import types
+
+    # Install stub llama_cloud_services so the connector doesn't need the real dep.
+    class _StubDocument:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _StubLlamaParse:
+        def __init__(self, **kwargs: object) -> None:
+            self._pages = [_StubDocument("stub markdown page")]
+
+        async def aload_data(self, path: str) -> list[_StubDocument]:
+            return list(self._pages)
+
+    mod = types.ModuleType("llama_cloud_services")
+    mod.LlamaParse = _StubLlamaParse  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "llama_cloud_services", mod)
+    monkeypatch.setenv("LLAMA_CLOUD_API_KEY", "llx-fake")
+
+    from ontos.cli.main import _build_source_connector
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "report.pdf").write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "b" / "report.pdf").write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "notes.md").write_text("some notes")
+
+    connector, count = _build_source_connector(
+        tmp_path, pdf_backend="llamaparse", llama_api_key_env="LLAMA_CLOUD_API_KEY"
+    )
+    assert count == 3  # 1 md + 2 pdfs
+
+    docs = [d async for d in connector.iter_documents()]
+    ids = sorted(d.source_id for d in docs)
+    assert ids == ["a/report.pdf", "b/report.pdf", "notes.md"]
+    # No source_id leaks the absolute tmp_path prefix.
+    for d in docs:
+        assert str(tmp_path) not in d.source_id
+
+
 def test_build_source_connector_empty_dir_exits(tmp_path: Path) -> None:
     import typer as _typer
 
