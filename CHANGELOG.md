@@ -45,6 +45,33 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   obsolete `llama-index` + `llama-index-graph-stores-neo4j` pins
   (dead weight from an abandoned PropertyGraphIndex design).
 
+### Fixed
+- `#29` — CLI default `NetworkxStore` no longer loses facts between
+  `ontos ingest` and `ontos query` invocations. Facts now persist to
+  `~/.ontos/dev-store.pkl` by default; override via `--storage-path
+  PATH` or `ONTOS_STORAGE_PATH`. Pass `--storage-path ""` for explicit
+  in-memory (ephemeral) mode. Operators who stay ephemeral see a loud
+  stderr warning naming the data-loss consequence. Format is
+  Python-pickle, dev-only — regulated deploys still use the Neo4j
+  backend.
+
+### Added — storage persistence (#29)
+- `NetworkxStore(path=...)` — optional persistence to a local pickle
+  file. Load on construct, atomic save on `close()` (write to `.tmp`
+  then `replace`), magic-header + schema version
+  (`b"ONTOS-NX-STORE-V1\n"`) so a format change fails loud instead of
+  silently resetting state. Zero-arg `NetworkxStore()` still means
+  in-memory — no breaking change for the 55+ existing call sites.
+- `StorageError` on `ontos.storage.base` — raised when a store cannot
+  load, persist, or recover state (missing magic header, corrupt
+  payload, unrecognised payload shape). Reusable by future
+  file-backed backends.
+- `--storage-path PATH` CLI flag on `ontos ingest`, `ontos query`,
+  `ontos serve`.
+- `ONTOS_STORAGE_PATH` env var on `RuntimeConfig`.
+- `ontos ingest` now prints `facts persisted to <path>` after a
+  successful run so operators see where their data went.
+
 ### Known caveats
 - `LlamaParsePdfConnector` is BRIDGE-only — sends PDF bytes to
   `api.cloud.llamaindex.ai`. #39 tracks the sovereign `pypdf` in-VPC

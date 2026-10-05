@@ -41,8 +41,18 @@ class ToolResponse(BaseModel):
 
 def build_store(config: RuntimeConfig) -> GraphStore:
     if config.storage_backend == "networkx":
-        return NetworkxStore()
+        return NetworkxStore(path=config.storage_path)
     if config.storage_backend == "neo4j":
+        if config.storage_path is not None:
+            log.warning(
+                "storage-path-ignored-for-backend",
+                backend="neo4j",
+                storage_path=str(config.storage_path),
+                message=(
+                    "ONTOS_STORAGE_PATH / --storage-path is a NetworkxStore-only "
+                    "concept and is ignored for the Neo4j backend."
+                ),
+            )
         # Deferred import: `neo4j` is an optional extra so the base install
         # doesn't drag it in for dev/CI runs that use the in-memory backend.
         from ontos.storage.neo4j_store import Neo4jStore
