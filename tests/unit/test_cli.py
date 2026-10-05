@@ -278,6 +278,92 @@ def test_build_source_connector_llamaparse_mixed_dir(
     assert LlamaParsePdfConnector in kinds
 
 
+def test_build_source_connector_pypdf_single_pdf(tmp_path: Path) -> None:
+    """#39: --pdf-backend pypdf dispatches to PypdfConnector with
+    root=source_dir, no api key, no env lookup."""
+    from ontos.cli.main import _build_source_connector
+    from ontos.ingest import MultiConnector, PypdfConnector
+
+    (tmp_path / "report.pdf").write_bytes(b"%PDF-1.4\n")
+
+    connector, count = _build_source_connector(
+        tmp_path, pdf_backend="pypdf", llama_api_key_env="LLAMA_CLOUD_API_KEY"
+    )
+    assert isinstance(connector, MultiConnector)
+    assert count == 1
+    assert len(connector.sub_connectors) == 1
+    assert isinstance(connector.sub_connectors[0], PypdfConnector)
+
+
+def test_build_source_connector_pypdf_mixed_dir(tmp_path: Path) -> None:
+    """Mixed .md + .pdf with --pdf-backend pypdf → both sub-connectors."""
+    from ontos.cli.main import _build_source_connector
+    from ontos.ingest import MultiConnector, PypdfConnector, TextConnector
+
+    (tmp_path / "notes.md").write_text("some notes")
+    (tmp_path / "report.pdf").write_bytes(b"%PDF-1.4\n")
+
+    connector, count = _build_source_connector(
+        tmp_path, pdf_backend="pypdf", llama_api_key_env="LLAMA_CLOUD_API_KEY"
+    )
+    assert isinstance(connector, MultiConnector)
+    assert count == 2
+    kinds = {type(sc) for sc in connector.sub_connectors}
+    assert TextConnector in kinds
+    assert PypdfConnector in kinds
+
+
+def test_build_source_connector_pypdf_no_env_needed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sovereign path: LLAMA_CLOUD_API_KEY absence must not matter."""
+    from ontos.cli.main import _build_source_connector
+
+    monkeypatch.delenv("LLAMA_CLOUD_API_KEY", raising=False)
+    (tmp_path / "doc.pdf").write_bytes(b"%PDF-1.4\n")
+
+    connector, count = _build_source_connector(
+        tmp_path, pdf_backend="pypdf", llama_api_key_env="LLAMA_CLOUD_API_KEY"
+    )
+    assert count == 1  # succeeds without the env var
+
+
+def test_build_source_connector_unknown_backend_message_mentions_both(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Error on unknown --pdf-backend must list both supported values."""
+    import typer as _typer
+
+    from ontos.cli.main import _build_source_connector
+
+    (tmp_path / "doc.pdf").write_bytes(b"%PDF-1.4\n")
+
+    with pytest.raises(_typer.Exit):
+        _build_source_connector(
+            tmp_path, pdf_backend="nonsense", llama_api_key_env="LLAMA_CLOUD_API_KEY"
+        )
+    out = capsys.readouterr().out
+    assert "pypdf" in out
+    assert "llamaparse" in out
+
+
+def test_build_source_connector_missing_backend_message_mentions_both(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Error when PDFs present but --pdf-backend unset lists both choices."""
+    import typer as _typer
+
+    from ontos.cli.main import _build_source_connector
+
+    (tmp_path / "doc.pdf").write_bytes(b"%PDF-1.4\n")
+
+    with pytest.raises(_typer.Exit):
+        _build_source_connector(tmp_path, pdf_backend=None, llama_api_key_env="LLAMA_CLOUD_API_KEY")
+    out = capsys.readouterr().out
+    assert "pypdf" in out
+    assert "llamaparse" in out
+
+
 def test_build_source_connector_unknown_backend_exits(tmp_path: Path) -> None:
     import typer as _typer
 

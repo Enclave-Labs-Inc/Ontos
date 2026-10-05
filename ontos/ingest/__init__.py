@@ -8,6 +8,7 @@ connector produced the document.
 from ontos.ingest.base import Connector, ConnectorError, SourceDocument
 from ontos.ingest.llamacloud_pdf import LlamaParsePdfConnector
 from ontos.ingest.multi import MultiConnector
+from ontos.ingest.pypdf import PypdfConnector
 from ontos.ingest.text import TextConnector
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "ConnectorError",
     "LlamaParsePdfConnector",
     "MultiConnector",
+    "PypdfConnector",
     "SourceDocument",
     "TextConnector",
 ]

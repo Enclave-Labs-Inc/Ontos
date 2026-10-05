@@ -23,10 +23,15 @@ dependencies = [
 
 [project.optional-dependencies]
 neo4j = ["neo4j>=5.20"]
+# `pdf` pulls local `pypdf` for the sovereign in-VPC PDF ingest path
+# used by `PypdfConnector`. Zero network, text-based PDFs only. For
+# scanned / image-based PDFs install `llama` and use
+# `--pdf-backend llamaparse` (BRIDGE — document bytes leave the VPC).
+pdf = ["pypdf>=4.0"]
 # `llama` pulls the LlamaCloud hosted PDF→markdown parser used by
 # `LlamaParsePdfConnector`. BRIDGE connector — see docs/architecture.md
-# for the sovereignty posture. For in-VPC compliant PDF ingest, follow
-# the sovereign-pypdf-connector follow-up on GitHub.
+# for the sovereignty posture. For in-VPC compliant PDF ingest, use the
+# `pdf` extra and `--pdf-backend pypdf` instead.
 llama = ["llama-cloud-services>=0.2"]
 langchain = ["langchain>=0.3", "langchain-experimental>=0.3"]
 authz = ["openfga-sdk>=0.6"]
@@ -40,6 +45,7 @@ dev = [
     "types-networkx>=3.0",
     "types-PyYAML>=6.0",
     "neo4j>=5.20",
+    "pypdf>=4.0",
     "testcontainers[neo4j,postgres]>=4.8",
     "asyncpg>=0.30",
     "aiosqlite>=0.20",

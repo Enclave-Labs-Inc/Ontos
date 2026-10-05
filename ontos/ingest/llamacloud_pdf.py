@@ -8,10 +8,10 @@ that a pure-text parser (``pypdf``) cannot read, which in practice
 covers the majority of real-world document archives in finance,
 pharma, and legal.
 
-For in-VPC compliance, a sovereign ``PypdfConnector`` lands as a
-follow-up (text-only PDFs; local parsing). The pair gives operators
-the compliance trade-off explicitly: pick ``pypdf`` for sovereign;
-pick ``llamaparse`` when the content needs vision.
+For in-VPC compliance, use ``PypdfConnector`` (``--pdf-backend
+pypdf``) — sovereign, local, zero-network, text-only PDFs. The pair
+gives operators the compliance trade-off explicitly: pick ``pypdf``
+for sovereign; pick ``llamaparse`` when the content needs vision.
 
 The connector loads ``llama_cloud_services`` lazily so the base
 install stays slim — install the extra to enable it::
@@ -162,7 +162,7 @@ def _emit_bridge_warning_once(pdf_count: int) -> None:
         message=(
             "LlamaParsePdfConnector sends PDF bytes to "
             f"{_LLAMACLOUD_HOST} — BRIDGE connector, not sovereignty-safe. "
-            "Follow #39 for the in-VPC pypdf path."
+            "For in-VPC parsing use --pdf-backend pypdf (text-only PDFs)."
         ),
     )
 

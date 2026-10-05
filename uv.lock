@@ -912,6 +912,7 @@ dev = [
     { name = "asyncpg" },
     { name = "mypy" },
     { name = "neo4j" },
+    { name = "pypdf" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -933,6 +934,9 @@ neo4j = [
 openai = [
     { name = "openai" },
 ]
+pdf = [
+    { name = "pypdf" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -952,6 +956,8 @@ requires-dist = [
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.50" },
     { name = "openfga-sdk", marker = "extra == 'authz'", specifier = ">=0.6" },
     { name = "pydantic", specifier = ">=2.7" },
+    { name = "pypdf", marker = "extra == 'dev'", specifier = ">=4.0" },
+    { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
@@ -965,7 +971,7 @@ requires-dist = [
     { name = "types-networkx", marker = "extra == 'dev'", specifier = ">=3.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
-provides-extras = ["authz", "dev", "langchain", "llama", "neo4j", "openai"]
+provides-extras = ["authz", "dev", "langchain", "llama", "neo4j", "openai", "pdf"]
 
 [[package]]
 name = "exceptiongroup"
@@ -3016,6 +3022,15 @@ wheels = [
 [package.optional-dependencies]
 crypto = [
     { name = "cryptography" },
+]
+
+[[package]]
+name = "pypdf"
+version = "6.19.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/ac/63d71aaedb59acbcdef491e6ca6469165e3771c9c74358204818fd9bc5a6/pypdf-6.19.0.tar.gz", hash = "sha256:bbc43aca292369ccc6cbc8a921991ecf2538a3587ab5a116eff06c321d647155", size = 7033266, upload-time = "2026-09-16T09:32:05.946Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/2c/c43c03eaf630435f023f1dc61ec4a4a78951ad5530a62c71cc89bde307b7/pypdf-6.19.0-py3-none-any.whl", hash = "sha256:7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14", size = 395480, upload-time = "2026-09-16T09:32:04.087Z" },
 ]
 
 [[package]]

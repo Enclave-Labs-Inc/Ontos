@@ -84,7 +84,12 @@ ontos ingest \
     --pdf-backend llamaparse
 ```
 
-`--pdf-backend llamaparse` is a **BRIDGE** connector — document bytes leave the customer VPC on their way to `api.cloud.llamaindex.ai`. For in-VPC compliance, [#39](https://github.com/Enclave-Labs-Inc/Ontos/issues/39) tracks a sovereign `pypdf` backend (text-only PDFs; local parsing). Pure `.txt`/`.md` ingest requires no flag and no extra.
+Two backends ship:
+
+- **`--pdf-backend pypdf`** (install `[pdf]`) — sovereign in-VPC parsing via local `pypdf`. Zero network calls. Works on PDFs with an embedded text layer (typical office / finance / legal filings). Pick this when sovereignty matters.
+- **`--pdf-backend llamaparse`** (install `[llama]`) — BRIDGE, document bytes leave the customer VPC on their way to `api.cloud.llamaindex.ai`. Handles scanned / image-based PDFs via LlamaCloud's hosted vision API. Pick this only when the content actually needs vision — your `pypdf` run tells you so by failing with `"PypdfConnector got zero characters from X. The PDF is likely image-based; use --pdf-backend llamaparse ..."`.
+
+Pure `.txt`/`.md` ingest requires no flag and no extra.
 
 ### Ollama timeouts (0.3.0+)
 
