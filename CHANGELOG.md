@@ -14,7 +14,48 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
-Nothing yet. New work between releases lands here.
+0.3.0 track — UX unblockers from the 0.2.0 testing week.
+
+### Added
+- **`LlamaParsePdfConnector` (BRIDGE)** — ingest PDFs via LlamaCloud's
+  hosted vision API. Handles both text-based and scanned/image PDFs
+  that pure-text parsers cannot read. `pip install 'enclave-ontos[llama]'`
+  pulls the dep; `ontos ingest --source-dir corpus/ --pdf-backend llamaparse`
+  routes PDFs through the connector. First connector to lift the
+  `.txt`/`.md` restriction. Closes #28.
+- **`MultiConnector`** — composes multiple sub-connectors behind one
+  Connector-shaped seam. The CLI uses it to fan a mixed-type directory
+  (`.txt` + `.md` + `.pdf`) into the right per-type sub-connectors in
+  a single `ontos ingest` invocation. Pattern mirrors `CascadeResolver`.
+- **`ontos ingest --pdf-backend`** CLI flag (choices: `llamaparse`;
+  future-additive). Required when the source directory contains `.pdf`
+  files; omit for pure `.txt`/`.md` ingest. Fail-loud if PDFs are
+  present but the flag is unset — the pre-0.3.0 silent skip was the
+  #28 UX bug.
+- **`ontos ingest --llama-api-key-env`** CLI flag (default:
+  `LLAMA_CLOUD_API_KEY`) — names the env var holding the LlamaCloud
+  key. Keeps the key out of command-line / audit records.
+- First-use `structlog.warning` emitted whenever
+  `LlamaParsePdfConnector` is constructed: *"sends PDF bytes to
+  api.cloud.llamaindex.ai — BRIDGE connector, not sovereignty-safe."*
+  One line per process so compliance reviewers see it in `kubectl logs`.
+
+### Changed
+- `llama` extra now pulls `llama-cloud-services>=0.2` instead of the
+  obsolete `llama-index` + `llama-index-graph-stores-neo4j` pins
+  (dead weight from an abandoned PropertyGraphIndex design).
+
+### Known caveats
+- `LlamaParsePdfConnector` is BRIDGE-only — sends PDF bytes to
+  `api.cloud.llamaindex.ai`. #39 tracks the sovereign `pypdf` in-VPC
+  path for text-based PDFs (0.3.x follow-up).
+- No native OCR path yet — scanned PDFs require LlamaParse (BRIDGE).
+  A local Tesseract-based path is a potential follow-up if operators
+  ask.
+
+### Numbers
+- 314 unit + compliance tests pass (up from 281 at 0.2.0).
+- `ruff` + `ruff format --check` + `mypy --strict ontos` all clean.
 
 ## [0.2.0] - 2026-10-01 - correctness and vertical content
 

@@ -21,9 +21,12 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
+
+if TYPE_CHECKING:
+    from ontos.ingest import Connector, MultiConnector
 
 app = typer.Typer(
     name="ontos",
@@ -55,7 +58,7 @@ def ingest(
         typer.Option(
             "--source-dir",
             "-s",
-            help="Directory of .txt/.md files to ingest.",
+            help="Directory of .txt / .md / .pdf files to ingest.",
             exists=True,
             file_okay=False,
             dir_okay=True,
@@ -91,11 +94,29 @@ def ingest(
             help="fail_fast | skip_and_log",
         ),
     ] = "fail_fast",
+    pdf_backend: Annotated[
+        str | None,
+        typer.Option(
+            "--pdf-backend",
+            help=(
+                "PDF ingest backend. 'llamaparse' uses LlamaCloud's hosted "
+                "vision API (BRIDGE — sends PDF bytes off-prem). Required "
+                "when the source directory contains .pdf files; omit for "
+                "pure .txt/.md ingest."
+            ),
+        ),
+    ] = None,
+    llama_api_key_env: Annotated[
+        str,
+        typer.Option(
+            "--llama-api-key-env",
+            help="Env var holding the LlamaCloud API key.",
+        ),
+    ] = "LLAMA_CLOUD_API_KEY",
 ) -> None:
-    """Ingest a directory of text files via Ollama + the M4.a resolver cascade."""
+    """Ingest a directory of .txt / .md / .pdf files via Ollama + the resolver cascade."""
     # Deferred imports keep --help fast.
     from ontos.extraction import LlmExtractor
-    from ontos.ingest import TextConnector
     from ontos.llm import OllamaBackend
     from ontos.ontology import load_ontology
     from ontos.pipeline import ErrorPolicy, IngestPipeline
@@ -103,11 +124,14 @@ def ingest(
     from ontos.runtime.config import RuntimeConfig
     from ontos.runtime.server import build_store
 
-    documents = _read_source_dir(source_dir)
-    typer.echo(f"discovered {len(documents)} document(s) in {source_dir}")
+    connector, document_count = _build_source_connector(
+        source_dir,
+        pdf_backend=pdf_backend,
+        llama_api_key_env=llama_api_key_env,
+    )
+    typer.echo(f"discovered {document_count} document(s) in {source_dir}")
 
     ontology = load_ontology(ontology_path)
-    connector = TextConnector(documents)
     llm = OllamaBackend(ollama_model, base_url=ollama_url)
     extractor = LlmExtractor(llm, ontology)
     resolver = ExactMatchResolver()
@@ -228,17 +252,89 @@ def audit_verify(
     asyncio.run(_run())
 
 
+TEXT_EXTENSIONS = frozenset({".txt", ".md"})
+PDF_EXTENSIONS = frozenset({".pdf"})
+
+
 def _read_source_dir(source_dir: Path) -> dict[str, str]:
     """Load every .txt / .md file under source_dir as a document keyed on relative path."""
     docs: dict[str, str] = {}
     for path in source_dir.rglob("*"):
         if not path.is_file():
             continue
-        if path.suffix.lower() not in {".txt", ".md"}:
+        if path.suffix.lower() not in TEXT_EXTENSIONS:
             continue
         rel = path.relative_to(source_dir).as_posix()
         docs[rel] = path.read_text(encoding="utf-8", errors="replace")
     return docs
+
+
+def _collect_pdf_paths(source_dir: Path) -> list[Path]:
+    return sorted(
+        p for p in source_dir.rglob("*") if p.is_file() and p.suffix.lower() in PDF_EXTENSIONS
+    )
+
+
+def _build_source_connector(
+    source_dir: Path,
+    *,
+    pdf_backend: str | None,
+    llama_api_key_env: str,
+) -> tuple[MultiConnector, int]:
+    """Walk source_dir, dispatch per-extension sub-connectors, wrap in MultiConnector.
+
+    Fails loud if ``.pdf`` files are present but ``--pdf-backend`` is not set,
+    rather than silently skipping them. The old behavior (silent skip) was the
+    #28 UX bug the operator hit during the 0.2.0 testing week.
+    """
+    from ontos.ingest import LlamaParsePdfConnector, MultiConnector, TextConnector
+
+    sub_connectors: list[Connector] = []
+    document_count = 0
+
+    text_docs = _read_source_dir(source_dir)
+    if text_docs:
+        sub_connectors.append(TextConnector(text_docs))
+        document_count += len(text_docs)
+
+    pdf_paths = _collect_pdf_paths(source_dir)
+    if pdf_paths:
+        if pdf_backend is None:
+            typer.secho(
+                f"found {len(pdf_paths)} PDF file(s) in {source_dir} but "
+                "--pdf-backend is not set. Pass --pdf-backend llamaparse "
+                "to ingest PDFs via LlamaCloud (BRIDGE), or remove the "
+                "PDFs from the source directory.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=2)
+
+        if pdf_backend == "llamaparse":
+            api_key = os.environ.get(llama_api_key_env, "")
+            if not api_key:
+                typer.secho(
+                    f"--pdf-backend llamaparse requires {llama_api_key_env} "
+                    "to be set in the environment.",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(code=2)
+            sub_connectors.append(LlamaParsePdfConnector(pdf_paths, api_key=api_key))
+            document_count += len(pdf_paths)
+        else:
+            typer.secho(
+                f"unknown --pdf-backend {pdf_backend!r}. Supported: 'llamaparse'.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=2)
+
+    if not sub_connectors:
+        typer.secho(
+            f"no .txt / .md / .pdf files found under {source_dir}.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    return MultiConnector(sub_connectors), document_count
 
 
 if __name__ == "__main__":
