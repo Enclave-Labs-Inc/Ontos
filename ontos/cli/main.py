@@ -124,6 +124,18 @@ def ingest(
         str,
         typer.Option("--ollama-url", help="Ollama base URL."),
     ] = "http://localhost:11434",
+    ollama_timeout: Annotated[
+        float,
+        typer.Option(
+            "--ollama-timeout",
+            help=(
+                "Ollama request timeout in seconds (default 60). Long "
+                "docs or cold-start model loads may need 180-300. First "
+                "load of a model can take 30-60s; warm it beforehand "
+                "via `ollama run <model>` to avoid cold-start timeouts."
+            ),
+        ),
+    ] = 60.0,
     error_policy: Annotated[
         str,
         typer.Option(
@@ -184,7 +196,7 @@ def ingest(
     _warn_if_ephemeral(resolved_path, cfg.storage_backend)
 
     ontology = load_ontology(ontology_path)
-    llm = OllamaBackend(ollama_model, base_url=ollama_url)
+    llm = OllamaBackend(ollama_model, base_url=ollama_url, timeout_s=ollama_timeout)
     extractor = LlmExtractor(llm, ontology)
     resolver = ExactMatchResolver()
     store = build_store(cfg)
@@ -230,6 +242,17 @@ def query(
     ],
     ollama_model: Annotated[str, typer.Option("--ollama-model")] = "llama3.1:8b",
     ollama_url: Annotated[str, typer.Option("--ollama-url")] = "http://localhost:11434",
+    ollama_timeout: Annotated[
+        float,
+        typer.Option(
+            "--ollama-timeout",
+            help=(
+                "Ollama request timeout in seconds (default 60). Raise "
+                "it if the planner LLM is slow on first call (model "
+                "cold-start) — warm with `ollama run <model>` to avoid."
+            ),
+        ),
+    ] = 60.0,
     storage_path: Annotated[
         str | None,
         typer.Option(
@@ -255,7 +278,7 @@ def query(
     _warn_if_ephemeral(resolved_path, cfg.storage_backend)
 
     ontology = load_ontology(ontology_path)
-    llm = OllamaBackend(ollama_model, base_url=ollama_url)
+    llm = OllamaBackend(ollama_model, base_url=ollama_url, timeout_s=ollama_timeout)
     planner = LlmPlanner(llm, ontology)
     executor = DeterministicExecutor()
     store = build_store(cfg)

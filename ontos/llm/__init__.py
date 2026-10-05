@@ -9,10 +9,11 @@ for regulated deploys — behind the `openai` optional extra.
 benchmarks pass current frontier models.
 """
 
-from ontos.llm.ollama import OllamaBackend
+from ontos.llm.ollama import OllamaBackend, OllamaTimeoutError
 from ontos.llm.openai import OpenAIBackend
 
 __all__ = [
     "OllamaBackend",
+    "OllamaTimeoutError",
     "OpenAIBackend",
 ]

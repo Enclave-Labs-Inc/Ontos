@@ -144,6 +144,23 @@ async def test_llm_planner_wraps_backend_exception_as_planner_error(
         await planner.plan("anything", ontology)
 
 
+async def test_llm_planner_wraps_ollama_timeout_with_actionable_message(
+    ontology: Ontology,
+) -> None:
+    """#30: planner-side timeout gets a dedicated message so operators
+    see 'planner LLM timed out' + the --ollama-timeout knob, not a
+    generic 'LLM backend failed' with buried httpx jargon."""
+    from ontos.llm import OllamaTimeoutError
+
+    planner = LlmPlanner(
+        FakePlannerBackend([OllamaTimeoutError(60.0, "http://localhost:11434/api/chat")]),
+        ontology,
+    )
+    with pytest.raises(PlannerError, match="timed out") as exc:
+        await planner.plan("q", ontology)
+    assert "--ollama-timeout" in str(exc.value)
+
+
 async def test_llm_planner_rejects_schema_violation_from_backend(
     ontology: Ontology,
 ) -> None:

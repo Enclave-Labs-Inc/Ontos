@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from ontos.extraction import LLMBackend, RawTriple
-from ontos.llm import OllamaBackend, OpenAIBackend
+from ontos.llm import OllamaBackend, OllamaTimeoutError, OpenAIBackend
 from ontos.ontology import Ontology, load_ontology
 from ontos.planner import LLMPlannerBackend, SeedByEntity, SeedByKeyword
 
@@ -46,6 +46,17 @@ class _MockOllamaTransport(httpx.AsyncBaseTransport):
 
 def _ollama_client(response_json: str) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=_MockOllamaTransport(response_json))
+
+
+class _TimeoutTransport(httpx.AsyncBaseTransport):
+    """Raises httpx.ReadTimeout on every request — simulates a slow Ollama."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("mock timeout", request=request)
+
+
+def _timeout_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=_TimeoutTransport())
 
 
 def test_ollama_conforms_to_both_protocols() -> None:
@@ -115,6 +126,32 @@ async def test_ollama_unknown_seed_kind_raises(ontology: Ontology) -> None:
     backend = OllamaBackend("llama3.1:8b", client=_ollama_client(canned))
     with pytest.raises(ValueError, match="unknown seed kind"):
         await backend.structured_plan("q", ontology)
+
+
+async def test_ollama_structured_extract_wraps_read_timeout(ontology: Ontology) -> None:
+    """#30: httpx.ReadTimeout → OllamaTimeoutError, with message naming the knob."""
+    backend = OllamaBackend("llama3.1:8b", client=_timeout_client(), timeout_s=60.0)
+    with pytest.raises(OllamaTimeoutError) as exc:
+        await backend.structured_extract("some text", ontology)
+    msg = str(exc.value)
+    assert "60.0s" in msg
+    assert "--ollama-timeout" in msg
+    assert "api/chat" in msg
+    assert exc.value.timeout_s == 60.0
+
+
+async def test_ollama_structured_plan_wraps_read_timeout(ontology: Ontology) -> None:
+    """Same wrap for the planner-side code path."""
+    backend = OllamaBackend("llama3.1:8b", client=_timeout_client(), timeout_s=15.5)
+    with pytest.raises(OllamaTimeoutError) as exc:
+        await backend.structured_plan("q", ontology)
+    assert "15.5s" in str(exc.value)
+
+
+def test_ollama_timeout_s_defaults_to_sixty_seconds() -> None:
+    """Protect against accidental default drift."""
+    backend = OllamaBackend("llama3.1:8b")
+    assert backend._timeout_s == 60.0  # noqa: SLF001 — explicit regression guard
 
 
 # -----------------------------------------------------------------------------

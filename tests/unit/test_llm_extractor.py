@@ -227,14 +227,49 @@ async def test_every_fact_references_an_entity_in_the_result(ontology: Ontology)
         assert fact.object_id in entity_ids
 
 
-async def test_upstream_exception_propagates_untouched(ontology: Ontology) -> None:
+async def test_upstream_exception_wraps_as_extraction_error(ontology: Ontology) -> None:
+    """#30: raw backend exceptions get wrapped so IngestPipeline's error
+    policy handles them cleanly. Pre-#30 they escaped as raw httpx /
+    provider stack traces."""
+
     class BoomError(RuntimeError):
         pass
 
     llm = FakeLLM([BoomError("upstream API down")])
     extractor = LlmExtractor(llm, ontology)
-    with pytest.raises(BoomError):
+    with pytest.raises(ExtractionError, match="LLM backend failed") as exc:
         await extractor.extract(ExtractionInput(source_id="d", text="t"))
+    # Original exception preserved as __cause__ for debugging.
+    assert isinstance(exc.value.__cause__, BoomError)
+
+
+async def test_ollama_timeout_wraps_as_extraction_error_naming_knob(
+    ontology: Ontology,
+) -> None:
+    """#30: OllamaTimeoutError gets a dedicated branch so its message
+    (which already names --ollama-timeout) survives into the
+    operator-visible ExtractionError."""
+    from ontos.llm import OllamaTimeoutError
+
+    llm = FakeLLM([OllamaTimeoutError(60.0, "http://localhost:11434/api/chat")])
+    extractor = LlmExtractor(llm, ontology)
+    with pytest.raises(ExtractionError, match="--ollama-timeout") as exc:
+        await extractor.extract(ExtractionInput(source_id="doc1", text="t"))
+    assert "60.0s" in str(exc.value)
+    assert isinstance(exc.value.__cause__, OllamaTimeoutError)
+
+
+async def test_extraction_error_from_backend_is_not_rewrapped(
+    ontology: Ontology,
+) -> None:
+    """ExtractionError from a backend passes through unchanged — don't
+    double-wrap."""
+    original = ExtractionError(source_id="d", message="backend raised", sample="t")
+    llm = FakeLLM([original])
+    extractor = LlmExtractor(llm, ontology)
+    with pytest.raises(ExtractionError) as exc:
+        await extractor.extract(ExtractionInput(source_id="d", text="t"))
+    assert exc.value is original
 
 
 async def test_extraction_input_source_id_becomes_provenance_source_id(

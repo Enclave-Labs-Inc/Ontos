@@ -39,9 +39,112 @@ def test_ingest_help_documents_ontology_and_source_options() -> None:
     assert "--source-dir" in result.stdout
     assert "--ontology" in result.stdout
     assert "--ollama-model" in result.stdout
+    assert "--ollama-timeout" in result.stdout
     assert "--error-policy" in result.stdout
     assert "--pdf-backend" in result.stdout
     assert "--llama-api-key-env" in result.stdout
+
+
+def test_query_help_documents_ollama_timeout() -> None:
+    result = runner.invoke(app, ["query", "--help"])
+    assert result.exit_code == 0
+    assert "--ollama-timeout" in result.stdout
+
+
+def test_ingest_threads_ollama_timeout_into_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#30: --ollama-timeout 180 must land as OllamaBackend(timeout_s=180.0)."""
+    import ontos.extraction
+    import ontos.llm
+
+    captured_kwargs: dict[str, object] = {}
+
+    class _CapturingLLM:
+        def __init__(self, model: str, **kwargs: object) -> None:
+            captured_kwargs["model"] = model
+            captured_kwargs.update(kwargs)
+
+    class _StubExtractor:
+        def __init__(self, llm: object, ontology: object) -> None:
+            pass
+
+        async def extract(self, inp: object) -> object:
+            import types
+
+            return types.SimpleNamespace(facts=[], entities=[], warnings=[])
+
+    source_dir = tmp_path / "corpus"
+    source_dir.mkdir()
+    (source_dir / "doc.md").write_text("placeholder")
+    pkl = tmp_path / "store.pkl"
+
+    monkeypatch.setattr(ontos.llm, "OllamaBackend", _CapturingLLM)
+    monkeypatch.setattr(ontos.extraction, "LlmExtractor", _StubExtractor)
+    monkeypatch.delenv("ONTOS_STORAGE_PATH", raising=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "ingest",
+            "--source-dir",
+            str(source_dir),
+            "--ontology",
+            str(STARTER_PATH),
+            "--ollama-timeout",
+            "180",
+            "--storage-path",
+            str(pkl),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert captured_kwargs["timeout_s"] == 180.0
+
+
+def test_query_threads_ollama_timeout_into_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mirror of the ingest test for the query path."""
+    import ontos.llm
+    import ontos.planner
+    from ontos.planner import Plan, SeedByEntity
+
+    captured_kwargs: dict[str, object] = {}
+
+    class _CapturingLLM:
+        def __init__(self, model: str, **kwargs: object) -> None:
+            captured_kwargs["model"] = model
+            captured_kwargs.update(kwargs)
+
+    class _StubPlanner:
+        def __init__(self, llm: object, ontology: object) -> None:
+            pass
+
+        async def plan(self, question: str, ontology: object) -> Plan:
+            return Plan.build(
+                seed=SeedByEntity(entity_id="x"),
+                steps=[],
+                ontology=ontology,  # type: ignore[arg-type]
+            )
+
+    monkeypatch.setattr(ontos.llm, "OllamaBackend", _CapturingLLM)
+    monkeypatch.setattr(ontos.planner, "LlmPlanner", _StubPlanner)
+
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "anything",
+            "--ontology",
+            str(STARTER_PATH),
+            "--ollama-timeout",
+            "240.5",
+            "--storage-path",
+            "",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert captured_kwargs["timeout_s"] == 240.5
 
 
 def test_query_help_requires_ontology() -> None:

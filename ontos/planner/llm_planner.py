@@ -77,6 +77,13 @@ class LlmPlanner:
         except PlannerError:
             raise
         except Exception as exc:  # noqa: BLE001 — see PlannerError contract
+            # Deferred import keeps the planner's Scribe-drop-in boundary
+            # free of Ollama coupling at construction time; this is
+            # Ollama-specific message sugar, not a planner dependency.
+            from ontos.llm.ollama import OllamaTimeoutError
+
+            if isinstance(exc, OllamaTimeoutError):
+                raise PlannerError(question, f"planner LLM timed out: {exc}") from exc
             raise PlannerError(question, f"LLM backend failed: {exc}") from exc
 
         try:
