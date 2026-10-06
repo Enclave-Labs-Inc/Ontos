@@ -14,7 +14,57 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
-Nothing yet. New work between releases lands here.
+0.4.0 track — storage-model foundations for exports and
+ontology-version provenance.
+
+### Added — Entity.type persistence (#38)
+- `GraphStore.upsert_entity` Protocol method — idempotent entity
+  write with MERGE semantics. Accepts optional `acl_ref` so entities
+  extracted from restricted documents inherit the doc's ACL on
+  first write. Implemented in both `NetworkxStore` and `Neo4jStore`;
+  both fire a `structlog.warning` ("entity-type-overwrite") when
+  the type changes between writes so operators can audit the drift
+  against the resolver's `MergeRecord`.
+- `IngestPipeline.run()` now calls `upsert_entity` for every
+  extracted entity before the fact-write loop, threading
+  `doc.acl_ref` through. Pre-#38, extracted `Entity` objects were
+  seen by the resolver (for merge counts) and then dropped on the
+  floor — the resulting graph had untyped nodes with no provenance
+  pointer. Unblocks #32 (Neo4j Bloom + exports) and sets the pattern
+  #34 (ontology-version stamp) will follow.
+- Neo4j: new `entity_type_idx` on `(:Entity).type` so #32's
+  type-filtered exports stay O(matching-nodes) on 10k+ node
+  graphs. Lazy migration — existing untyped nodes get `type` on
+  the next ingest that touches them; no destructive one-shot.
+- `Entity.properties` on Neo4j are stored as a **JSON-encoded
+  string** (not a map) because Neo4j node properties can only be
+  primitives or arrays of primitives. Readers decode via
+  `json.loads(n.properties)`.
+- `NetworkxStore` nodes now carry `type`, `canonical_name`,
+  `aliases`, `properties`, `acl_ref`, `provenance_source_id`,
+  `provenance_extractor_id` attrs. Pickle format unchanged
+  (`nx.MultiDiGraph` serializes node attrs natively) — no
+  `ONTOS-NX-STORE-V1` magic bump; existing dev-store pickles
+  stay readable.
+- **ACL semantics are first-write-wins.** An entity first stamped
+  by a restricted doc stays restricted even when a later public
+  ingest re-upserts it — prevents a silent downgrade that would
+  expose the entity's name via #32's exporter. Operators who need
+  to broaden an entity's ACL use a dedicated admin path, not
+  routine ingest.
+- **Read-side ACL contract** documented on the Protocol: backends
+  that persist entity attrs MUST filter at read time on `acl_ref`
+  the same way `search` / `traverse` / `facts_for_entity` already
+  do for facts. Returning an entity's attrs to a caller who can't
+  see any fact citing it would leak the entity's existence — the
+  permission-aware-traversal invariant forbids that.
+
+### Changed — Protocol surface
+- `GraphStore` Protocol gains one method (`upsert_entity`).
+  Additive, but any third-party store implementation (we ship
+  `NetworkxStore` + `Neo4jStore`) will need to adopt it. No
+  existing CI tests fail — no test implements `GraphStore`
+  outside the shipped backends.
 
 ## [0.3.0] - 2026-10-06 - UX unblockers
 

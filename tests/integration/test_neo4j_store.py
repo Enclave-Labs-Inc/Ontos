@@ -330,3 +330,112 @@ async def test_initialize_is_idempotent(store: Neo4jStore) -> None:
     # Calling initialize a second time must not raise (indexes have IF NOT EXISTS).
     await store.initialize()
     await store.initialize()
+
+
+# ---------------------------------------------------------------------------
+# #38 — upsert_entity + entity_type_idx
+# ---------------------------------------------------------------------------
+
+
+async def test_upsert_entity_writes_attrs_including_properties_as_json(
+    store: Neo4jStore,
+) -> None:
+    """#38 PR-review regression: `properties` is a dict, and Neo4j rejects
+    map-shaped node properties. Must be JSON-encoded on write and decode
+    cleanly."""
+    import json
+
+    from ontos.runtime.models import Entity
+
+    e = Entity(
+        id="alice",
+        type="Person",
+        canonical_name="Alice",
+        aliases=["Alice W."],
+        properties={"email": "alice@example.com", "team": "research"},
+        provenance=Provenance(
+            source_id="doc1",
+            extractor_id="test",
+            extractor_version="0",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+    )
+    await store.upsert_entity(e, acl_ref="acl:finance")
+
+    async with store._driver.session(database=store._database) as session:  # noqa: SLF001
+        result = await session.run("MATCH (n:Entity {id: 'alice'}) RETURN n")
+        record = await result.single()
+        assert record is not None
+        node = record["n"]
+        assert node["type"] == "Person"
+        assert node["canonical_name"] == "Alice"
+        assert list(node["aliases"]) == ["Alice W."]
+        # properties stored as JSON string, decodable back to dict
+        assert json.loads(node["properties"]) == {
+            "email": "alice@example.com",
+            "team": "research",
+        }
+        assert node["acl_ref"] == "acl:finance"
+
+
+async def test_upsert_entity_is_idempotent_in_neo4j(store: Neo4jStore) -> None:
+    from ontos.runtime.models import Entity
+
+    e = Entity(
+        id="alice",
+        type="Person",
+        canonical_name="Alice",
+        provenance=Provenance(
+            source_id="doc1",
+            extractor_id="test",
+            extractor_version="0",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+    )
+    await store.upsert_entity(e)
+    await store.upsert_entity(e)
+
+    async with store._driver.session(database=store._database) as session:  # noqa: SLF001
+        result = await session.run("MATCH (n:Entity {id: 'alice'}) RETURN count(n) AS c")
+        record = await result.single()
+        assert record is not None
+        assert record["c"] == 1
+
+
+async def test_upsert_entity_acl_is_first_write_wins_in_neo4j(
+    store: Neo4jStore,
+) -> None:
+    """A later public ingest must not downgrade a prior restricted stamp."""
+    from ontos.runtime.models import Entity
+
+    e = Entity(
+        id="alice",
+        type="Person",
+        canonical_name="Alice",
+        provenance=Provenance(
+            source_id="doc1",
+            extractor_id="test",
+            extractor_version="0",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+    )
+    await store.upsert_entity(e, acl_ref="acl:finance")
+    await store.upsert_entity(e, acl_ref=None)
+
+    async with store._driver.session(database=store._database) as session:  # noqa: SLF001
+        result = await session.run("MATCH (n:Entity {id: 'alice'}) RETURN n.acl_ref AS acl")
+        record = await result.single()
+        assert record is not None
+        assert record["acl"] == "acl:finance"
+
+
+async def test_entity_type_idx_exists_after_initialize(store: Neo4jStore) -> None:
+    """#38 adds an index on (:Entity).type so #32's type-filtered reads
+    stay O(matching-nodes). Verify it exists after initialize()."""
+    async with store._driver.session(database=store._database) as session:  # noqa: SLF001
+        result = await session.run("SHOW INDEXES WHERE name = 'entity_type_idx'")
+        records = [r async for r in result]
+        assert len(records) == 1

@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Literal, Protocol
 from uuid import UUID
 
-from ontos.runtime.models import Fact
+from ontos.runtime.models import Entity, Fact
 
 
 class GraphStore(Protocol):
@@ -35,6 +35,37 @@ class GraphStore(Protocol):
     """
 
     async def add_fact(self, fact: Fact) -> None: ...
+
+    async def upsert_entity(self, entity: Entity, *, acl_ref: str | None = None) -> None:
+        """Idempotent entity write.
+
+        Stores ``type``, ``canonical_name``, ``aliases``,
+        ``properties``, a provenance pointer, and an optional
+        ``acl_ref`` on the entity node. Last-write-wins on repeated
+        upserts for every attribute **except** ``acl_ref``, which is
+        first-write-wins: an entity first stamped by a restricted
+        document stays restricted even when a later public ingest
+        re-upserts it. Operators who need to broaden an entity's ACL
+        use a dedicated admin path, not routine ingest.
+
+        Entity properties are not bitemporal facts and have no
+        supersession policy. Callers that need change history use
+        the resolver's ``MergeRecord`` audit trail, not this seam.
+
+        MUST be MERGE-based: re-ingesting the same entity never
+        duplicates nodes. ``IngestPipeline.run`` calls this before
+        ``add_fact`` so every ``Fact.subject_id`` / ``Fact.object_id``
+        has a backing typed node by the time the fact lands.
+
+        **Read-side ACL contract (CLAUDE.md invariant):** backends
+        that persist entity attrs (name, aliases, properties) MUST
+        filter at read time on ``acl_ref`` the same way ``search`` /
+        ``traverse`` / ``facts_for_entity`` already do for facts.
+        Returning an entity's attrs to a caller who can't see any
+        fact citing it would leak the entity's existence — the
+        permission-aware-traversal invariant forbids that.
+        """
+        ...
 
     async def close_fact(
         self,
