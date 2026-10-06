@@ -43,7 +43,7 @@ import structlog
 
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
-from ontos.storage.base import StorageError
+from ontos.storage.base import CrossAclUpsertError, StorageError
 
 log = structlog.get_logger(__name__)
 
@@ -218,10 +218,34 @@ class NetworkxStore:
         # second-process read sees these values without any format bump.
         existing_attrs = self._graph.nodes.get(entity.id, {})
         existing_type = existing_attrs.get("type")
+        existing_acl = existing_attrs.get("acl_ref")
+
+        # #48: fail-loud on cross-ACL overwrite. Pre-#48 silently kept
+        # the stored ACL but overwrote attrs — letting one scope's
+        # attrs become readable under another scope's ACL. Attrs are
+        # NOT touched when this fires; no partial write. The audit
+        # structlog line gives compliance operators an auditable
+        # record of attempted boundary crossings without parsing
+        # exception stack traces.
+        if existing_acl is not None and existing_acl != acl_ref:
+            log.warning(
+                "cross-acl-upsert-rejected",
+                entity_id=entity.id,
+                stored_acl=existing_acl,
+                attempted_acl=acl_ref,
+                attempted_canonical_name=entity.canonical_name,
+            )
+            raise CrossAclUpsertError(
+                entity_id=entity.id,
+                stored_acl=existing_acl,
+                attempted_acl=acl_ref,
+            )
+
         if existing_type is not None and existing_type != entity.type:
-            # Last-write-wins is the stored contract, but surface the
-            # type drift so operators can audit a resolver bug or an
-            # upstream schema change rather than seeing silent overwrite.
+            # Last-write-wins is the stored contract for type, but
+            # surface the drift so operators can audit a resolver bug
+            # or an upstream schema change rather than seeing silent
+            # overwrite.
             log.warning(
                 "entity-type-overwrite",
                 entity_id=entity.id,
@@ -229,11 +253,10 @@ class NetworkxStore:
                 new_type=entity.type,
                 canonical_name=entity.canonical_name,
             )
-        # ACL is first-write-wins: a restricted doc's stamp persists
-        # even when a later public ingest re-upserts the same entity.
-        # Avoids a silent downgrade that would expose a previously-
-        # restricted entity's name via #32's exporter.
-        effective_acl = existing_attrs.get("acl_ref") or acl_ref
+
+        # Safe write: same-ACL re-write or None → X upgrade. ACL
+        # stays stable, attrs follow last-write-wins.
+        effective_acl = existing_acl if existing_acl is not None else acl_ref
         self._graph.add_node(
             entity.id,
             type=entity.type,

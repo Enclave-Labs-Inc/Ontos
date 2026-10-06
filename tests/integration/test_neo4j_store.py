@@ -404,16 +404,20 @@ async def test_upsert_entity_is_idempotent_in_neo4j(store: Neo4jStore) -> None:
         assert record["c"] == 1
 
 
-async def test_upsert_entity_acl_is_first_write_wins_in_neo4j(
-    store: Neo4jStore,
-) -> None:
-    """A later public ingest must not downgrade a prior restricted stamp."""
-    from ontos.runtime.models import Entity
+async def test_cross_acl_upsert_raises_in_neo4j(store: Neo4jStore) -> None:
+    """#48: cross-ACL re-upsert now raises CrossAclUpsertError in Neo4j
+    too; the two-query transaction rolls back so no partial state
+    lands."""
+    import pytest as _pytest
 
-    e = Entity(
+    from ontos.runtime.models import Entity
+    from ontos.storage.base import CrossAclUpsertError
+
+    e_fin = Entity(
         id="alice",
         type="Person",
-        canonical_name="Alice",
+        canonical_name="Alice Finance",
+        properties={"dept": "finance"},
         provenance=Provenance(
             source_id="doc1",
             extractor_id="test",
@@ -422,14 +426,72 @@ async def test_upsert_entity_acl_is_first_write_wins_in_neo4j(
             confidence_score=1.0,
         ),
     )
-    await store.upsert_entity(e, acl_ref="acl:finance")
-    await store.upsert_entity(e, acl_ref=None)
+    e_hr = Entity(
+        id="alice",
+        type="Person",
+        canonical_name="Alice HR",
+        properties={"dept": "hr"},
+        provenance=e_fin.provenance,
+    )
+    await store.upsert_entity(e_fin, acl_ref="acl:finance")
+
+    # Downgrade (X → None) raises.
+    with _pytest.raises(CrossAclUpsertError):
+        await store.upsert_entity(e_fin, acl_ref=None)
+
+    # Cross-label (X → Y) raises.
+    with _pytest.raises(CrossAclUpsertError):
+        await store.upsert_entity(e_hr, acl_ref="acl:hr")
+
+
+async def test_neo4j_cross_acl_check_is_atomic(store: Neo4jStore) -> None:
+    """#48: after a rejected cross-ACL write, the node's attrs are the
+    first-write values — the Neo4j transaction rolled back cleanly, no
+    partial update."""
+    import json
+
+    import pytest as _pytest
+
+    from ontos.runtime.models import Entity
+    from ontos.storage.base import CrossAclUpsertError
+
+    prov = Provenance(
+        source_id="doc1",
+        extractor_id="test",
+        extractor_version="0",
+        confidence=Confidence.EXTRACTED,
+        confidence_score=1.0,
+    )
+    await store.upsert_entity(
+        Entity(
+            id="alice",
+            type="Person",
+            canonical_name="Alice Finance",
+            properties={"dept": "finance"},
+            provenance=prov,
+        ),
+        acl_ref="acl:finance",
+    )
+    with _pytest.raises(CrossAclUpsertError):
+        await store.upsert_entity(
+            Entity(
+                id="alice",
+                type="Person",
+                canonical_name="Alice HR",
+                properties={"dept": "hr"},
+                provenance=prov,
+            ),
+            acl_ref="acl:hr",
+        )
 
     async with store._driver.session(database=store._database) as session:  # noqa: SLF001
-        result = await session.run("MATCH (n:Entity {id: 'alice'}) RETURN n.acl_ref AS acl")
+        result = await session.run("MATCH (n:Entity {id: 'alice'}) RETURN n")
         record = await result.single()
         assert record is not None
-        assert record["acl"] == "acl:finance"
+        node = record["n"]
+        assert node["acl_ref"] == "acl:finance"
+        assert node["canonical_name"] == "Alice Finance"
+        assert json.loads(node["properties"]) == {"dept": "finance"}
 
 
 async def test_entity_type_idx_exists_after_initialize(store: Neo4jStore) -> None:

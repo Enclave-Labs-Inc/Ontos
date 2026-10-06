@@ -29,7 +29,7 @@ from ontos.ingest import Connector
 from ontos.ontology import Ontology
 from ontos.resolver import Resolver
 from ontos.runtime.models import Fact
-from ontos.storage.base import GraphStore
+from ontos.storage.base import CrossAclUpsertError, GraphStore
 from ontos.supersession import (
     CardinalitySupersessionPolicy,
     SupersessionPolicy,
@@ -148,9 +148,18 @@ class IngestPipeline:
             # Propagate the doc's ACL to the entity on first write so
             # entities extracted only from restricted docs don't leak
             # via a future entity-attribute read path (#32's exporter).
-            # upsert_entity itself enforces first-write-wins on acl_ref.
-            for entity in extraction.entities:
-                await self._store.upsert_entity(entity, acl_ref=doc.acl_ref)
+            # #48: cross-ACL conflicts raise CrossAclUpsertError. Route
+            # through the existing ErrorPolicy exactly like ExtractionError
+            # above — whole-doc skip under SKIP_AND_LOG preserves the
+            # "every fact subject/object has a typed node" invariant.
+            try:
+                for entity in extraction.entities:
+                    await self._store.upsert_entity(entity, acl_ref=doc.acl_ref)
+            except CrossAclUpsertError as exc:
+                if self._error_policy is ErrorPolicy.FAIL_FAST:
+                    raise
+                errors.append(IngestError(source_id=doc.source_id, reason=str(exc)))
+                continue
 
             if self._resolver is not None and extraction.entities:
                 resolution = await self._resolver.resolve(list(extraction.entities))

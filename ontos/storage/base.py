@@ -38,25 +38,39 @@ class GraphStore(Protocol):
     async def add_fact(self, fact: Fact) -> None: ...
 
     async def upsert_entity(self, entity: Entity, *, acl_ref: str | None = None) -> None:
-        """Idempotent entity write.
+        """Idempotent entity write with cross-ACL protection.
 
         Stores ``type``, ``canonical_name``, ``aliases``,
         ``properties``, a provenance pointer, and an optional
-        ``acl_ref`` on the entity node. Last-write-wins on repeated
-        upserts for every attribute **except** ``acl_ref``, which is
-        first-write-wins: an entity first stamped by a restricted
-        document stays restricted even when a later public ingest
-        re-upserts it. Operators who need to broaden an entity's ACL
-        use a dedicated admin path, not routine ingest.
+        ``acl_ref`` on the entity node. MUST be MERGE-based:
+        re-ingesting the same entity never duplicates nodes.
+        ``IngestPipeline.run`` calls this before ``add_fact`` so
+        every ``Fact.subject_id`` / ``Fact.object_id`` has a
+        backing typed node by the time the fact lands.
+
+        **ACL semantics (#48):**
+
+        =================  =================  =================================
+        Stored ``acl_ref`` New ``acl_ref``    Action
+        =================  =================  =================================
+        ``None``           ``None``           Last-write-wins on attrs
+        ``None``           ``X``              Upgrade: stamp X + update attrs
+        ``X``              ``X``              Last-write-wins on attrs
+        ``X``              ``None``           Raise ``CrossAclUpsertError``
+        ``X``              ``Y`` ≠ ``X``      Raise ``CrossAclUpsertError``
+        =================  =================  =================================
+
+        Rationale: pre-#48 the ACL was first-write-wins but attrs
+        were last-write-wins, which let attrs from one scope become
+        readable under another scope's ACL (Aleksandra's #48 repro).
+        The new contract keeps the ACL stable and rejects cross-scope
+        attr overwrites atomically — no partial writes. Operators
+        hitting ``CrossAclUpsertError`` have a resolver bug or need
+        a dedicated admin path for multi-tenant merges.
 
         Entity properties are not bitemporal facts and have no
         supersession policy. Callers that need change history use
         the resolver's ``MergeRecord`` audit trail, not this seam.
-
-        MUST be MERGE-based: re-ingesting the same entity never
-        duplicates nodes. ``IngestPipeline.run`` calls this before
-        ``add_fact`` so every ``Fact.subject_id`` / ``Fact.object_id``
-        has a backing typed node by the time the fact lands.
 
         **Read-side ACL contract (CLAUDE.md invariant):** backends
         that persist entity attrs (name, aliases, properties) MUST
@@ -64,7 +78,9 @@ class GraphStore(Protocol):
         ``traverse`` / ``facts_for_entity`` already do for facts.
         Returning an entity's attrs to a caller who can't see any
         fact citing it would leak the entity's existence — the
-        permission-aware-traversal invariant forbids that.
+        permission-aware-traversal invariant forbids that. With #48
+        the stored ACL is now the trustworthy ground truth for the
+        attrs: they can never drift apart.
         """
         ...
 
@@ -182,3 +198,43 @@ class StorageError(RuntimeError):
     right posture here: silent reset of persisted facts would quietly
     violate the provenance invariant.
     """
+
+
+class CrossAclUpsertError(StorageError):
+    """Raised when ``upsert_entity`` would write entity attributes
+    under a different ACL than the one currently stamped on the
+    entity node.
+
+    Catches the compliance leak flagged in #48: an entity first
+    stamped by a restricted doc, then re-upserted from a different
+    (or public) scope, would otherwise end up with the original ACL
+    but new attrs — a Finance caller reading HR-sourced attrs under
+    the Finance stamp. Attrs are NEVER touched when this fires; the
+    write is rejected atomically (and in the Neo4j backend, the
+    transaction is rolled back).
+
+    Operators who hit this have either (a) a resolver bug collapsing
+    entities that shouldn't be collapsed, or (b) a legitimate
+    multi-tenant merge that needs a dedicated admin path, not
+    routine ingest. ``IngestPipeline.run`` routes this through
+    ``ErrorPolicy`` the same way it routes ``ExtractionError``.
+    """
+
+    def __init__(
+        self,
+        *,
+        entity_id: str,
+        stored_acl: str | None,
+        attempted_acl: str | None,
+    ) -> None:
+        self.entity_id = entity_id
+        self.stored_acl = stored_acl
+        self.attempted_acl = attempted_acl
+        super().__init__(
+            f"cross-ACL upsert rejected for entity_id={entity_id!r}: "
+            f"stored acl_ref={stored_acl!r} but attempted write "
+            f"carries acl_ref={attempted_acl!r}. Attrs were not "
+            "written — fix the resolver that collapsed these "
+            "entities or route the cross-scope merge through an "
+            "admin path."
+        )
