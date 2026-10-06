@@ -14,8 +14,14 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
-0.4.0 track — storage-model foundations for exports and
-ontology-version provenance.
+## [0.4.0] - 2026-10-06 - storage audit maturity
+
+Four storage-layer invariants shipped together: Entity.type persists
+across restart, resolver merges carry an audit edge, cross-ACL
+entity writes fail loud instead of leaking attrs, and every fact
+carries the ontology version it was extracted under. Unblocks #32
+(exports) and #33 (snapshot MCP) — both can now interpret facts
+across schema evolutions.
 
 ### Added — Ontology-version stamp on every fact + lazy migration (#34)
 - `Provenance` gains `ontology_id` and `ontology_version` fields;
