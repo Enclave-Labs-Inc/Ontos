@@ -148,10 +148,12 @@ def ingest(
         typer.Option(
             "--pdf-backend",
             help=(
-                "PDF ingest backend. 'llamaparse' uses LlamaCloud's hosted "
-                "vision API (BRIDGE — sends PDF bytes off-prem). Required "
-                "when the source directory contains .pdf files; omit for "
-                "pure .txt/.md ingest."
+                "PDF ingest backend. 'pypdf' is sovereign (local, text-only, "
+                "zero network — install the [pdf] extra). 'llamaparse' is "
+                "BRIDGE (LlamaCloud hosted vision API — handles scanned PDFs "
+                "but sends document bytes off-prem; install the [llama] extra). "
+                "Required when the source directory contains .pdf files; omit "
+                "for pure .txt/.md ingest."
             ),
         ),
     ] = None,
@@ -475,7 +477,12 @@ def _build_source_connector(
     rather than silently skipping them. The old behavior (silent skip) was the
     #28 UX bug the operator hit during the 0.2.0 testing week.
     """
-    from ontos.ingest import LlamaParsePdfConnector, MultiConnector, TextConnector
+    from ontos.ingest import (
+        LlamaParsePdfConnector,
+        MultiConnector,
+        PypdfConnector,
+        TextConnector,
+    )
 
     sub_connectors: list[Connector] = []
     document_count = 0
@@ -490,14 +497,18 @@ def _build_source_connector(
         if pdf_backend is None:
             typer.secho(
                 f"found {len(pdf_paths)} PDF file(s) in {source_dir} but "
-                "--pdf-backend is not set. Pass --pdf-backend llamaparse "
-                "to ingest PDFs via LlamaCloud (BRIDGE), or remove the "
-                "PDFs from the source directory.",
+                "--pdf-backend is not set. Pass --pdf-backend pypdf for "
+                "sovereign in-VPC parsing (text PDFs only), --pdf-backend "
+                "llamaparse for the LlamaCloud BRIDGE path (handles scanned "
+                "PDFs), or remove the PDFs from the source directory.",
                 fg=typer.colors.RED,
             )
             raise typer.Exit(code=2)
 
-        if pdf_backend == "llamaparse":
+        if pdf_backend == "pypdf":
+            sub_connectors.append(PypdfConnector(pdf_paths, root=source_dir))
+            document_count += len(pdf_paths)
+        elif pdf_backend == "llamaparse":
             api_key = os.environ.get(llama_api_key_env, "")
             if not api_key:
                 typer.secho(
@@ -512,7 +523,8 @@ def _build_source_connector(
             document_count += len(pdf_paths)
         else:
             typer.secho(
-                f"unknown --pdf-backend {pdf_backend!r}. Supported: 'llamaparse'.",
+                f"unknown --pdf-backend {pdf_backend!r}. Supported: "
+                "'pypdf' (sovereign), 'llamaparse' (BRIDGE).",
                 fg=typer.colors.RED,
             )
             raise typer.Exit(code=2)

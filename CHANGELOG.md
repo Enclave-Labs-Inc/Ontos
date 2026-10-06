@@ -66,6 +66,24 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   Python-pickle, dev-only — regulated deploys still use the Neo4j
   backend.
 
+### Added — sovereign PDF ingest (#39)
+- **`PypdfConnector`** — in-VPC, text-only PDF ingest via local
+  `pypdf`. Zero network calls. Closes the sovereignty gap left
+  open by #28's `LlamaParsePdfConnector` (BRIDGE); the pair makes
+  the operator's compliance posture an explicit choice.
+- **`pdf` extra** pulling `pypdf>=4.0`. Install with
+  `pip install 'enclave-ontos[pdf]'`.
+- **`ontos ingest --pdf-backend pypdf`** CLI dispatch alongside
+  the existing `llamaparse` option. Fails loud on 0-char output
+  (image-based PDF) with the exact message *"PypdfConnector got
+  zero characters from X. The PDF is likely image-based; use
+  --pdf-backend llamaparse for vision-based parsing."* — points
+  operators at the complementary BRIDGE connector when their
+  content actually needs it.
+- `--pdf-backend` help text + the "PDFs found but --pdf-backend
+  not set" error now list both choices with their sovereignty
+  posture called out.
+
 ### Added — Ollama timeout UX (#30)
 - `OllamaTimeoutError` typed exception in `ontos.llm` — the backend
   raises it when a request exceeds the configured `timeout_s`.
