@@ -10,13 +10,19 @@ Persistence format
 When constructed with ``path=``, the store transparently loads from
 and saves to that file. The on-disk payload is:
 
-    b"ONTOS-NX-STORE-V1\\n" + pickle.dumps({"graph": ..., "facts": ...})
+    b"ONTOS-NX-STORE-V2\\n" + pickle.dumps({"graph": ..., "facts": ...,
+                                             "merges": ...})
+
+Legacy format compat: files written under ``ONTOS-NX-STORE-V1``
+(no ``merges`` key) load cleanly with an empty merges dict and get
+rewritten under V2 on the next flush. One structlog info line
+("networkx-store-migrated-from-legacy-format") fires per load.
 
 ``pickle`` is a Python-version-specific binary format, NOT a wire
 format. The file is intended to live under the operator's own home
 directory and be read + written only by the same user's `ontos` CLI.
-A format bump (V2 and beyond) will fail loud on load with
-``StorageError`` rather than silently reset state.
+Future format bumps (V3 and beyond) will accept V2 as legacy and
+``StorageError`` on genuinely-unrecognised headers.
 
 Save is atomic: ``write_bytes`` to ``<path>.tmp`` then ``replace``.
 A crash mid-save leaves the previous valid file intact.
@@ -35,6 +41,7 @@ from uuid import UUID
 import networkx as nx
 import structlog
 
+from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
 from ontos.storage.base import StorageError
 
@@ -59,11 +66,20 @@ class NetworkxStore:
     Omit ``path`` for an ephemeral in-memory store (what tests use).
     """
 
-    _MAGIC_HEADER = b"ONTOS-NX-STORE-V1\n"
+    # V2 adds the `_merges` payload key for persisted MergeRecords (#46).
+    # V1 files load with an empty `_merges` default and get upgraded on
+    # next flush — operators see a one-line structlog info and no action
+    # is required.
+    _MAGIC_HEADER = b"ONTOS-NX-STORE-V2\n"
+    _LEGACY_MAGIC_HEADERS: tuple[bytes, ...] = (b"ONTOS-NX-STORE-V1\n",)
 
     def __init__(self, path: Path | None = None) -> None:
         self._graph: nx.MultiDiGraph[str] = nx.MultiDiGraph()
         self._facts: dict[UUID, Fact] = {}
+        # Keyed on (canonical_id, merged_id, resolver_id) — idempotent on
+        # re-record; last-write-wins on resolved_at. See #46 and the
+        # GraphStore.record_merge Protocol docstring for semantics.
+        self._merges: dict[tuple[str, str, str], MergeRecord] = {}
         self._path: Path | None = path
         # Set by any state-mutating method; checked by `flush()` so that
         # read-only callers (e.g. `ontos query`) never rewrite the file —
@@ -73,16 +89,38 @@ class NetworkxStore:
             self._load_from(path)
 
     def _load_from(self, path: Path) -> None:
-        """Load state from path. Fail loud on magic mismatch or corrupt payload."""
+        """Load state from path. Fail loud on magic mismatch or corrupt payload.
+
+        Accepts the current magic header and any header in
+        ``_LEGACY_MAGIC_HEADERS``; legacy loads log a one-line
+        structlog info naming the migration so operators see what
+        happened. Missing payload keys default to the empty collection
+        for forward-compat with older on-disk formats.
+        """
         raw = path.read_bytes()
-        if not raw.startswith(self._MAGIC_HEADER):
+        if raw.startswith(self._MAGIC_HEADER):
+            payload_bytes = raw[len(self._MAGIC_HEADER) :]
+        elif legacy := next(
+            (h for h in self._LEGACY_MAGIC_HEADERS if raw.startswith(h)),
+            None,
+        ):
+            log.info(
+                "networkx-store-migrated-from-legacy-format",
+                path=str(path),
+                from_version=legacy.decode().strip(),
+                to_version=self._MAGIC_HEADER.decode().strip(),
+            )
+            payload_bytes = raw[len(legacy) :]
+        else:
             raise StorageError(
-                f"{path} is not an Ontos NetworkxStore v1 file "
-                f"(missing {self._MAGIC_HEADER!r} header). Delete it or "
+                f"{path} is not an Ontos NetworkxStore file "
+                f"(missing {self._MAGIC_HEADER!r} or any legacy header "
+                f"in {self._LEGACY_MAGIC_HEADERS!r}). Delete it or "
                 "point at a different --storage-path."
             )
+
         try:
-            payload = pickle.loads(raw[len(self._MAGIC_HEADER) :])
+            payload = pickle.loads(payload_bytes)
         except (
             # Broadened to cover realistic version-drift cases where a
             # pickled module / class moved or was renamed between releases;
@@ -105,6 +143,10 @@ class NetworkxStore:
         try:
             self._graph = payload["graph"]
             self._facts = payload["facts"]
+            # V1 payloads lack "merges"; default to empty (the lazy
+            # migration path — on next flush the file gets rewritten
+            # under the current magic header with the new key).
+            self._merges = payload.get("merges", {})
         except (KeyError, TypeError) as exc:
             raise StorageError(
                 f"{path} payload shape is not recognised: {exc!r}. "
@@ -128,7 +170,8 @@ class NetworkxStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_bytes(
-            self._MAGIC_HEADER + pickle.dumps({"graph": self._graph, "facts": self._facts})
+            self._MAGIC_HEADER
+            + pickle.dumps({"graph": self._graph, "facts": self._facts, "merges": self._merges})
         )
         # Dev-store file: single-user, same-process-writer. Lock down
         # mode so a shared machine doesn't let other users plant a
@@ -314,6 +357,84 @@ class NetworkxStore:
                 out.append(fact)
         return out
 
+    async def record_merge(self, record: MergeRecord) -> None:
+        # Fan out one logical MergeRecord across (canonical, merged_id,
+        # resolver_id) keys so merges_for_entity can find the record
+        # from any endpoint.
+        #
+        # Normalize at write time: strip the canonical from merged_ids
+        # before storing. ExactMatchResolver's convention includes the
+        # winner's own id in merged_ids; the audit edge only shows real
+        # consolidations, and reads must match Neo4j (which also strips
+        # the self-loop). The normalized record is what merges_for_entity
+        # returns — Protocol docstring documents the contract.
+        normalized_merged = [m for m in record.merged_ids if m != record.canonical_id]
+        if not normalized_merged:
+            # No real consolidation (resolver only emitted the canonical
+            # self-reference); nothing to record.
+            return
+        normalized = record.model_copy(update={"merged_ids": normalized_merged})
+        for merged_id in normalized_merged:
+            key = (record.canonical_id, merged_id, record.resolver_id)
+            # Idempotent: re-recording the same (canonical, merged,
+            # resolver) tuple is last-write-wins on resolved_at + reason.
+            self._merges[key] = normalized
+        self._dirty = True
+
+    async def merges_for_entity(
+        self,
+        entity_id: str,
+        *,
+        allowed_acls: list[str] | None = None,
+    ) -> list[MergeRecord]:
+        # Dedupe on (canonical_id, resolver_id, resolved_at): one logical
+        # MergeRecord fans out across multiple keys (one per merged_id)
+        # but should be returned once from the audit view.
+        #
+        # PR #47 review: optional allowed_acls pre-filter drops records
+        # whose canonical or any merged endpoint has an acl_ref the
+        # caller cannot see. Readers that forget to filter would leak
+        # the existence of a restricted entity's merge group — CLAUDE.md
+        # forbids that.
+        allowed_set = set(allowed_acls) if allowed_acls is not None else None
+        seen: set[tuple[str, str, str]] = set()
+        hits: list[MergeRecord] = []
+        for (canonical, merged, _resolver), record in self._merges.items():
+            if canonical != entity_id and merged != entity_id:
+                continue
+            dedupe_key = (
+                record.canonical_id,
+                record.resolver_id,
+                record.resolved_at.isoformat(),
+            )
+            if dedupe_key in seen:
+                continue
+            if allowed_set is not None and not self._merge_record_visible(record, allowed_set):
+                seen.add(dedupe_key)  # dedupe even skipped records to avoid re-check
+                continue
+            seen.add(dedupe_key)
+            hits.append(record)
+        return hits
+
+    def _merge_record_visible(self, record: MergeRecord, allowed_set: set[str]) -> bool:
+        """Return True iff every endpoint entity is visible under allowed_set.
+
+        An endpoint is visible when its node's ``acl_ref`` is None (public)
+        or appears in ``allowed_set``. If the node doesn't exist in the
+        graph (e.g. a merged id that was never upserted), we treat it as
+        public — the pipeline guarantees upserts come before fact writes
+        in #38, but older stores may have gaps.
+        """
+
+        def _endpoint_visible(eid: str) -> bool:
+            attrs = self._graph.nodes.get(eid, {})
+            acl = attrs.get("acl_ref")
+            return acl is None or acl in allowed_set
+
+        if not _endpoint_visible(record.canonical_id):
+            return False
+        return all(_endpoint_visible(mid) for mid in record.merged_ids)
+
     async def close(self) -> None:
         self.flush()
         # Keep the clear so existing in-memory callers see close() as a
@@ -321,6 +442,7 @@ class NetworkxStore:
         # next NetworkxStore(path=same) rebuilds from the file.
         self._graph.clear()
         self._facts.clear()
+        self._merges.clear()
 
 
 def _acl_allows(

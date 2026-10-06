@@ -99,7 +99,7 @@ def test_load_fails_loud_on_missing_magic_header(tmp_path: Path) -> None:
     pkl = tmp_path / "junk.pkl"
     pkl.write_bytes(b"not an ontos store\n" + pickle.dumps({"graph": None, "facts": None}))
 
-    with pytest.raises(StorageError, match="not an Ontos NetworkxStore v1 file"):
+    with pytest.raises(StorageError, match="not an Ontos NetworkxStore file"):
         NetworkxStore(path=pkl)
 
 

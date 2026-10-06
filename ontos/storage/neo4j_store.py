@@ -32,6 +32,7 @@ import structlog
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from neo4j.time import DateTime as Neo4jDateTime
 
+from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
 
 log = structlog.get_logger(__name__)
@@ -125,6 +126,12 @@ class Neo4jStore:
             "CREATE INDEX fact_predicate_idx IF NOT EXISTS FOR ()-[r:RELATES]-() ON (r.predicate)",
             "CREATE INDEX fact_validity_idx IF NOT EXISTS "
             "FOR ()-[r:RELATES]-() ON (r.t_valid, r.t_invalid)",
+            # #46: audit queries on the merge trail scan by resolver +
+            # time. [:MERGED_WITH] is a different edge type from facts;
+            # separate index keeps merge audit and fact traversal
+            # performance decoupled.
+            "CREATE INDEX merge_record_idx IF NOT EXISTS "
+            "FOR ()-[r:MERGED_WITH]-() ON (r.resolver_id, r.resolved_at)",
         ]
         async with self._driver.session(database=self._database) as session:
             for stmt in statements:
@@ -380,6 +387,111 @@ class Neo4jStore:
             )
             records = await result.data()
         return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]
+
+    async def record_merge(self, record: MergeRecord) -> None:
+        # #46: materialize MergeRecord as [:MERGED_WITH] edges from each
+        # merged_id to the canonical. MERGE on (canonical, merged,
+        # resolver_id) gives us the idempotency key the Protocol
+        # contract promises; SET overwrites resolved_at + reason on
+        # re-assertion (last-write-wins on the audit timestamp).
+        #
+        # PR #47 review: single UNWIND statement so a mid-loop failure
+        # can't leave a partial merge record (edges for B but not C).
+        # One transaction, one atomic write per logical MergeRecord.
+        query = """
+        MERGE (canonical:Entity {id: $canonical_id})
+        WITH canonical
+        UNWIND $merged_ids AS merged_id_param
+        WITH canonical, merged_id_param
+        WHERE merged_id_param <> $canonical_id
+        MERGE (merged:Entity {id: merged_id_param})
+        MERGE (merged)-[r:MERGED_WITH {resolver_id: $resolver_id}]->(canonical)
+        SET r.resolver_version = $resolver_version,
+            r.resolved_at = datetime($resolved_at),
+            r.reason = $reason
+        """
+        async with self._driver.session(database=self._database) as session:
+            await session.run(
+                query,
+                canonical_id=record.canonical_id,
+                merged_ids=list(record.merged_ids),
+                resolver_id=record.resolver_id,
+                resolver_version=record.resolver_version,
+                resolved_at=record.resolved_at.isoformat(),
+                reason=record.reason,
+            )
+
+    async def merges_for_entity(
+        self,
+        entity_id: str,
+        *,
+        allowed_acls: list[str] | None = None,
+    ) -> list[MergeRecord]:
+        # Bidirectional lookup — the id can appear as canonical or
+        # merged.
+        #
+        # PR #47 review: two-step Cypher so the group is found first,
+        # THEN all its edges are collected. Pre-review the one-step
+        # pattern truncated merged_ids when queried from a merged
+        # endpoint — graph A ← {B,C} queried on "B" returned
+        # merged_ids=[B] (losing C), a real Article-12 audit gap.
+        #
+        # ACL pre-filter (PR #47 suggestion 2): optional allowed_acls
+        # drops records where any endpoint entity has an acl_ref the
+        # caller cannot see. CLAUDE.md "pre-filter when possible" —
+        # safer default than relying on callers to post-filter.
+        query = """
+        // Step 1: find matching groups by their identifying tuple.
+        MATCH (m:Entity)-[r:MERGED_WITH]->(c:Entity)
+        WHERE c.id = $entity_id OR m.id = $entity_id
+        WITH DISTINCT c,
+             r.resolver_id AS resolver_id,
+             r.resolver_version AS resolver_version,
+             r.resolved_at AS resolved_at,
+             r.reason AS reason
+        // Step 2: collect every edge in each identified group.
+        MATCH (m2:Entity)-[r2:MERGED_WITH {resolver_id: resolver_id}]->(c)
+        WHERE r2.resolved_at = resolved_at
+        WITH c, resolver_id, resolver_version, resolved_at, reason,
+             collect(m2) AS merged_nodes
+        // ACL pre-filter — canonical AND every endpoint must be visible.
+        WHERE $allowed_acls IS NULL
+           OR (
+               (c.acl_ref IS NULL OR c.acl_ref IN $allowed_acls)
+               AND ALL(mn IN merged_nodes
+                       WHERE mn.acl_ref IS NULL OR mn.acl_ref IN $allowed_acls)
+           )
+        RETURN c.id AS canonical_id,
+               [mn IN merged_nodes | mn.id] AS merged_ids,
+               resolver_id, resolver_version, resolved_at, reason
+        """
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                query,
+                entity_id=entity_id,
+                allowed_acls=allowed_acls,
+            )
+            records = await result.data()
+
+        hits: list[MergeRecord] = []
+        for row in records:
+            resolved_at_raw = row["resolved_at"]
+            # Neo4j returns its own DateTime; convert to stdlib datetime.
+            if isinstance(resolved_at_raw, Neo4jDateTime):
+                resolved_at = resolved_at_raw.to_native()
+            else:
+                resolved_at = resolved_at_raw
+            hits.append(
+                MergeRecord(
+                    canonical_id=row["canonical_id"],
+                    merged_ids=list(row["merged_ids"]),
+                    resolver_id=row["resolver_id"],
+                    resolver_version=row["resolver_version"],
+                    resolved_at=resolved_at,
+                    reason=row["reason"] or "",
+                )
+            )
+        return hits
 
     async def close(self) -> None:
         await self._driver.close()

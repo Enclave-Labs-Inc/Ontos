@@ -439,3 +439,161 @@ async def test_entity_type_idx_exists_after_initialize(store: Neo4jStore) -> Non
         result = await session.run("SHOW INDEXES WHERE name = 'entity_type_idx'")
         records = [r async for r in result]
         assert len(records) == 1
+
+
+# ---------------------------------------------------------------------------
+# #46 — record_merge + [:MERGED_WITH] + merge_record_idx
+# ---------------------------------------------------------------------------
+
+
+async def test_record_merge_creates_merged_with_edges_per_non_self_id(
+    store: Neo4jStore,
+) -> None:
+    """One MergeRecord with 3 merged_ids (one is the canonical) → 2
+    [:MERGED_WITH] edges, each carrying the audit metadata."""
+    from datetime import UTC, datetime
+
+    from ontos.resolver.base import MergeRecord
+
+    rec = MergeRecord(
+        canonical_id="A",
+        merged_ids=["A", "B", "C"],
+        resolver_id="ontos.resolver.exact-match",
+        resolver_version="0.1.0",
+        resolved_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        reason="exact match on (type, canonical_name)",
+    )
+    await store.record_merge(rec)
+
+    async with store._driver.session(database=store._database) as session:  # noqa: SLF001
+        result = await session.run(
+            "MATCH ()-[r:MERGED_WITH]->(canonical:Entity {id: 'A'}) "
+            "RETURN r.resolver_id AS resolver_id, r.reason AS reason, "
+            "       startNode(r).id AS merged_id"
+        )
+        rows = [r async for r in result]
+    merged_ids = sorted(row["merged_id"] for row in rows)
+    assert merged_ids == ["B", "C"]  # A → A self-loop skipped
+    assert all(row["resolver_id"] == "ontos.resolver.exact-match" for row in rows)
+
+
+async def test_record_merge_is_idempotent_in_neo4j(store: Neo4jStore) -> None:
+    """Re-recording the same (canonical, merged, resolver) overwrites
+    resolved_at but leaves one edge, not two."""
+    from datetime import UTC, datetime
+
+    from ontos.resolver.base import MergeRecord
+
+    def _rec(resolved_at: datetime, reason: str) -> MergeRecord:
+        return MergeRecord(
+            canonical_id="A",
+            merged_ids=["A", "B"],
+            resolver_id="ontos.resolver.exact-match",
+            resolver_version="0.1.0",
+            resolved_at=resolved_at,
+            reason=reason,
+        )
+
+    await store.record_merge(_rec(datetime(2026, 1, 1, tzinfo=UTC), "first"))
+    await store.record_merge(_rec(datetime(2026, 6, 1, tzinfo=UTC), "re-affirmed"))
+
+    async with store._driver.session(database=store._database) as session:  # noqa: SLF001
+        result = await session.run(
+            "MATCH ()-[r:MERGED_WITH]->(canonical:Entity {id: 'A'}) "
+            "RETURN count(r) AS c, collect(r.reason) AS reasons"
+        )
+        record = await result.single()
+        assert record is not None
+        assert record["c"] == 1
+        assert record["reasons"] == ["re-affirmed"]
+
+
+async def test_merges_for_entity_returns_grouped_record_from_either_endpoint(
+    store: Neo4jStore,
+) -> None:
+    """Audit lookup from both canonical and merged ids returns the full
+    MergeRecord reconstructed by grouping edges that share (canonical,
+    resolver_id, resolved_at)."""
+    from datetime import UTC, datetime
+
+    from ontos.resolver.base import MergeRecord
+
+    rec = MergeRecord(
+        canonical_id="A",
+        merged_ids=["A", "B", "C"],
+        resolver_id="ontos.resolver.exact-match",
+        resolver_version="0.1.0",
+        resolved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        reason="exact match",
+    )
+    await store.record_merge(rec)
+
+    from_canonical = await store.merges_for_entity("A")
+    assert len(from_canonical) == 1
+    assert sorted(from_canonical[0].merged_ids) == ["B", "C"]
+
+    from_merged = await store.merges_for_entity("B")
+    assert len(from_merged) == 1
+    assert from_merged[0].canonical_id == "A"
+    # PR #47 blocking regression: lookup from a merged endpoint MUST
+    # return the full group, not just the queried id. Pre-fix the
+    # one-step Cypher truncated to ["B"] (losing C) — a real Article-12
+    # audit gap. Two-step Cypher finds the group first, then collects
+    # all its edges.
+    assert sorted(from_merged[0].merged_ids) == ["B", "C"]
+
+
+async def test_merges_for_entity_pre_filters_by_allowed_acls(
+    store: Neo4jStore,
+) -> None:
+    """PR #47 suggestion 2: optional allowed_acls drops records whose
+    endpoint entities have an acl_ref the caller cannot see."""
+    from datetime import UTC, datetime
+
+    from ontos.resolver.base import MergeRecord
+    from ontos.runtime.models import Confidence, Entity, Provenance
+
+    prov = Provenance(
+        source_id="doc",
+        extractor_id="t",
+        extractor_version="0",
+        confidence=Confidence.EXTRACTED,
+        confidence_score=1.0,
+    )
+    # Public canonical, restricted merged endpoint.
+    await store.upsert_entity(
+        Entity(id="A", type="Person", canonical_name="Alice", provenance=prov),
+        acl_ref=None,
+    )
+    await store.upsert_entity(
+        Entity(id="B", type="Person", canonical_name="Alice", provenance=prov),
+        acl_ref="acl:finance",
+    )
+    await store.record_merge(
+        MergeRecord(
+            canonical_id="A",
+            merged_ids=["A", "B"],
+            resolver_id="r",
+            resolver_version="0",
+            resolved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    )
+
+    hits_public = await store.merges_for_entity("A", allowed_acls=["acl:public"])
+    assert hits_public == []
+
+    hits_privileged = await store.merges_for_entity("A", allowed_acls=["acl:public", "acl:finance"])
+    assert len(hits_privileged) == 1
+
+    # None = no filter (back-compat for pre-#47 callers).
+    hits_unfiltered = await store.merges_for_entity("A")
+    assert len(hits_unfiltered) == 1
+
+
+async def test_merge_record_idx_exists_after_initialize(store: Neo4jStore) -> None:
+    """#46 adds an index on [:MERGED_WITH](resolver_id, resolved_at) so
+    audit queries stay fast on large graphs."""
+    async with store._driver.session(database=store._database) as session:  # noqa: SLF001
+        result = await session.run("SHOW INDEXES WHERE name = 'merge_record_idx'")
+        records = [r async for r in result]
+        assert len(records) == 1
