@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Literal, Protocol
 from uuid import UUID
 
+from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
 
 
@@ -106,6 +107,48 @@ class GraphStore(Protocol):
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
     ) -> list[Fact]: ...
+
+    async def record_merge(self, record: MergeRecord) -> None:
+        """Idempotent merge-record write.
+
+        Persists one logical merge decision — a canonical entity id
+        and the list of entity ids merged into it — so audit tools
+        and #32's exporter can walk the trail across process
+        restarts. Mirrors ``upsert_entity``'s MERGE semantics.
+
+        **Idempotency key: ``(canonical_id, merged_id, resolver_id)``.**
+        Re-recording the same merge updates ``resolved_at`` to the
+        latest assertion but leaves one record / one edge per logical
+        merge. A resolver asserting "A and B are the same" across N
+        ingest runs produces one record, not N.
+
+        **Self-loops skipped.** ``ExactMatchResolver`` includes
+        ``canonical_id`` in ``merged_ids`` by convention
+        (``rules.py``); backends MUST NOT emit a self-referential
+        ``[:MERGED_WITH]`` edge or record.
+
+        **Read-side ACL contract (CLAUDE.md invariant):** this seam
+        does NOT itself carry an ACL. Readers (``merges_for_entity``,
+        the exporter) filter the referenced entities via the
+        entity-level ``acl_ref`` the same way ``facts_for_entity``
+        already filters its facts. A merge record naming a restricted
+        entity's id does not leak as long as the exporter checks both
+        endpoint entities' ``acl_ref`` before emitting the edge.
+        """
+        ...
+
+    async def merges_for_entity(self, entity_id: str) -> list[MergeRecord]:
+        """Return every merge record where ``entity_id`` appears either
+        as ``canonical_id`` OR in ``merged_ids``.
+
+        Mirrors ``facts_for_entity`` — bidirectional audit lookup.
+        One logical merge decision is returned once even if it carries
+        multiple ``merged_ids`` (deduped on
+        ``(canonical_id, resolver_id, resolved_at)``). Callers filter
+        the returned records on the referenced entities' ACL per the
+        read-side contract on ``record_merge``.
+        """
+        ...
 
     async def close(self) -> None: ...
 

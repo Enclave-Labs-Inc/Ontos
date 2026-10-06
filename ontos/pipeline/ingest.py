@@ -58,6 +58,7 @@ class IngestReport(BaseModel):
     documents_extracted: int = 0
     facts_written: int = 0
     entities_merged: int = 0
+    merges_recorded: int = 0
     facts_superseded: int = 0
     facts_reaffirmed: int = 0
     facts_historical: int = 0
@@ -111,6 +112,7 @@ class IngestPipeline:
         facts_reaffirmed = 0
         facts_historical = 0
         entities_merged = 0
+        merges_recorded = 0
         warnings: list[str] = []
         errors: list[IngestError] = []
         supersession_records: list[SupersessionRecord] = []
@@ -153,6 +155,14 @@ class IngestPipeline:
             if self._resolver is not None and extraction.entities:
                 resolution = await self._resolver.resolve(list(extraction.entities))
                 entities_merged += sum(max(len(m.merged_ids) - 1, 0) for m in resolution.merges)
+                # #46: persist every merge decision the resolver cascade
+                # emits so #32's exporter + Article-12 audit tools can
+                # walk the trail across process restarts. Idempotent at
+                # the store layer on (canonical, merged, resolver_id)
+                # keys — re-ingest produces one record, not N.
+                for merge in resolution.merges:
+                    await self._store.record_merge(merge)
+                    merges_recorded += 1
 
             for fact in extraction.facts:
                 write_fact: Fact = fact
@@ -240,6 +250,7 @@ class IngestPipeline:
             documents_extracted=documents_extracted,
             facts_written=facts_written,
             entities_merged=entities_merged,
+            merges_recorded=merges_recorded,
             facts_superseded=facts_superseded,
             facts_reaffirmed=facts_reaffirmed,
             facts_historical=facts_historical,

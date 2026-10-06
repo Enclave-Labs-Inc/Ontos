@@ -10,13 +10,19 @@ Persistence format
 When constructed with ``path=``, the store transparently loads from
 and saves to that file. The on-disk payload is:
 
-    b"ONTOS-NX-STORE-V1\\n" + pickle.dumps({"graph": ..., "facts": ...})
+    b"ONTOS-NX-STORE-V2\\n" + pickle.dumps({"graph": ..., "facts": ...,
+                                             "merges": ...})
+
+Legacy format compat: files written under ``ONTOS-NX-STORE-V1``
+(no ``merges`` key) load cleanly with an empty merges dict and get
+rewritten under V2 on the next flush. One structlog info line
+("networkx-store-migrated-from-legacy-format") fires per load.
 
 ``pickle`` is a Python-version-specific binary format, NOT a wire
 format. The file is intended to live under the operator's own home
 directory and be read + written only by the same user's `ontos` CLI.
-A format bump (V2 and beyond) will fail loud on load with
-``StorageError`` rather than silently reset state.
+Future format bumps (V3 and beyond) will accept V2 as legacy and
+``StorageError`` on genuinely-unrecognised headers.
 
 Save is atomic: ``write_bytes`` to ``<path>.tmp`` then ``replace``.
 A crash mid-save leaves the previous valid file intact.
@@ -35,6 +41,7 @@ from uuid import UUID
 import networkx as nx
 import structlog
 
+from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
 from ontos.storage.base import StorageError
 
@@ -59,11 +66,20 @@ class NetworkxStore:
     Omit ``path`` for an ephemeral in-memory store (what tests use).
     """
 
-    _MAGIC_HEADER = b"ONTOS-NX-STORE-V1\n"
+    # V2 adds the `_merges` payload key for persisted MergeRecords (#46).
+    # V1 files load with an empty `_merges` default and get upgraded on
+    # next flush — operators see a one-line structlog info and no action
+    # is required.
+    _MAGIC_HEADER = b"ONTOS-NX-STORE-V2\n"
+    _LEGACY_MAGIC_HEADERS: tuple[bytes, ...] = (b"ONTOS-NX-STORE-V1\n",)
 
     def __init__(self, path: Path | None = None) -> None:
         self._graph: nx.MultiDiGraph[str] = nx.MultiDiGraph()
         self._facts: dict[UUID, Fact] = {}
+        # Keyed on (canonical_id, merged_id, resolver_id) — idempotent on
+        # re-record; last-write-wins on resolved_at. See #46 and the
+        # GraphStore.record_merge Protocol docstring for semantics.
+        self._merges: dict[tuple[str, str, str], MergeRecord] = {}
         self._path: Path | None = path
         # Set by any state-mutating method; checked by `flush()` so that
         # read-only callers (e.g. `ontos query`) never rewrite the file —
@@ -73,16 +89,38 @@ class NetworkxStore:
             self._load_from(path)
 
     def _load_from(self, path: Path) -> None:
-        """Load state from path. Fail loud on magic mismatch or corrupt payload."""
+        """Load state from path. Fail loud on magic mismatch or corrupt payload.
+
+        Accepts the current magic header and any header in
+        ``_LEGACY_MAGIC_HEADERS``; legacy loads log a one-line
+        structlog info naming the migration so operators see what
+        happened. Missing payload keys default to the empty collection
+        for forward-compat with older on-disk formats.
+        """
         raw = path.read_bytes()
-        if not raw.startswith(self._MAGIC_HEADER):
+        if raw.startswith(self._MAGIC_HEADER):
+            payload_bytes = raw[len(self._MAGIC_HEADER) :]
+        elif legacy := next(
+            (h for h in self._LEGACY_MAGIC_HEADERS if raw.startswith(h)),
+            None,
+        ):
+            log.info(
+                "networkx-store-migrated-from-legacy-format",
+                path=str(path),
+                from_version=legacy.decode().strip(),
+                to_version=self._MAGIC_HEADER.decode().strip(),
+            )
+            payload_bytes = raw[len(legacy) :]
+        else:
             raise StorageError(
-                f"{path} is not an Ontos NetworkxStore v1 file "
-                f"(missing {self._MAGIC_HEADER!r} header). Delete it or "
+                f"{path} is not an Ontos NetworkxStore file "
+                f"(missing {self._MAGIC_HEADER!r} or any legacy header "
+                f"in {self._LEGACY_MAGIC_HEADERS!r}). Delete it or "
                 "point at a different --storage-path."
             )
+
         try:
-            payload = pickle.loads(raw[len(self._MAGIC_HEADER) :])
+            payload = pickle.loads(payload_bytes)
         except (
             # Broadened to cover realistic version-drift cases where a
             # pickled module / class moved or was renamed between releases;
@@ -105,6 +143,10 @@ class NetworkxStore:
         try:
             self._graph = payload["graph"]
             self._facts = payload["facts"]
+            # V1 payloads lack "merges"; default to empty (the lazy
+            # migration path — on next flush the file gets rewritten
+            # under the current magic header with the new key).
+            self._merges = payload.get("merges", {})
         except (KeyError, TypeError) as exc:
             raise StorageError(
                 f"{path} payload shape is not recognised: {exc!r}. "
@@ -128,7 +170,8 @@ class NetworkxStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_bytes(
-            self._MAGIC_HEADER + pickle.dumps({"graph": self._graph, "facts": self._facts})
+            self._MAGIC_HEADER
+            + pickle.dumps({"graph": self._graph, "facts": self._facts, "merges": self._merges})
         )
         # Dev-store file: single-user, same-process-writer. Lock down
         # mode so a shared machine doesn't let other users plant a
@@ -314,6 +357,43 @@ class NetworkxStore:
                 out.append(fact)
         return out
 
+    async def record_merge(self, record: MergeRecord) -> None:
+        # Fan out one logical MergeRecord across (canonical, merged_id,
+        # resolver_id) keys so merges_for_entity can find the record
+        # from any endpoint. Store the full record object at each key —
+        # audit can reconstruct the original group via canonical_id.
+        # Idempotent: re-recording the same (canonical, merged, resolver)
+        # tuple is last-write-wins on resolved_at + reason.
+        for merged_id in record.merged_ids:
+            if merged_id == record.canonical_id:
+                # ExactMatchResolver's convention includes the winner's
+                # own id in merged_ids; skip the self-loop so the
+                # [:MERGED_WITH] view only shows real consolidations.
+                continue
+            key = (record.canonical_id, merged_id, record.resolver_id)
+            self._merges[key] = record
+        self._dirty = True
+
+    async def merges_for_entity(self, entity_id: str) -> list[MergeRecord]:
+        # Dedupe on (canonical_id, resolver_id, resolved_at): one logical
+        # MergeRecord fans out across multiple keys (one per merged_id)
+        # but should be returned once from the audit view.
+        seen: set[tuple[str, str, str]] = set()
+        hits: list[MergeRecord] = []
+        for (canonical, merged, _resolver), record in self._merges.items():
+            if canonical != entity_id and merged != entity_id:
+                continue
+            dedupe_key = (
+                record.canonical_id,
+                record.resolver_id,
+                record.resolved_at.isoformat(),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            hits.append(record)
+        return hits
+
     async def close(self) -> None:
         self.flush()
         # Keep the clear so existing in-memory callers see close() as a
@@ -321,6 +401,7 @@ class NetworkxStore:
         # next NetworkxStore(path=same) rebuilds from the file.
         self._graph.clear()
         self._facts.clear()
+        self._merges.clear()
 
 
 def _acl_allows(

@@ -17,6 +17,32 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 0.4.0 track — storage-model foundations for exports and
 ontology-version provenance.
 
+### Added — MergeRecord persistence (#46)
+- `GraphStore.record_merge(record)` + `merges_for_entity(entity_id)`
+  Protocol methods. Idempotent on `(canonical_id, merged_id,
+  resolver_id)`; last-write-wins on `resolved_at`. Mirrors #38's
+  `upsert_entity` pattern.
+- `IngestPipeline.run()` now calls `record_merge` for every merge
+  the resolver cascade emits, between the resolver call and the
+  fact-write loop. New `IngestReport.merges_recorded: int` counter.
+- `NetworkxStore` pickle format bumped `ONTOS-NX-STORE-V1` →
+  `ONTOS-NX-STORE-V2`. Load-time back-compat for V1 files
+  (missing `_merges` defaults to empty); logs a structlog
+  `networkx-store-migrated-from-legacy-format` info line once per
+  load. Existing dev-store pickles upgrade transparently on the
+  next ingest/flush.
+- `Neo4jStore`: new `[:MERGED_WITH]` edge type (merged → canonical)
+  with `resolver_id`, `resolver_version`, `resolved_at`, `reason`
+  as edge properties. New `merge_record_idx` on
+  `(resolver_id, resolved_at)` for audit queries.
+- Self-loops skipped at write time — `ExactMatchResolver` includes
+  the canonical in `merged_ids` by convention, but the audit edge
+  only shows real consolidations.
+- Pre-#46, every `MergeRecord` the resolver emitted was dropped on
+  the floor after a single-run merge-count tally — a quiet
+  Article-12 gap for entity-consolidation audits. Unblocks #32's
+  `MERGED_WITH` edge export surface.
+
 ### Added — Entity.type persistence (#38)
 - `GraphStore.upsert_entity` Protocol method — idempotent entity
   write with MERGE semantics. Accepts optional `acl_ref` so entities
