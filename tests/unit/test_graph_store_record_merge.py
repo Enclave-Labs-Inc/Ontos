@@ -47,18 +47,25 @@ def test_networkx_store_has_record_merge_and_merges_for_entity() -> None:
 
 
 async def test_record_merge_stores_record_and_merges_for_entity_reads_it_back() -> None:
-    """Round-trip from both endpoints — canonical AND merged ids find the record."""
+    """Round-trip from both endpoints — canonical AND merged ids find the record.
+
+    PR #47 normalized the stored shape: ``merged_ids`` contains only
+    the non-canonical ids after write (self-loop stripped). Callers
+    reconstruct the full group via ``canonical_id + merged_ids``.
+    """
     store = NetworkxStore()
     rec = _merge(canonical="alice", merged=["alice", "alice-alt"])
     await store.record_merge(rec)
 
     from_canonical = await store.merges_for_entity("alice")
     assert len(from_canonical) == 1
-    assert from_canonical[0] == rec
+    assert from_canonical[0].canonical_id == "alice"
+    assert from_canonical[0].merged_ids == ["alice-alt"]  # self-loop stripped
 
     from_merged = await store.merges_for_entity("alice-alt")
     assert len(from_merged) == 1
-    assert from_merged[0] == rec
+    assert from_merged[0].canonical_id == "alice"
+    assert from_merged[0].merged_ids == ["alice-alt"]
 
 
 async def test_record_merge_skips_self_loop_but_persists_real_merges() -> None:
@@ -79,7 +86,9 @@ async def test_record_merge_skips_self_loop_but_persists_real_merges() -> None:
 
 async def test_record_merge_fans_out_across_multiple_merged_ids() -> None:
     """One logical record with 3 merged ids → 2 keys (one per non-self id),
-    but merges_for_entity returns the record once from each endpoint."""
+    merges_for_entity returns the record once from each endpoint, and
+    the returned merged_ids is the normalized list (canonical stripped).
+    """
     store = NetworkxStore()
     rec = _merge(canonical="A", merged=["A", "B", "C"])
     await store.record_merge(rec)
@@ -88,7 +97,8 @@ async def test_record_merge_fans_out_across_multiple_merged_ids() -> None:
     for probe_id in ("A", "B", "C"):
         hits = await store.merges_for_entity(probe_id)
         assert len(hits) == 1
-        assert hits[0] == rec
+        assert hits[0].canonical_id == "A"
+        assert sorted(hits[0].merged_ids) == ["B", "C"]  # normalized
 
 
 async def test_record_merge_is_idempotent_on_canonical_merged_resolver_tuple() -> None:
@@ -157,7 +167,78 @@ async def test_record_merge_round_trips_through_pickle_persistence(tmp_path: Pat
     hits = await reader.merges_for_entity("A")
     assert len(hits) == 1
     assert hits[0].canonical_id == "A"
-    assert hits[0].merged_ids == ["A", "B"]
+    assert hits[0].merged_ids == ["B"]  # normalized at write time
+
+
+async def test_merges_for_entity_from_merged_endpoint_returns_full_group() -> None:
+    """PR #47 blocking regression: querying from a non-canonical endpoint
+    MUST return the full group, not just the queried id. Pre-fix the
+    Neo4j Cypher truncated this; locking the invariant on the dev store
+    first so both backends share the semantics."""
+    store = NetworkxStore()
+    rec = _merge(canonical="A", merged=["A", "B", "C"])
+    await store.record_merge(rec)
+
+    # Lookup from B must return {B, C} — missing C would be a leak of
+    # the "which else was merged" audit view.
+    from_b = await store.merges_for_entity("B")
+    assert len(from_b) == 1
+    assert from_b[0].canonical_id == "A"
+    assert sorted(from_b[0].merged_ids) == ["B", "C"]
+
+    from_c = await store.merges_for_entity("C")
+    assert len(from_c) == 1
+    assert sorted(from_c[0].merged_ids) == ["B", "C"]
+
+
+async def test_merges_for_entity_filters_by_allowed_acls() -> None:
+    """PR #47 suggestion 2: optional allowed_acls drops records whose
+    endpoint entities have an acl_ref the caller cannot see. Pre-filter
+    at the store boundary per CLAUDE.md."""
+    from datetime import UTC, datetime
+
+    from ontos.runtime.models import Confidence, Entity, Provenance
+
+    prov = Provenance(
+        source_id="doc",
+        extractor_id="t",
+        extractor_version="0",
+        confidence=Confidence.EXTRACTED,
+        confidence_score=1.0,
+    )
+    store = NetworkxStore()
+
+    # Stamp acl_ref="acl:finance" on the merged endpoint via upsert.
+    await store.upsert_entity(
+        Entity(id="A", type="Person", canonical_name="Alice", provenance=prov),
+        acl_ref=None,  # public canonical
+    )
+    await store.upsert_entity(
+        Entity(id="B", type="Person", canonical_name="Alice", provenance=prov),
+        acl_ref="acl:finance",  # restricted merged endpoint
+    )
+    await store.record_merge(
+        MergeRecord(
+            canonical_id="A",
+            merged_ids=["A", "B"],
+            resolver_id="r",
+            resolver_version="0",
+            resolved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    )
+
+    # Caller without 'acl:finance' sees no record (would otherwise leak
+    # that A was merged with a finance-restricted entity).
+    hits_public = await store.merges_for_entity("A", allowed_acls=["acl:public"])
+    assert hits_public == []
+
+    # Caller with 'acl:finance' sees the full record.
+    hits_privileged = await store.merges_for_entity("A", allowed_acls=["acl:public", "acl:finance"])
+    assert len(hits_privileged) == 1
+
+    # None (back-compat) = no filter.
+    hits_unfiltered = await store.merges_for_entity("A")
+    assert len(hits_unfiltered) == 1
 
 
 async def test_v1_pickle_loads_cleanly_with_empty_merges(

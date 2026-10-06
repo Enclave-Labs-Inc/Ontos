@@ -535,6 +535,59 @@ async def test_merges_for_entity_returns_grouped_record_from_either_endpoint(
     from_merged = await store.merges_for_entity("B")
     assert len(from_merged) == 1
     assert from_merged[0].canonical_id == "A"
+    # PR #47 blocking regression: lookup from a merged endpoint MUST
+    # return the full group, not just the queried id. Pre-fix the
+    # one-step Cypher truncated to ["B"] (losing C) — a real Article-12
+    # audit gap. Two-step Cypher finds the group first, then collects
+    # all its edges.
+    assert sorted(from_merged[0].merged_ids) == ["B", "C"]
+
+
+async def test_merges_for_entity_pre_filters_by_allowed_acls(
+    store: Neo4jStore,
+) -> None:
+    """PR #47 suggestion 2: optional allowed_acls drops records whose
+    endpoint entities have an acl_ref the caller cannot see."""
+    from datetime import UTC, datetime
+
+    from ontos.resolver.base import MergeRecord
+    from ontos.runtime.models import Confidence, Entity, Provenance
+
+    prov = Provenance(
+        source_id="doc",
+        extractor_id="t",
+        extractor_version="0",
+        confidence=Confidence.EXTRACTED,
+        confidence_score=1.0,
+    )
+    # Public canonical, restricted merged endpoint.
+    await store.upsert_entity(
+        Entity(id="A", type="Person", canonical_name="Alice", provenance=prov),
+        acl_ref=None,
+    )
+    await store.upsert_entity(
+        Entity(id="B", type="Person", canonical_name="Alice", provenance=prov),
+        acl_ref="acl:finance",
+    )
+    await store.record_merge(
+        MergeRecord(
+            canonical_id="A",
+            merged_ids=["A", "B"],
+            resolver_id="r",
+            resolver_version="0",
+            resolved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    )
+
+    hits_public = await store.merges_for_entity("A", allowed_acls=["acl:public"])
+    assert hits_public == []
+
+    hits_privileged = await store.merges_for_entity("A", allowed_acls=["acl:public", "acl:finance"])
+    assert len(hits_privileged) == 1
+
+    # None = no filter (back-compat for pre-#47 callers).
+    hits_unfiltered = await store.merges_for_entity("A")
+    assert len(hits_unfiltered) == 1
 
 
 async def test_merge_record_idx_exists_after_initialize(store: Neo4jStore) -> None:

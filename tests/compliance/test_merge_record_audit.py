@@ -95,10 +95,14 @@ async def test_pipeline_persists_merge_record_through_exact_match_resolver(
     hits = await reader.merges_for_entity(canonical)
     assert len(hits) == 1
     assert hits[0].resolver_id == "ontos.resolver.exact-match"
-    assert set(hits[0].merged_ids) == {canonical, non_canonical}
+    # Normalized at write time — canonical stripped from merged_ids.
+    assert hits[0].canonical_id == canonical
+    assert hits[0].merged_ids == [non_canonical]
 
     hits_from_other = await reader.merges_for_entity(non_canonical)
     assert len(hits_from_other) == 1
+    assert hits_from_other[0].canonical_id == canonical
+    assert hits_from_other[0].merged_ids == [non_canonical]
 
 
 async def test_re_ingest_is_idempotent_on_merge_persistence(tmp_path: Path) -> None:

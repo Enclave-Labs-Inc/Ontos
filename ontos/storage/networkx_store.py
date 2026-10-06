@@ -360,24 +360,43 @@ class NetworkxStore:
     async def record_merge(self, record: MergeRecord) -> None:
         # Fan out one logical MergeRecord across (canonical, merged_id,
         # resolver_id) keys so merges_for_entity can find the record
-        # from any endpoint. Store the full record object at each key —
-        # audit can reconstruct the original group via canonical_id.
-        # Idempotent: re-recording the same (canonical, merged, resolver)
-        # tuple is last-write-wins on resolved_at + reason.
-        for merged_id in record.merged_ids:
-            if merged_id == record.canonical_id:
-                # ExactMatchResolver's convention includes the winner's
-                # own id in merged_ids; skip the self-loop so the
-                # [:MERGED_WITH] view only shows real consolidations.
-                continue
+        # from any endpoint.
+        #
+        # Normalize at write time: strip the canonical from merged_ids
+        # before storing. ExactMatchResolver's convention includes the
+        # winner's own id in merged_ids; the audit edge only shows real
+        # consolidations, and reads must match Neo4j (which also strips
+        # the self-loop). The normalized record is what merges_for_entity
+        # returns — Protocol docstring documents the contract.
+        normalized_merged = [m for m in record.merged_ids if m != record.canonical_id]
+        if not normalized_merged:
+            # No real consolidation (resolver only emitted the canonical
+            # self-reference); nothing to record.
+            return
+        normalized = record.model_copy(update={"merged_ids": normalized_merged})
+        for merged_id in normalized_merged:
             key = (record.canonical_id, merged_id, record.resolver_id)
-            self._merges[key] = record
+            # Idempotent: re-recording the same (canonical, merged,
+            # resolver) tuple is last-write-wins on resolved_at + reason.
+            self._merges[key] = normalized
         self._dirty = True
 
-    async def merges_for_entity(self, entity_id: str) -> list[MergeRecord]:
+    async def merges_for_entity(
+        self,
+        entity_id: str,
+        *,
+        allowed_acls: list[str] | None = None,
+    ) -> list[MergeRecord]:
         # Dedupe on (canonical_id, resolver_id, resolved_at): one logical
         # MergeRecord fans out across multiple keys (one per merged_id)
         # but should be returned once from the audit view.
+        #
+        # PR #47 review: optional allowed_acls pre-filter drops records
+        # whose canonical or any merged endpoint has an acl_ref the
+        # caller cannot see. Readers that forget to filter would leak
+        # the existence of a restricted entity's merge group — CLAUDE.md
+        # forbids that.
+        allowed_set = set(allowed_acls) if allowed_acls is not None else None
         seen: set[tuple[str, str, str]] = set()
         hits: list[MergeRecord] = []
         for (canonical, merged, _resolver), record in self._merges.items():
@@ -390,9 +409,31 @@ class NetworkxStore:
             )
             if dedupe_key in seen:
                 continue
+            if allowed_set is not None and not self._merge_record_visible(record, allowed_set):
+                seen.add(dedupe_key)  # dedupe even skipped records to avoid re-check
+                continue
             seen.add(dedupe_key)
             hits.append(record)
         return hits
+
+    def _merge_record_visible(self, record: MergeRecord, allowed_set: set[str]) -> bool:
+        """Return True iff every endpoint entity is visible under allowed_set.
+
+        An endpoint is visible when its node's ``acl_ref`` is None (public)
+        or appears in ``allowed_set``. If the node doesn't exist in the
+        graph (e.g. a merged id that was never upserted), we treat it as
+        public — the pipeline guarantees upserts come before fact writes
+        in #38, but older stores may have gaps.
+        """
+
+        def _endpoint_visible(eid: str) -> bool:
+            attrs = self._graph.nodes.get(eid, {})
+            acl = attrs.get("acl_ref")
+            return acl is None or acl in allowed_set
+
+        if not _endpoint_visible(record.canonical_id):
+            return False
+        return all(_endpoint_visible(mid) for mid in record.merged_ids)
 
     async def close(self) -> None:
         self.flush()

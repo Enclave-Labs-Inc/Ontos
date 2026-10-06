@@ -122,10 +122,15 @@ class GraphStore(Protocol):
         merge. A resolver asserting "A and B are the same" across N
         ingest runs produces one record, not N.
 
-        **Self-loops skipped.** ``ExactMatchResolver`` includes
-        ``canonical_id`` in ``merged_ids`` by convention
-        (``rules.py``); backends MUST NOT emit a self-referential
-        ``[:MERGED_WITH]`` edge or record.
+        **Self-loops stripped at write time.** ``ExactMatchResolver``
+        includes ``canonical_id`` in ``merged_ids`` by convention
+        (``rules.py``). Backends normalize the stored record so
+        ``merged_ids`` contains only non-canonical ids — this is the
+        shape ``merges_for_entity`` returns. Callers that need to know
+        "every id in the group including canonical" use
+        ``canonical_id + merged_ids``. A record whose ``merged_ids``
+        contains only the canonical (no real consolidations) is
+        skipped entirely — the audit edge only shows real consolidations.
 
         **Read-side ACL contract (CLAUDE.md invariant):** this seam
         does NOT itself carry an ACL. Readers (``merges_for_entity``,
@@ -137,16 +142,31 @@ class GraphStore(Protocol):
         """
         ...
 
-    async def merges_for_entity(self, entity_id: str) -> list[MergeRecord]:
+    async def merges_for_entity(
+        self,
+        entity_id: str,
+        *,
+        allowed_acls: list[str] | None = None,
+    ) -> list[MergeRecord]:
         """Return every merge record where ``entity_id`` appears either
         as ``canonical_id`` OR in ``merged_ids``.
 
         Mirrors ``facts_for_entity`` — bidirectional audit lookup.
         One logical merge decision is returned once even if it carries
         multiple ``merged_ids`` (deduped on
-        ``(canonical_id, resolver_id, resolved_at)``). Callers filter
-        the returned records on the referenced entities' ACL per the
-        read-side contract on ``record_merge``.
+        ``(canonical_id, resolver_id, resolved_at)``).
+
+        **ACL pre-filter.** When ``allowed_acls`` is passed, every
+        record whose canonical or any merged entity has an ``acl_ref``
+        the caller cannot see is dropped at the store boundary. The
+        default ``None`` means "no filter" (back-compat with pre-#47
+        callers), but any caller that returns merge records up a user-
+        facing path MUST pass ``allowed_acls`` or the authz-leak
+        contract described on ``record_merge`` is violated: a merged
+        id's existence would be visible even when the citing entity
+        is not. CLAUDE.md "pre-filter when possible" applies here —
+        the store sees the endpoint entities' ``acl_ref`` and must
+        enforce the invariant on behalf of callers that forget.
         """
         ...
 

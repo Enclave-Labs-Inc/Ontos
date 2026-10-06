@@ -394,48 +394,83 @@ class Neo4jStore:
         # resolver_id) gives us the idempotency key the Protocol
         # contract promises; SET overwrites resolved_at + reason on
         # re-assertion (last-write-wins on the audit timestamp).
+        #
+        # PR #47 review: single UNWIND statement so a mid-loop failure
+        # can't leave a partial merge record (edges for B but not C).
+        # One transaction, one atomic write per logical MergeRecord.
         query = """
         MERGE (canonical:Entity {id: $canonical_id})
-        MERGE (merged:Entity {id: $merged_id})
+        WITH canonical
+        UNWIND $merged_ids AS merged_id_param
+        WITH canonical, merged_id_param
+        WHERE merged_id_param <> $canonical_id
+        MERGE (merged:Entity {id: merged_id_param})
         MERGE (merged)-[r:MERGED_WITH {resolver_id: $resolver_id}]->(canonical)
         SET r.resolver_version = $resolver_version,
             r.resolved_at = datetime($resolved_at),
             r.reason = $reason
         """
         async with self._driver.session(database=self._database) as session:
-            for merged_id in record.merged_ids:
-                if merged_id == record.canonical_id:
-                    continue  # skip self-loops (ExactMatchResolver convention)
-                await session.run(
-                    query,
-                    canonical_id=record.canonical_id,
-                    merged_id=merged_id,
-                    resolver_id=record.resolver_id,
-                    resolver_version=record.resolver_version,
-                    resolved_at=record.resolved_at.isoformat(),
-                    reason=record.reason,
-                )
+            await session.run(
+                query,
+                canonical_id=record.canonical_id,
+                merged_ids=list(record.merged_ids),
+                resolver_id=record.resolver_id,
+                resolver_version=record.resolver_version,
+                resolved_at=record.resolved_at.isoformat(),
+                reason=record.reason,
+            )
 
-    async def merges_for_entity(self, entity_id: str) -> list[MergeRecord]:
+    async def merges_for_entity(
+        self,
+        entity_id: str,
+        *,
+        allowed_acls: list[str] | None = None,
+    ) -> list[MergeRecord]:
         # Bidirectional lookup — the id can appear as canonical or
-        # merged. Group edges that share (canonical_id, resolver_id,
-        # resolved_at) back into a single MergeRecord so the audit view
-        # matches the dev-store's "one logical decision = one record"
-        # semantics.
+        # merged.
+        #
+        # PR #47 review: two-step Cypher so the group is found first,
+        # THEN all its edges are collected. Pre-review the one-step
+        # pattern truncated merged_ids when queried from a merged
+        # endpoint — graph A ← {B,C} queried on "B" returned
+        # merged_ids=[B] (losing C), a real Article-12 audit gap.
+        #
+        # ACL pre-filter (PR #47 suggestion 2): optional allowed_acls
+        # drops records where any endpoint entity has an acl_ref the
+        # caller cannot see. CLAUDE.md "pre-filter when possible" —
+        # safer default than relying on callers to post-filter.
         query = """
-        MATCH (merged:Entity)-[r:MERGED_WITH]->(canonical:Entity)
-        WHERE canonical.id = $entity_id OR merged.id = $entity_id
-        WITH canonical.id AS canonical_id,
+        // Step 1: find matching groups by their identifying tuple.
+        MATCH (m:Entity)-[r:MERGED_WITH]->(c:Entity)
+        WHERE c.id = $entity_id OR m.id = $entity_id
+        WITH DISTINCT c,
              r.resolver_id AS resolver_id,
              r.resolver_version AS resolver_version,
              r.resolved_at AS resolved_at,
-             r.reason AS reason,
-             collect(merged.id) AS merged_ids
-        RETURN canonical_id, merged_ids, resolver_id, resolver_version,
-               resolved_at, reason
+             r.reason AS reason
+        // Step 2: collect every edge in each identified group.
+        MATCH (m2:Entity)-[r2:MERGED_WITH {resolver_id: resolver_id}]->(c)
+        WHERE r2.resolved_at = resolved_at
+        WITH c, resolver_id, resolver_version, resolved_at, reason,
+             collect(m2) AS merged_nodes
+        // ACL pre-filter — canonical AND every endpoint must be visible.
+        WHERE $allowed_acls IS NULL
+           OR (
+               (c.acl_ref IS NULL OR c.acl_ref IN $allowed_acls)
+               AND ALL(mn IN merged_nodes
+                       WHERE mn.acl_ref IS NULL OR mn.acl_ref IN $allowed_acls)
+           )
+        RETURN c.id AS canonical_id,
+               [mn IN merged_nodes | mn.id] AS merged_ids,
+               resolver_id, resolver_version, resolved_at, reason
         """
         async with self._driver.session(database=self._database) as session:
-            result = await session.run(query, entity_id=entity_id)
+            result = await session.run(
+                query,
+                entity_id=entity_id,
+                allowed_acls=allowed_acls,
+            )
             records = await result.data()
 
         hits: list[MergeRecord] = []
