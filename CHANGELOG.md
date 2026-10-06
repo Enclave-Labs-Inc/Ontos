@@ -17,6 +17,32 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 0.4.0 track — storage-model foundations for exports and
 ontology-version provenance.
 
+### Fixed — cross-ACL attribute leak on upsert_entity (#48)
+- `GraphStore.upsert_entity` now rejects writes that would change an
+  entity's `acl_ref` to a different non-None value (or to None, which
+  would unmask a restricted entity). Pre-#48 the ACL stayed on the
+  first write but attrs got overwritten by any subsequent ingest
+  regardless of scope — a Finance-scoped caller could read HR-sourced
+  attrs under the Finance ACL. New `CrossAclUpsertError(StorageError)`
+  is raised; `IngestPipeline.run()` routes it through the existing
+  `ErrorPolicy` the same way it already routes `ExtractionError`
+  (whole-doc skip under `SKIP_AND_LOG` preserves the "every fact
+  subject/object has a backing typed node" invariant).
+- Neo4j: the pre-write check runs inside a `session.execute_write`
+  transaction so a rejected cross-ACL upsert rolls back atomically —
+  no partial state lands.
+- A `structlog.warning("cross-acl-upsert-rejected", entity_id=...,
+  stored_acl=..., attempted_acl=..., attempted_canonical_name=...)`
+  event fires at the raise site so compliance operators can audit
+  attempted boundary crossings without parsing exception traces.
+- Downstream: #46's `merges_for_entity(allowed_acls=...)` is now
+  consistently safe — the "stored ACL but different-scope attrs"
+  state that could silently leak through the merge-visibility
+  pre-filter cannot occur. ACL and attrs can never drift apart.
+- New semantics table: `None → None`, `None → X`, `X → X` proceed
+  with last-write-wins on attrs; `X → None` and `X → Y` raise.
+- Credit: @ALEKS0805 caught this while prepping #32's exporter.
+
 ### Added — MergeRecord persistence (#46)
 - `GraphStore.record_merge(record)` + `merges_for_entity(entity_id)`
   Protocol methods. Idempotent on `(canonical_id, merged_id,

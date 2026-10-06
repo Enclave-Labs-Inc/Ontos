@@ -34,6 +34,7 @@ from neo4j.time import DateTime as Neo4jDateTime
 
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
+from ontos.storage.base import CrossAclUpsertError
 
 log = structlog.get_logger(__name__)
 
@@ -155,42 +156,68 @@ class Neo4jStore:
 
     async def upsert_entity(self, entity: Entity, *, acl_ref: str | None = None) -> None:
         # #38: idempotent MERGE on (:Entity {id}). Last-write-wins on
-        # type / canonical_name / aliases / properties. IngestPipeline
-        # calls this before add_fact so every fact's subject_id /
-        # object_id has a backing typed node.
+        # type / canonical_name / aliases / properties when the ACL
+        # doesn't change. IngestPipeline calls this before add_fact so
+        # every fact's subject_id / object_id has a backing typed node.
         #
-        # Neo4j property values must be primitives or arrays of primitives.
-        # `Entity.properties: dict[str, str]` is a map, which Neo4j rejects
-        # as a node property — JSON-encode it on write (reviewer catch;
-        # the pre-review version broke every Neo4j ingest). Readers (#32's
-        # exporter) decode via `json.loads(n.properties)` back into a dict.
+        # Neo4j property values must be primitives or arrays of
+        # primitives. `Entity.properties: dict[str, str]` is a map,
+        # which Neo4j rejects as a node property — JSON-encode on
+        # write; readers decode via `json.loads(n.properties)`.
+        #
+        # #48: two-query transaction so the cross-ACL check runs
+        # BEFORE any write. If the raise fires, the transaction rolls
+        # back and the node's prior attrs stay intact (no partial
+        # write). session.execute_write wraps both tx.runs in a
+        # single Neo4j transaction so there's no TOCTOU window for
+        # another writer.
         properties_json = json.dumps(dict(entity.properties), sort_keys=True)
-        # OPTIONAL MATCH captures the pre-upsert type so we can fire the
-        # same "entity-type-overwrite" audit warning as NetworkxStore
-        # when a resolver bug or legitimate schema change rewrites the
-        # type. Single statement; no extra round-trip.
-        # ACL is first-write-wins: an entity first stamped by a
-        # restricted doc stays restricted even when a later public doc
-        # re-upserts it. coalesce(n.acl_ref, $acl_ref) picks the first
-        # non-null, so a None later-write never downgrades. Operators
-        # that want to broaden an entity's ACL use a dedicated admin
-        # path, not routine ingest.
-        query = """
-        OPTIONAL MATCH (existing:Entity {id: $id})
-        WITH existing.type AS prev_type, existing.acl_ref AS prev_acl_ref
-        MERGE (n:Entity {id: $id})
-        SET n.type = $type,
-            n.canonical_name = $canonical_name,
-            n.aliases = $aliases,
-            n.properties = $properties_json,
-            n.provenance_source_id = $provenance_source_id,
-            n.provenance_extractor_id = $provenance_extractor_id,
-            n.acl_ref = coalesce(prev_acl_ref, $acl_ref)
-        RETURN prev_type
-        """
-        async with self._driver.session(database=self._database) as session:
-            result = await session.run(
-                query,
+
+        async def _upsert_tx(tx: Any) -> str | None:
+            # PR #49 review: MERGE + ON MATCH SET acquires the write
+            # lock on `n` BEFORE we read its acl_ref. Pre-review the
+            # plain OPTIONAL MATCH took no lock, so two concurrent
+            # writers could both see prev_acl_ref=None, both pass the
+            # check, and the second would overwrite the first's ACL
+            # via coalesce($prev_acl_ref=None, $acl_ref) — a race-
+            # induced reintroduction of the #48 bug. The _upsert_count
+            # bump is a dedicated lock-acquisition write; it also
+            # gives operators a per-node upsert counter for free.
+            prev_result = await tx.run(
+                """
+                MERGE (n:Entity {id: $id})
+                ON CREATE SET n._upsert_count = 1
+                ON MATCH SET n._upsert_count = coalesce(n._upsert_count, 0) + 1
+                WITH n, n.type AS prev_type, n.acl_ref AS prev_acl_ref
+                RETURN prev_type, prev_acl_ref
+                """,
+                id=entity.id,
+            )
+            prev_row = await prev_result.single()
+            prev_type: str | None = prev_row["prev_type"] if prev_row else None
+            prev_acl_ref: str | None = prev_row["prev_acl_ref"] if prev_row else None
+
+            # #48 cross-ACL check — raise inside the transaction so
+            # the whole thing rolls back; nothing writes if the ACL
+            # would change on an already-stamped entity.
+            if prev_acl_ref is not None and prev_acl_ref != acl_ref:
+                raise CrossAclUpsertError(
+                    entity_id=entity.id,
+                    stored_acl=prev_acl_ref,
+                    attempted_acl=acl_ref,
+                )
+
+            await tx.run(
+                """
+                MERGE (n:Entity {id: $id})
+                SET n.type = $type,
+                    n.canonical_name = $canonical_name,
+                    n.aliases = $aliases,
+                    n.properties = $properties_json,
+                    n.provenance_source_id = $provenance_source_id,
+                    n.provenance_extractor_id = $provenance_extractor_id,
+                    n.acl_ref = coalesce($prev_acl_ref, $acl_ref)
+                """,
                 id=entity.id,
                 type=entity.type,
                 canonical_name=entity.canonical_name,
@@ -198,10 +225,29 @@ class Neo4jStore:
                 properties_json=properties_json,
                 provenance_source_id=entity.provenance.source_id,
                 provenance_extractor_id=entity.provenance.extractor_id,
+                prev_acl_ref=prev_acl_ref,
                 acl_ref=acl_ref,
             )
-            record = await result.single()
-            prev_type = record["prev_type"] if record else None
+            return prev_type
+
+        try:
+            async with self._driver.session(database=self._database) as session:
+                prev_type = await session.execute_write(_upsert_tx)
+        except CrossAclUpsertError as exc:
+            # Also log the structured audit event (parity with
+            # NetworkxStore). Compliance operators grep logs rather
+            # than parsing exception traces.
+            # PR #49 review: do NOT log attempted_canonical_name — it
+            # can be restricted attribute content from the attempting
+            # doc's ACL scope, and log sinks are typically readable
+            # without those ACLs. Ids + ACL refs only.
+            log.warning(
+                "cross-acl-upsert-rejected",
+                entity_id=entity.id,
+                stored_acl=exc.stored_acl,
+                attempted_acl=exc.attempted_acl,
+            )
+            raise
 
         if prev_type is not None and prev_type != entity.type:
             log.warning(
@@ -387,6 +433,20 @@ class Neo4jStore:
             )
             records = await result.data()
         return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]
+
+    async def entity_acl(self, entity_id: str) -> str | None:
+        # PR #49: read-only ACL lookup used by IngestPipeline to
+        # pre-check all extracted entities before any write.
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "OPTIONAL MATCH (n:Entity {id: $id}) RETURN n.acl_ref AS acl",
+                id=entity_id,
+            )
+            row = await result.single()
+        if row is None:
+            return None
+        acl = row["acl"]
+        return acl if isinstance(acl, str) else None
 
     async def record_merge(self, record: MergeRecord) -> None:
         # #46: materialize MergeRecord as [:MERGED_WITH] edges from each

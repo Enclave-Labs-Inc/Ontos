@@ -187,13 +187,31 @@ async def test_entity_inherits_acl_from_restricted_source_doc() -> None:
     assert store._graph.nodes["alice"]["acl_ref"] == "acl:finance"  # noqa: SLF001
 
 
-async def test_entity_acl_not_downgraded_by_later_public_ingest() -> None:
-    """Prevents a silent leak: an entity first stamped by a restricted
-    doc must NOT lose its acl_ref if a later public doc re-upserts it."""
+async def test_cross_acl_second_doc_rejected_under_skip_and_log() -> None:
+    """#48: the pre-#48 "silent downgrade" scenario — restricted doc
+    then public doc re-upserting the same entity — is now a loud
+    `CrossAclUpsertError`. Under `SKIP_AND_LOG` the pipeline records
+    it in `IngestReport.errors`, keeps running, and the stored attrs
+    stay the restricted-doc values (no partial overwrite)."""
     ontology = load_ontology(STARTER)
     prov = _prov()
-    entities = [
-        Entity(id="alice", type="Person", canonical_name="Alice", provenance=prov),
+    restricted_entities = [
+        Entity(
+            id="alice",
+            type="Person",
+            canonical_name="Alice Finance",
+            properties={"department": "finance"},
+            provenance=prov,
+        ),
+    ]
+    public_entities = [
+        Entity(
+            id="alice",
+            type="Person",
+            canonical_name="Alice Public",
+            properties={"department": "public"},
+            provenance=prov,
+        ),
     ]
 
     store = NetworkxStore()
@@ -208,15 +226,27 @@ async def test_entity_acl_not_downgraded_by_later_public_ingest() -> None:
 
     pipeline = IngestPipeline(
         connector=_TwoDocConnector(),
-        extractor=_FixtureExtractor({"restricted": (entities, []), "public": (entities, [])}),
+        extractor=_FixtureExtractor(
+            {"restricted": (restricted_entities, []), "public": (public_entities, [])}
+        ),
         resolver=None,
         store=store,
         ontology=ontology,
-        error_policy=ErrorPolicy.FAIL_FAST,
+        error_policy=ErrorPolicy.SKIP_AND_LOG,
     )
-    await pipeline.run()
-    # Restrictive stamp survives the later public ingest.
-    assert store._graph.nodes["alice"]["acl_ref"] == "acl:finance"  # noqa: SLF001
+    report = await pipeline.run()
+
+    # The public doc is in errors; restricted doc succeeded.
+    assert len(report.errors) == 1
+    assert report.errors[0].source_id == "public"
+    assert "cross-ACL" in report.errors[0].reason
+
+    # Stored attrs are the restricted doc's values — no partial update
+    # from the rejected public write.
+    attrs = store._graph.nodes["alice"]  # noqa: SLF001
+    assert attrs["acl_ref"] == "acl:finance"
+    assert attrs["canonical_name"] == "Alice Finance"
+    assert attrs["properties"] == {"department": "finance"}
 
 
 async def test_resolver_type_merge_last_write_wins_with_audit_warning() -> None:

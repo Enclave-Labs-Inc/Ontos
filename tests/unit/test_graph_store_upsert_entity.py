@@ -246,27 +246,138 @@ async def test_upsert_entity_stamps_acl_ref_on_first_write() -> None:
     assert store._graph.nodes["alice"]["acl_ref"] == "acl:finance"  # noqa: SLF001
 
 
-async def test_upsert_entity_acl_is_first_write_wins() -> None:
-    """A later public ingest must NOT downgrade a previously-stamped ACL.
-    Prevents a silent leak of a restricted entity via #32's exporter."""
+async def test_cross_acl_upsert_restricted_to_none_raises() -> None:
+    """#48: a later public re-upsert of a restricted entity now raises.
+    Pre-#48 the ACL stayed stamped but attrs got overwritten, letting
+    public callers read restricted attrs through the stale ACL."""
+    import pytest
+
+    from ontos.storage.base import CrossAclUpsertError
+
     store = NetworkxStore()
     await store.upsert_entity(_entity(), acl_ref="acl:finance")
-    # Re-upsert with no acl_ref — restrictive stamp must persist.
-    await store.upsert_entity(_entity(canonical_name="Alice Updated"), acl_ref=None)
+    with pytest.raises(CrossAclUpsertError) as exc:
+        await store.upsert_entity(_entity(canonical_name="Alice Updated"), acl_ref=None)
+    assert exc.value.entity_id == "alice"
+    assert exc.value.stored_acl == "acl:finance"
+    assert exc.value.attempted_acl is None
+
+
+async def test_cross_acl_upsert_raises() -> None:
+    """#48: finance → hr now raises CrossAclUpsertError with both labels
+    in the structured error payload. Pre-#48 the ACL stamp stayed
+    finance but the attrs got overwritten with HR values — a silent
+    cross-scope leak."""
+    import pytest
+
+    from ontos.storage.base import CrossAclUpsertError
+
+    store = NetworkxStore()
+    await store.upsert_entity(_entity(), acl_ref="acl:finance")
+    with pytest.raises(CrossAclUpsertError) as exc:
+        await store.upsert_entity(_entity(canonical_name="Alice HR"), acl_ref="acl:hr")
+    assert exc.value.entity_id == "alice"
+    assert exc.value.stored_acl == "acl:finance"
+    assert exc.value.attempted_acl == "acl:hr"
+    assert "acl:finance" in str(exc.value)
+    assert "acl:hr" in str(exc.value)
+
+
+async def test_cross_acl_upsert_preserves_prior_attrs() -> None:
+    """#48: after the raise, stored attrs are the FIRST write's values —
+    no partial update landed. Covers the exact leak from Aleksandra's
+    repro: finance's Alice Finance / finance dept must survive the
+    rejected HR write."""
+    import pytest
+
+    from ontos.storage.base import CrossAclUpsertError
+
+    store = NetworkxStore()
+    await store.upsert_entity(
+        _entity(
+            canonical_name="Alice Finance",
+            properties={"department": "finance"},
+        ),
+        acl_ref="acl:finance",
+    )
+    with pytest.raises(CrossAclUpsertError):
+        await store.upsert_entity(
+            _entity(
+                canonical_name="Alice HR",
+                properties={"department": "hr"},
+            ),
+            acl_ref="acl:hr",
+        )
     attrs = store._graph.nodes["alice"]  # noqa: SLF001
     assert attrs["acl_ref"] == "acl:finance"
-    # Other attrs still last-write-wins.
-    assert attrs["canonical_name"] == "Alice Updated"
+    assert attrs["canonical_name"] == "Alice Finance"
+    assert attrs["properties"] == {"department": "finance"}
 
 
-async def test_upsert_entity_acl_also_first_write_wins_vs_different_label() -> None:
-    """Even a *different* non-null ACL on a later write doesn't overwrite
-    the stamped one — operators who need to broaden ACLs use a dedicated
-    admin path, not routine ingest."""
+async def test_same_acl_reupsert_last_write_wins_on_attrs() -> None:
+    """#48 regression: same-ACL re-upsert still updates attrs. This is
+    the common case (operator fixes a typo in a second ingest from the
+    same scope) — tightening ACL semantics must not break it."""
+    store = NetworkxStore()
+    await store.upsert_entity(
+        _entity(canonical_name="Alice Finance", properties={"team": "treasury"}),
+        acl_ref="acl:finance",
+    )
+    await store.upsert_entity(
+        _entity(canonical_name="Alice F. (Treasury)", properties={"team": "payments"}),
+        acl_ref="acl:finance",
+    )
+    attrs = store._graph.nodes["alice"]  # noqa: SLF001
+    assert attrs["acl_ref"] == "acl:finance"
+    assert attrs["canonical_name"] == "Alice F. (Treasury)"
+    assert attrs["properties"] == {"team": "payments"}
+
+
+async def test_public_to_restricted_upgrade_updates_attrs_and_acl() -> None:
+    """#48: None → X is a safe upgrade — the ACL stamps and attrs
+    land. Common case for an entity first seen in a public doc then
+    re-seen in a restricted one."""
+    store = NetworkxStore()
+    await store.upsert_entity(_entity(canonical_name="Alice Public"), acl_ref=None)
+    await store.upsert_entity(
+        _entity(canonical_name="Alice Finance", properties={"dept": "fin"}),
+        acl_ref="acl:finance",
+    )
+    attrs = store._graph.nodes["alice"]  # noqa: SLF001
+    assert attrs["acl_ref"] == "acl:finance"
+    assert attrs["canonical_name"] == "Alice Finance"
+    assert attrs["properties"] == {"dept": "fin"}
+
+
+async def test_none_to_none_reupsert_last_write_wins_on_attrs() -> None:
+    """#48 baseline: no-ACL common case still works. Both writes have
+    None acl_ref; attrs follow last-write-wins."""
+    store = NetworkxStore()
+    await store.upsert_entity(_entity(canonical_name="Alice v1"), acl_ref=None)
+    await store.upsert_entity(_entity(canonical_name="Alice v2"), acl_ref=None)
+    attrs = store._graph.nodes["alice"]  # noqa: SLF001
+    assert attrs["acl_ref"] is None
+    assert attrs["canonical_name"] == "Alice v2"
+
+
+async def test_cross_acl_rejection_logs_audit_event() -> None:
+    """#48: operators grepping logs see a structured
+    `cross-acl-upsert-rejected` event — can audit attempted boundary
+    crossings without parsing exception stack traces."""
+    import pytest
+    import structlog
+
+    from ontos.storage.base import CrossAclUpsertError
+
     store = NetworkxStore()
     await store.upsert_entity(_entity(), acl_ref="acl:finance")
-    await store.upsert_entity(_entity(), acl_ref="acl:hr")
-    assert store._graph.nodes["alice"]["acl_ref"] == "acl:finance"  # noqa: SLF001
+    with structlog.testing.capture_logs() as logs, pytest.raises(CrossAclUpsertError):
+        await store.upsert_entity(_entity(canonical_name="Alice HR"), acl_ref="acl:hr")
+    rejected = [log for log in logs if log.get("event") == "cross-acl-upsert-rejected"]
+    assert len(rejected) == 1
+    assert rejected[0]["entity_id"] == "alice"
+    assert rejected[0]["stored_acl"] == "acl:finance"
+    assert rejected[0]["attempted_acl"] == "acl:hr"
 
 
 async def test_upsert_entity_round_trips_through_persistence(tmp_path) -> None:
