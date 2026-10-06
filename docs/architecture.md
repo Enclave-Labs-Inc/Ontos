@@ -49,6 +49,14 @@ Correcting a fact does *not* mutate the original. The correction is a new `Fact`
 
 M2 replaces the inline check with a call into OpenFGA (`Check(user, relation, object)`).
 
+## Ontology evolution and lazy migration
+
+Every `Provenance` carries `ontology_id` and `ontology_version`, stamped by `LlmExtractor` from the active `Ontology` at ingest. Readers plug an `ontos.migration.MigrationRegistry` into the executor to translate historical facts forward when the schema evolves (predicate rename, deprecation, cardinality tighten). The seam mirrors `SupersessionPolicy`: a Protocol-shaped `OntologyMigration` with `id`, `from_version`, `to_version`, and an async per-fact `migrate_fact` method.
+
+The registry chains migrations across version hops via BFS; multiple migrations on the same edge apply in registration order (one version bump typically bundles rename + deprecate + tighten). Translation is **read-side only** — the stored fact's `predicate` and `provenance.ontology_version` never change, preserving the bitemporal immutability invariant. Migration events land in `ExecutionResult.warnings` so Article-12 audit tools can reconstruct which facts were translated or dropped and by which migration.
+
+Strict mode (`MigrationRegistry(strict=True)`) refuses to show facts the current ontology can't vouch for; the default is pass-through-with-warning so pre-#34 (unstamped) facts stay visible during ingest-side rollout.
+
 ## Audit contract
 
 Every tool in `runtime/server.py`:

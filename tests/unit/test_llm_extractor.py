@@ -105,6 +105,14 @@ async def test_happy_path_produces_facts_with_provenance(ontology: Ontology) -> 
     assert "fake-llm" in fact.provenance.extractor_id
     assert fact.provenance.confidence == Confidence.EXTRACTED
     assert fact.provenance.confidence_score == 0.95
+    # #34: ontology stamp lands from the active ontology on BOTH the
+    # Fact's provenance AND every extracted Entity's provenance.
+    assert fact.provenance.ontology_id == ontology.id
+    assert fact.provenance.ontology_version == ontology.version
+    assert result.entities
+    for ent in result.entities:
+        assert ent.provenance.ontology_id == ontology.id
+        assert ent.provenance.ontology_version == ontology.version
 
 
 async def test_silent_empty_on_non_empty_input_raises(ontology: Ontology) -> None:

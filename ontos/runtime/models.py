@@ -22,11 +22,28 @@ class Confidence(StrEnum):
 
 
 class Provenance(BaseModel):
-    """Per-fact provenance chain. Required on every Fact."""
+    """Per-fact provenance chain. Required on every Fact.
+
+    **#34 — ontology stamp.** ``ontology_id`` and ``ontology_version``
+    name the schema under which this fact was extracted. The ingest
+    pipeline (via ``LlmExtractor``) populates both from the active
+    ``Ontology`` at write time; readers plug an
+    ``ontos.migration.MigrationRegistry`` into the executor to
+    translate historical facts forward when the ontology evolves
+    (predicate rename, deprecation, cardinality tighten). The stored
+    fact is bitemporally immutable — migration is read-side only.
+
+    Both fields default to ``""`` for back-compat: pre-#34 ``Fact``
+    pickles / Neo4j edges load with empty strings, and the registry
+    treats an empty source version as "unstamped" (pass-through with
+    a warning under non-strict, drop under strict).
+    """
 
     source_id: str
     extractor_id: str
     extractor_version: str
+    ontology_id: str = ""
+    ontology_version: str = ""
     confidence: Confidence
     confidence_score: float = Field(ge=0.0, le=1.0)
 

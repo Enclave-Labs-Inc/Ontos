@@ -659,3 +659,71 @@ async def test_merge_record_idx_exists_after_initialize(store: Neo4jStore) -> No
         result = await session.run("SHOW INDEXES WHERE name = 'merge_record_idx'")
         records = [r async for r in result]
         assert len(records) == 1
+
+
+async def test_ontology_stamp_round_trips_through_neo4j(store: Neo4jStore) -> None:
+    """#34: ontology_id + ontology_version persist on the RELATES edge
+    and reconstruct on read. The two new fields are plain string props
+    (no index) so they only cost 2 extra bytes per edge."""
+    now = datetime.now(UTC)
+    prov = Provenance(
+        source_id="doc-v01",
+        extractor_id="test",
+        extractor_version="0.0.0",
+        ontology_id="ontos.starter",
+        ontology_version="0.1",
+        confidence=Confidence.EXTRACTED,
+        confidence_score=0.95,
+    )
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=prov,
+        t_valid=now,
+        ingested_at=now,
+    )
+    await store.add_fact(fact)
+
+    got = await store.get_fact(fact.id)
+    assert got is not None
+    assert got.provenance.ontology_id == "ontos.starter"
+    assert got.provenance.ontology_version == "0.1"
+
+
+async def test_legacy_edge_without_ontology_props_loads_with_empty_sentinel(
+    store: Neo4jStore,
+) -> None:
+    """A pre-#34 edge in a production store has no prov_ontology_* props.
+    `_edge_props_to_fact` must default both fields to "" so the fact
+    loads instead of raising KeyError. Simulated by writing a RELATES
+    edge directly with the pre-#34 prop set."""
+    fact_id = str(uuid4())
+    now = datetime.now(UTC)
+    async with store._driver.session(database=store._database) as session:  # noqa: SLF001
+        await session.run(
+            """
+            MERGE (s:Entity {id: 'legacy:subject'})
+            MERGE (o:Entity {id: 'legacy:object'})
+            CREATE (s)-[:RELATES {
+                fact_id: $fact_id,
+                predicate: 'knows',
+                t_valid: $now,
+                ingested_at: $now,
+                prov_source_id: 'legacy-doc',
+                prov_extractor_id: 'legacy.extractor',
+                prov_extractor_version: '0.0.0',
+                prov_confidence: 'EXTRACTED',
+                prov_confidence_score: 1.0
+            }]->(o)
+            """,
+            fact_id=fact_id,
+            now=now,
+        )
+
+    from uuid import UUID
+
+    got = await store.get_fact(UUID(fact_id))
+    assert got is not None
+    assert got.provenance.ontology_id == ""
+    assert got.provenance.ontology_version == ""

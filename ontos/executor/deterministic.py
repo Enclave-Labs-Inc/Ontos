@@ -31,6 +31,8 @@ from typing import Any, Literal
 import networkx as nx
 
 from ontos.executor.base import ExecutionHit, ExecutionResult
+from ontos.migration import MigrationRegistry
+from ontos.ontology import Ontology
 from ontos.planner import Plan, SeedByEntity, SeedByKeyword
 from ontos.runtime.models import Fact
 from ontos.storage.base import GraphStore
@@ -62,9 +64,27 @@ _EXECUTOR_MAX_DEPTH: int = 10
 
 
 class DeterministicExecutor:
-    """PPR + PathRAG-style executor."""
+    """PPR + PathRAG-style executor.
+
+    #34 — Optional ``current_ontology`` + ``migration_registry`` enable
+    lazy query-time translation: facts fetched from the store are run
+    through the registry against ``current_ontology`` before PPR +
+    path-flow scoring. Both default to ``None`` so pre-#34 callers keep
+    working with pass-through semantics. The stored facts stay
+    bitemporally immutable; only the read-side projection is
+    translated.
+    """
 
     id: str = "ontos.executor.deterministic-v1"
+
+    def __init__(
+        self,
+        *,
+        current_ontology: Ontology | None = None,
+        migration_registry: MigrationRegistry | None = None,
+    ) -> None:
+        self._current_ontology = current_ontology
+        self._migration_registry = migration_registry
 
     async def execute(
         self,
@@ -83,7 +103,7 @@ class DeterministicExecutor:
             return ExecutionResult(hits=[], warnings=warnings)
 
         collected, hops_by_fact = await self._expand(
-            plan, seed_entities, store, as_of, acl_subject, allowed_acls
+            plan, seed_entities, store, as_of, acl_subject, allowed_acls, warnings
         )
         if not collected:
             warnings.append("expansion produced no facts")
@@ -268,8 +288,17 @@ class DeterministicExecutor:
         as_of: datetime | None,
         acl_subject: str | None,
         allowed_acls: list[str] | None,
+        warnings: list[str],
     ) -> tuple[dict[Any, Fact], dict[Any, int]]:
-        """Return (facts by id, hop distance from nearest seed per fact)."""
+        """Return (facts by id, hop distance from nearest seed per fact).
+
+        Facts are translated through the migration registry (if set)
+        BEFORE `_absorb` so hop-distance bookkeeping and PPR scoring
+        both see the target-ontology projection, not the stored form.
+        Drops from migrations don't advance the frontier (they're
+        hidden from the read view, so expansion through them would
+        be incoherent).
+        """
         collected: dict[Any, Fact] = {}
         hops_by_fact: dict[Any, int] = {}
         current_frontier: list[str] = list(dict.fromkeys(seed_entities))
@@ -291,6 +320,7 @@ class DeterministicExecutor:
                                 allowed_acls=allowed_acls,
                             )
                         )
+                        facts = await self._translate(facts, warnings)
                         _absorb(
                             facts,
                             collected,
@@ -310,6 +340,7 @@ class DeterministicExecutor:
                             allowed_acls=allowed_acls,
                         )
                     )
+                    facts = await self._translate(facts, warnings)
                     _absorb(
                         facts,
                         collected,
@@ -323,6 +354,31 @@ class DeterministicExecutor:
             if not current_frontier:
                 break
         return collected, hops_by_fact
+
+    async def _translate(self, facts: list[Fact], warnings: list[str]) -> list[Fact]:
+        """Run facts through the migration registry when both the registry
+        and the current ontology are set; otherwise pass through unchanged.
+
+        Migration warnings land on the executor's warnings list so the
+        Article-12 audit trail (`ExecutionResult.warnings`) can
+        reconstruct which facts were translated or dropped and why.
+        """
+        if self._migration_registry is None or self._current_ontology is None:
+            return facts
+        translated: list[Fact] = []
+        for f in facts:
+            migrated, migration_warnings = await self._migration_registry.migrate_fact(
+                f, self._current_ontology
+            )
+            for w in migration_warnings:
+                warnings.append(
+                    f"ontology-migration: fact {w.fact_id} "
+                    f"from v{w.from_version} to v{w.to_version} "
+                    f"({w.migration_id}): {w.reason}"
+                )
+            if migrated is not None:
+                translated.append(migrated)
+        return translated
 
     def _ppr(self, collected: dict[Any, Fact], seed_entities: list[str]) -> dict[str, float]:
         """Personalized PageRank over the fetched subgraph."""

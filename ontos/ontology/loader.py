@@ -84,6 +84,18 @@ class Pattern(BaseModel):
 
 
 class Ontology(BaseModel):
+    # #34: `id` + `version` form the stamp written into
+    # `Provenance.ontology_id` / `Provenance.ontology_version` on every
+    # fact (and entity) extracted under this ontology. Readers rely on
+    # that stamp to migrate historical facts forward at query time via
+    # `ontos.migration.MigrationRegistry`.
+    #
+    # `id` is a stable, dotted identifier (e.g. "ontos.starter",
+    # "customer.finops"); never rename once facts have been written
+    # under it. The `"ontos.unknown"` default lets pre-#34 YAMLs
+    # (no top-level `id:` key) keep loading — facts extracted under
+    # one show up with that sentinel so operators notice.
+    id: str = "ontos.unknown"
     version: str = "0.1"
     entity_types: list[EntityType]
     relation_types: list[RelationType]

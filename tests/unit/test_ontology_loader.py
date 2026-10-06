@@ -188,3 +188,52 @@ def test_starter_ontology_cardinality_parses() -> None:
     acquired = ont.relation_type("acquired")
     assert acquired is not None
     assert acquired.cardinality == "many_to_many"
+
+
+def test_starter_ontology_carries_id_for_provenance_stamp() -> None:
+    # #34: `Ontology.id` is read by `LlmExtractor` to stamp every
+    # extracted fact's `Provenance.ontology_id`. The starter ontology
+    # carries an explicit id so facts extracted against it in CI /
+    # demos are never written with the back-compat sentinel.
+    ont = load_ontology(STARTER_PATH)
+    assert ont.id == "ontos.starter"
+    assert ont.version == "0.1"
+
+
+def test_ontology_id_defaults_to_unknown_when_yaml_omits_it(tmp_path: Path) -> None:
+    # Back-compat: a YAML that pre-dates #34 (no top-level `id:` key)
+    # still loads. The sentinel "ontos.unknown" surfaces on any fact
+    # extracted under it so operators can tell at a glance that the
+    # ontology wasn't tagged.
+    legacy = tmp_path / "pre_34.yaml"
+    legacy.write_text(
+        "entity_types:\n"
+        "  - label: Person\n"
+        "relation_types:\n"
+        "  - label: knows\n"
+        "patterns:\n"
+        "  - subject_type: Person\n"
+        "    predicate: knows\n"
+        "    object_type: Person\n"
+    )
+    ont = load_ontology(legacy)
+    assert ont.id == "ontos.unknown"
+
+
+def test_ontology_id_round_trips_from_yaml(tmp_path: Path) -> None:
+    custom = tmp_path / "custom.yaml"
+    custom.write_text(
+        'id: "customer.finops"\n'
+        'version: "2.3"\n'
+        "entity_types:\n"
+        "  - label: Person\n"
+        "relation_types:\n"
+        "  - label: knows\n"
+        "patterns:\n"
+        "  - subject_type: Person\n"
+        "    predicate: knows\n"
+        "    object_type: Person\n"
+    )
+    ont = load_ontology(custom)
+    assert ont.id == "customer.finops"
+    assert ont.version == "2.3"
