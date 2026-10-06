@@ -197,3 +197,133 @@ async def test_cross_acl_rejection_fires_structured_audit_event() -> None:
     assert rejected[0]["entity_id"] == "person:alice"
     assert rejected[0]["stored_acl"] == "acl:finance"
     assert rejected[0]["attempted_acl"] == "acl:hr"
+
+
+async def test_audit_log_does_not_include_attempted_attribute_content() -> None:
+    """PR #49 review fix: the audit log event must NOT include
+    `attempted_canonical_name` (or any other attempted attribute
+    content). Log sinks are typically readable by operators without
+    the restricted ACL — copying attribute content there copies
+    restricted content into a less-protected place."""
+    store = NetworkxStore()
+    await store.upsert_entity(_entity("Alice Finance"), acl_ref="acl:finance")
+    with structlog.testing.capture_logs() as logs, pytest.raises(CrossAclUpsertError):
+        await store.upsert_entity(
+            _entity("Alice HR SECRET DATA", {"ssn": "123"}),
+            acl_ref="acl:hr",
+        )
+    rejected = [log for log in logs if log.get("event") == "cross-acl-upsert-rejected"]
+    assert len(rejected) == 1
+    assert "attempted_canonical_name" not in rejected[0]
+    # And none of the restricted attempted-attr values leak via any
+    # other key.
+    event_str = str(rejected[0])
+    assert "Alice HR SECRET DATA" not in event_str
+    assert "123" not in event_str
+
+
+async def test_ingest_report_errors_do_not_leak_entity_id_or_stored_acl() -> None:
+    """PR #49 review fix (1a): `IngestReport.errors[].reason` must NOT
+    carry the stored ACL label or the entity id — a public caller
+    inspecting the report would otherwise learn that a restricted
+    entity exists and which ACL guards it. CLAUDE.md: never leak the
+    existence of a forbidden node. The detailed stored_acl +
+    attempted_acl pair lives in the audit log instead."""
+    ontology = load_ontology(STARTER)
+    store = NetworkxStore()
+    pipeline = IngestPipeline(
+        connector=_TwoDocConnector(),
+        extractor=_FixtureExtractor(
+            {
+                "finance": [_entity("Alice Finance", {"dept": "finance"})],
+                "hr": [_entity("Alice HR", {"dept": "hr"})],
+            }
+        ),
+        resolver=None,
+        store=store,
+        ontology=ontology,
+        error_policy=ErrorPolicy.SKIP_AND_LOG,
+    )
+    report = await pipeline.run()
+
+    assert len(report.errors) == 1
+    reason = report.errors[0].reason
+    # Generic text only — no restricted ACL label, no entity id.
+    assert reason == "cross-ACL entity conflict; document skipped"
+    assert "acl:finance" not in reason
+    assert "person:alice" not in reason
+
+
+async def test_cross_acl_pre_check_leaves_store_untouched_whole_doc_skip() -> None:
+    """PR #49 review fix (1b): if ANY entity in a doc would conflict,
+    the WHOLE doc is skipped and the store is left untouched. Pre-review
+    the pipeline wrote entities one-by-one — a conflict partway through
+    left earlier entities stamped with this doc's ACL while the facts
+    never landed. The pre-check pass makes "whole-doc atomic" true."""
+    ontology = load_ontology(STARTER)
+    store = NetworkxStore()
+    # Pre-populate "person:alice" with Finance ACL (will conflict).
+    await store.upsert_entity(
+        _entity("Alice Finance", {"dept": "finance"}),
+        acl_ref="acl:finance",
+    )
+
+    # Second doc from HR ingests TWO new-looking entities (person:bob,
+    # person:alice). person:bob has no stored ACL yet so a naive
+    # one-by-one loop would stamp it with acl:hr before hitting the
+    # alice conflict. The pre-check must prevent that write entirely.
+    bob = Entity(
+        id="person:bob",
+        type="Person",
+        canonical_name="Bob HR",
+        provenance=_prov(),
+    )
+    alice_hr = _entity("Alice HR", {"dept": "hr"})
+
+    class _HrConnector:
+        id = "hr-conn"
+        source_kind = "test"
+
+        async def iter_documents(self):
+            yield SourceDocument(source_id="hr", text="x", acl_ref="acl:hr")
+
+    pipeline = IngestPipeline(
+        connector=_HrConnector(),
+        extractor=_FixtureExtractor({"hr": [bob, alice_hr]}),
+        resolver=None,
+        store=store,
+        ontology=ontology,
+        error_policy=ErrorPolicy.SKIP_AND_LOG,
+    )
+    report = await pipeline.run()
+
+    assert len(report.errors) == 1
+    assert report.errors[0].source_id == "hr"
+    # person:bob must NOT exist in the store — pre-check caught the
+    # conflict before any write landed.
+    assert "person:bob" not in store._graph.nodes  # noqa: SLF001
+    # person:alice unchanged — Finance's attrs survive.
+    attrs = store._graph.nodes["person:alice"]  # noqa: SLF001
+    assert attrs["acl_ref"] == "acl:finance"
+    assert attrs["canonical_name"] == "Alice Finance"
+
+
+async def test_entity_acl_read_lookup_returns_stored_or_none() -> None:
+    """PR #49: new `GraphStore.entity_acl` read seam powers the
+    pipeline pre-check. Returns the stored acl_ref when the entity
+    exists with one, None when it doesn't exist OR is public."""
+    store = NetworkxStore()
+    assert await store.entity_acl("unknown") is None
+    await store.upsert_entity(_entity("Alice Public"))  # acl_ref=None
+    assert await store.entity_acl("person:alice") is None
+    await store.upsert_entity(_entity("Bob Finance"), acl_ref="acl:finance")  # new id override
+    # Add a separately-ACL'd entity via explicit upsert to avoid the
+    # None → X upgrade path on person:alice.
+    bob = Entity(
+        id="person:bob",
+        type="Person",
+        canonical_name="Bob",
+        provenance=_prov(),
+    )
+    await store.upsert_entity(bob, acl_ref="acl:finance")
+    assert await store.entity_acl("person:bob") == "acl:finance"

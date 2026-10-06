@@ -228,12 +228,16 @@ class NetworkxStore:
         # record of attempted boundary crossings without parsing
         # exception stack traces.
         if existing_acl is not None and existing_acl != acl_ref:
+            # PR #49 review: do NOT log attempted_canonical_name. The
+            # canonical_name may be restricted attribute content from
+            # the attempting doc's ACL scope; log sinks are typically
+            # readable by operators without those ACLs. Keep ids +
+            # ACL refs only.
             log.warning(
                 "cross-acl-upsert-rejected",
                 entity_id=entity.id,
                 stored_acl=existing_acl,
                 attempted_acl=acl_ref,
-                attempted_canonical_name=entity.canonical_name,
             )
             raise CrossAclUpsertError(
                 entity_id=entity.id,
@@ -379,6 +383,14 @@ class NetworkxStore:
             if _fact_alive_at(fact, as_of) and _acl_allows(fact, acl_subject, allowed_set):
                 out.append(fact)
         return out
+
+    async def entity_acl(self, entity_id: str) -> str | None:
+        # PR #49: read-only ACL lookup used by IngestPipeline to
+        # pre-check all extracted entities before any write — closes
+        # the "partial writes before whole-doc skip" review finding.
+        attrs = self._graph.nodes.get(entity_id, {})
+        acl = attrs.get("acl_ref")
+        return acl if isinstance(acl, str) else None
 
     async def record_merge(self, record: MergeRecord) -> None:
         # Fan out one logical MergeRecord across (canonical, merged_id,

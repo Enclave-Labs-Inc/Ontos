@@ -148,17 +148,68 @@ class IngestPipeline:
             # Propagate the doc's ACL to the entity on first write so
             # entities extracted only from restricted docs don't leak
             # via a future entity-attribute read path (#32's exporter).
-            # #48: cross-ACL conflicts raise CrossAclUpsertError. Route
-            # through the existing ErrorPolicy exactly like ExtractionError
-            # above — whole-doc skip under SKIP_AND_LOG preserves the
-            # "every fact subject/object has a typed node" invariant.
+            #
+            # #48 + PR #49 review: pre-check EVERY extracted entity's
+            # ACL against the stored state BEFORE any write. Pre-review
+            # the loop wrote entities one-by-one and raised partway
+            # through — earlier entities would land with this doc's ACL
+            # while the conflicting one aborted the rest, breaking the
+            # "whole-doc skip" invariant. Pre-check makes "no writes
+            # from a doc with any cross-ACL conflict" true.
+            #
+            # The pre-check is advisory; upsert_entity itself still
+            # enforces the ACL contract to close any TOCTOU window
+            # between pre-check and write (concurrent writers).
+            conflict: tuple[str, str | None] | None = None  # (entity_id, stored_acl)
+            for entity in extraction.entities:
+                stored_acl = await self._store.entity_acl(entity.id)
+                if stored_acl is not None and stored_acl != doc.acl_ref:
+                    conflict = (entity.id, stored_acl)
+                    break
+            if conflict is not None:
+                conflict_entity_id, conflict_stored_acl = conflict
+                if self._error_policy is ErrorPolicy.FAIL_FAST:
+                    raise CrossAclUpsertError(
+                        entity_id=conflict_entity_id,
+                        stored_acl=conflict_stored_acl,
+                        attempted_acl=doc.acl_ref,
+                    )
+                # Generic reason — do NOT leak the stored ACL or entity
+                # id through IngestReport.errors, which can be returned
+                # to a caller who doesn't hold the stored ACL. The
+                # detailed stored_acl + attempted_acl pair lives in the
+                # audit log (`cross-acl-upsert-rejected` structlog
+                # event), gated by log-sink access controls instead.
+                errors.append(
+                    IngestError(
+                        source_id=doc.source_id,
+                        reason="cross-ACL entity conflict; document skipped",
+                    )
+                )
+                log.warning(
+                    "cross-acl-upsert-rejected",
+                    source_id=doc.source_id,
+                    stage="pre-check",
+                    stored_acl=conflict_stored_acl,
+                    attempted_acl=doc.acl_ref,
+                )
+                continue
+
+            # Pre-check passed: safe to write all entities. upsert_entity
+            # may still raise under a concurrent writer race (TOCTOU) —
+            # route the same way for defense in depth.
             try:
                 for entity in extraction.entities:
                     await self._store.upsert_entity(entity, acl_ref=doc.acl_ref)
-            except CrossAclUpsertError as exc:
+            except CrossAclUpsertError:
                 if self._error_policy is ErrorPolicy.FAIL_FAST:
                     raise
-                errors.append(IngestError(source_id=doc.source_id, reason=str(exc)))
+                errors.append(
+                    IngestError(
+                        source_id=doc.source_id,
+                        reason="cross-ACL entity conflict; document skipped",
+                    )
+                )
                 continue
 
             if self._resolver is not None and extraction.entities:

@@ -124,6 +124,25 @@ class GraphStore(Protocol):
         allowed_acls: list[str] | None = None,
     ) -> list[Fact]: ...
 
+    async def entity_acl(self, entity_id: str) -> str | None:
+        """Return the stored ``acl_ref`` for ``entity_id``, or ``None``
+        if the entity is not stored or is public.
+
+        Read-only lookup used by ``IngestPipeline`` to pre-check for
+        cross-ACL conflicts across every extracted entity in a doc
+        BEFORE any write, so a conflict leaves the store completely
+        untouched (whole-doc atomicity under ``SKIP_AND_LOG``). The
+        pre-check is advisory only — the authoritative check lives
+        inside ``upsert_entity`` to close any TOCTOU window.
+
+        Returns ``None`` both for unknown entities and entities with
+        no ``acl_ref`` (public). Callers that need to distinguish
+        the two cases should use ``facts_for_entity`` or inspect the
+        store directly; the pre-check doesn't need that distinction
+        because an unknown entity cannot have a conflicting ACL.
+        """
+        ...
+
     async def record_merge(self, record: MergeRecord) -> None:
         """Idempotent merge-record write.
 

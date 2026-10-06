@@ -174,9 +174,23 @@ class Neo4jStore:
         properties_json = json.dumps(dict(entity.properties), sort_keys=True)
 
         async def _upsert_tx(tx: Any) -> str | None:
+            # PR #49 review: MERGE + ON MATCH SET acquires the write
+            # lock on `n` BEFORE we read its acl_ref. Pre-review the
+            # plain OPTIONAL MATCH took no lock, so two concurrent
+            # writers could both see prev_acl_ref=None, both pass the
+            # check, and the second would overwrite the first's ACL
+            # via coalesce($prev_acl_ref=None, $acl_ref) — a race-
+            # induced reintroduction of the #48 bug. The _upsert_count
+            # bump is a dedicated lock-acquisition write; it also
+            # gives operators a per-node upsert counter for free.
             prev_result = await tx.run(
-                "OPTIONAL MATCH (n:Entity {id: $id}) "
-                "RETURN n.type AS prev_type, n.acl_ref AS prev_acl_ref",
+                """
+                MERGE (n:Entity {id: $id})
+                ON CREATE SET n._upsert_count = 1
+                ON MATCH SET n._upsert_count = coalesce(n._upsert_count, 0) + 1
+                WITH n, n.type AS prev_type, n.acl_ref AS prev_acl_ref
+                RETURN prev_type, prev_acl_ref
+                """,
                 id=entity.id,
             )
             prev_row = await prev_result.single()
@@ -219,15 +233,19 @@ class Neo4jStore:
         try:
             async with self._driver.session(database=self._database) as session:
                 prev_type = await session.execute_write(_upsert_tx)
-        except CrossAclUpsertError:
+        except CrossAclUpsertError as exc:
             # Also log the structured audit event (parity with
             # NetworkxStore). Compliance operators grep logs rather
             # than parsing exception traces.
+            # PR #49 review: do NOT log attempted_canonical_name — it
+            # can be restricted attribute content from the attempting
+            # doc's ACL scope, and log sinks are typically readable
+            # without those ACLs. Ids + ACL refs only.
             log.warning(
                 "cross-acl-upsert-rejected",
                 entity_id=entity.id,
-                attempted_acl=acl_ref,
-                attempted_canonical_name=entity.canonical_name,
+                stored_acl=exc.stored_acl,
+                attempted_acl=exc.attempted_acl,
             )
             raise
 
@@ -415,6 +433,20 @@ class Neo4jStore:
             )
             records = await result.data()
         return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]
+
+    async def entity_acl(self, entity_id: str) -> str | None:
+        # PR #49: read-only ACL lookup used by IngestPipeline to
+        # pre-check all extracted entities before any write.
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "OPTIONAL MATCH (n:Entity {id: $id}) RETURN n.acl_ref AS acl",
+                id=entity_id,
+            )
+            row = await result.single()
+        if row is None:
+            return None
+        acl = row["acl"]
+        return acl if isinstance(acl, str) else None
 
     async def record_merge(self, record: MergeRecord) -> None:
         # #46: materialize MergeRecord as [:MERGED_WITH] edges from each
