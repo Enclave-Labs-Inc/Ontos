@@ -132,6 +132,35 @@ across schema evolutions.
   with last-write-wins on attrs; `X → None` and `X → Y` raise.
 - Credit: @ALEKS0805 caught this while prepping #32's exporter.
 
+### Added — Anthropic (Claude) LLM backend
+- `AnthropicBackend` in `ontos/llm/anthropic.py`, behind a new
+  `[anthropic]` extra. Implements both `LLMBackend` (extraction) and
+  `LLMPlannerBackend` (planning) with Claude structured outputs
+  (`messages.parse`), using the same Pydantic response models as
+  `OpenAIBackend` — both adapters accept and reject identical output.
+  Default model `claude-opus-5`.
+- Server-side refusal fallbacks enabled by default (`fallbacks=False`
+  opts out). A refusal from the whole chain raises a typed
+  `AnthropicRefusalError`; `max_tokens` truncation raises with the
+  limit in the message. Both surface through `LlmExtractor` /
+  `LlmPlanner` as `ExtractionError` / `PlannerError`.
+- `LLMUsage` (`ontos/llm/usage.py`): `AnthropicBackend.usage`
+  accumulates input / output / cache tokens per instance, with
+  `snapshot()` and subtraction for per-run deltas. Protocols unchanged.
+- `ontos ingest` / `ontos query` gain `--llm-backend
+  [ollama|anthropic]` (default `ollama` — no behavior change),
+  `--anthropic-model`, and `--anthropic-api-key-env` (default
+  `ANTHROPIC_API_KEY`). Missing key or unknown backend exits 2 with
+  an actionable message. Anthropic runs print token usage to stderr.
+- BRIDGE posture: prompts and document text go to api.anthropic.com.
+  Not for in-VPC regulated deploys; Ollama stays the sovereign default.
+
+### Changed — shared structured-output models
+- `_ExtractionResponse`, `_PlanResponse`, and `_reify_plan` moved
+  from `ontos/llm/openai.py` to `ontos/llm/_structured.py`.
+  `ontos.llm.openai` re-exports the models, so existing imports keep
+  working.
+
 ### Added — MergeRecord persistence (#46)
 - `GraphStore.record_merge(record)` + `merges_for_entity(entity_id)`
   Protocol methods. Idempotent on `(canonical_id, merged_id,

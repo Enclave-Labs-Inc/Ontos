@@ -91,6 +91,19 @@ Two backends ship:
 
 Pure `.txt`/`.md` ingest requires no flag and no extra.
 
+### Anthropic (Claude) backend
+
+Ollama is the default, in-VPC LLM. To extract and plan with Claude instead:
+
+```bash
+pip install 'enclave-ontos[anthropic]'
+export ANTHROPIC_API_KEY=sk-ant-...
+ontos ingest --source-dir ./corpus --ontology ./starter.yaml --llm-backend anthropic
+ontos query "Who works at Acme?" --ontology ./starter.yaml --llm-backend anthropic
+```
+
+`--anthropic-model` picks the model (default `claude-opus-5`). This is a BRIDGE backend: prompts and document text go to api.anthropic.com, so don't use it for in-VPC regulated deployments.
+
 ### Ollama timeouts (0.3.0+)
 
 First-time model loads can take 30–60s. If `ontos ingest` or `ontos query` times out, warm the model via `ollama run <model>` first, or raise the per-request timeout with `--ollama-timeout 180` (or higher for long documents).

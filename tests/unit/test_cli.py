@@ -743,3 +743,102 @@ def test_cli_query_does_not_rewrite_the_store_file(
     # File untouched.
     assert pkl.stat().st_mtime_ns == before_mtime, "query rewrote the store file"
     assert pkl.read_bytes() == before_bytes
+
+
+def test_ingest_and_query_help_document_llm_backend() -> None:
+    for command in ("ingest", "query"):
+        result = runner.invoke(app, [command, "--help"])
+        assert result.exit_code == 0
+        assert "--llm-backend" in result.stdout
+        assert "--anthropic-model" in result.stdout
+        assert "--anthropic-api-key-env" in result.stdout
+
+
+def test_query_anthropic_without_api_key_exits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ONTOS_TEST_MISSING_KEY", raising=False)
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "anything",
+            "--ontology",
+            str(STARTER_PATH),
+            "--llm-backend",
+            "anthropic",
+            "--anthropic-api-key-env",
+            "ONTOS_TEST_MISSING_KEY",
+            "--storage-path",
+            "",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "ONTOS_TEST_MISSING_KEY" in result.stderr
+
+
+def test_query_unknown_llm_backend_exits() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "anything",
+            "--ontology",
+            str(STARTER_PATH),
+            "--llm-backend",
+            "gpt-something",
+            "--storage-path",
+            "",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "unknown --llm-backend" in result.stderr
+
+
+def test_query_threads_anthropic_model_and_key_into_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ontos.llm
+    import ontos.planner
+    from ontos.planner import Plan, SeedByEntity
+
+    captured_kwargs: dict[str, object] = {}
+
+    class _CapturingLLM:
+        id = "anthropic:test"
+
+        def __init__(self, **kwargs: object) -> None:
+            captured_kwargs.update(kwargs)
+
+    class _StubPlanner:
+        def __init__(self, llm: object, ontology: object) -> None:
+            pass
+
+        async def plan(self, question: str, ontology: object) -> Plan:
+            return Plan.build(
+                seed=SeedByEntity(entity_id="x"),
+                steps=[],
+                ontology=ontology,  # type: ignore[arg-type]
+            )
+
+    monkeypatch.setattr(ontos.llm, "AnthropicBackend", _CapturingLLM)
+    monkeypatch.setattr(ontos.planner, "LlmPlanner", _StubPlanner)
+    monkeypatch.setenv("ONTOS_TEST_ANTHROPIC_KEY", "sk-test")
+
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "anything",
+            "--ontology",
+            str(STARTER_PATH),
+            "--llm-backend",
+            "anthropic",
+            "--anthropic-model",
+            "claude-sonnet-5",
+            "--anthropic-api-key-env",
+            "ONTOS_TEST_ANTHROPIC_KEY",
+            "--storage-path",
+            "",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert captured_kwargs == {"model": "claude-sonnet-5", "api_key": "sk-test"}

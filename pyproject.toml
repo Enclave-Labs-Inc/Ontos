@@ -36,6 +36,10 @@ llama = ["llama-cloud-services>=0.2"]
 langchain = ["langchain>=0.3", "langchain-experimental>=0.3"]
 authz = ["openfga-sdk>=0.6"]
 openai = ["openai>=1.50"]
+# `anthropic` pulls the Anthropic SDK used by `AnthropicBackend`.
+# BRIDGE — prompts and document text leave the customer VPC on their
+# way to api.anthropic.com. Use Ollama for in-VPC deploys.
+anthropic = ["anthropic>=1.11"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
