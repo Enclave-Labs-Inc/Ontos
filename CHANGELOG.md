@@ -14,7 +14,16 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
-0.3.0 track — UX unblockers from the 0.2.0 testing week.
+Nothing yet. New work between releases lands here.
+
+## [0.3.0] - 2026-10-06 - UX unblockers
+
+Four UX fixes surfaced by real-world testing after 0.2.0: PDF
+ingest (sovereign + BRIDGE paths), CLI state persistence between
+`ingest` and `query`, actionable timeouts on Ollama, and the
+schema-strict error contract parallel to the planner's. First
+release where "quick start just works" on both `pip install
+enclave-ontos` + an `ingest; query` pair AND real-world PDFs.
 
 ### Added
 - **`LlamaParsePdfConnector` (BRIDGE)** — ingest PDFs via LlamaCloud's
@@ -120,7 +129,9 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   ask.
 
 ### Numbers
-- 314 unit + compliance tests pass (up from 281 at 0.2.0).
+- **384 unit + compliance tests pass** (up from 281 at 0.2.0).
+  Breakdown by PR: #40 +33 (PDF ingest), #41 +31 (persistence),
+  #42 +9 (Ollama timeout), #43 +18 (sovereign pypdf).
 - `ruff` + `ruff format --check` + `mypy --strict ontos` all clean.
 
 ## [0.2.0] - 2026-10-01 - correctness and vertical content
