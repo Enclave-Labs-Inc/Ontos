@@ -4,6 +4,7 @@
 # five allowed patterns. Vertical ontologies (fintech, pharma, legal,
 # defense) will land under this same directory as separate files.
 
+id: ontos.starter
 version: "0.1"
 
 entity_types:

@@ -56,6 +56,8 @@ def _fact_to_edge_props(fact: Fact) -> dict[str, Any]:
         "prov_source_id": fact.provenance.source_id,
         "prov_extractor_id": fact.provenance.extractor_id,
         "prov_extractor_version": fact.provenance.extractor_version,
+        "prov_ontology_id": fact.provenance.ontology_id,
+        "prov_ontology_version": fact.provenance.ontology_version,
         "prov_confidence": fact.provenance.confidence.value,
         "prov_confidence_score": fact.provenance.confidence_score,
     }
@@ -72,6 +74,11 @@ def _edge_props_to_fact(subject_id: str, object_id: str, props: dict[str, Any]) 
             source_id=props["prov_source_id"],
             extractor_id=props["prov_extractor_id"],
             extractor_version=props["prov_extractor_version"],
+            # #34: back-compat — pre-#34 edges have no ontology props;
+            # default to "" so legacy facts load with the sentinel the
+            # MigrationRegistry treats as "unstamped".
+            ontology_id=props.get("prov_ontology_id", "") or "",
+            ontology_version=props.get("prov_ontology_version", "") or "",
             confidence=Confidence(props["prov_confidence"]),
             confidence_score=props["prov_confidence_score"],
         ),

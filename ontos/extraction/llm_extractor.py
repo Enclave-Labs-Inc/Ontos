@@ -201,6 +201,8 @@ class LlmExtractor:
                 source_id=input.source_id,
                 extractor_id=self.id,
                 extractor_version=self.version,
+                ontology_id=self._ontology.id,
+                ontology_version=self._ontology.version,
                 confidence=label,
                 confidence_score=score,
             )

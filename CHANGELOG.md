@@ -17,6 +17,40 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 0.4.0 track — storage-model foundations for exports and
 ontology-version provenance.
 
+### Added — Ontology-version stamp on every fact + lazy migration (#34)
+- `Provenance` gains `ontology_id` and `ontology_version` fields;
+  both default to `""` for back-compat so pre-#34 Fact pickles,
+  pre-#34 Neo4j edges, and 40+ existing test fixtures stay valid
+  without edits. `LlmExtractor` populates both from the active
+  `Ontology` on every extracted Fact and Entity.
+- `Ontology` gains a top-level `id` field (default `"ontos.unknown"`;
+  `docs/ontology/examples/starter.yaml` carries `ontos.starter`).
+- New `ontos.migration` package: `OntologyMigration` Protocol
+  (mirrors `SupersessionPolicy`'s shape), `MigrationRegistry` with
+  BFS version-hop resolution + strict mode + multi-migrations-per-edge
+  bundling, and three built-ins — `PredicateRename`,
+  `PredicateDeprecate`, `CardinalityTighten`.
+- `DeterministicExecutor` accepts an optional `current_ontology` +
+  `migration_registry`; facts fetched during `_expand` are
+  translated through the registry before PPR / path-flow scoring.
+  Stored facts stay bitemporally immutable — only the read-side
+  projection is translated. Migration events land in
+  `ExecutionResult.warnings` for the Article-12 audit trail.
+- `Neo4jStore` persists `prov_ontology_id` + `prov_ontology_version`
+  as plain RELATES edge props (no index needed — these aren't query
+  predicates). Pre-#34 edges with no ontology props still load:
+  `_edge_props_to_fact` defaults both to `""`, which the registry
+  treats as "unstamped" (pass-through with warning under non-strict,
+  drop under strict).
+- Unblocks #32 (exports can carry the schema identity in their
+  manifest) and #33 (snapshot MCP manifest can stamp the schema a
+  snapshot represents).
+
+### Deferred (follow-up PR)
+- `--strict-ontology` server/CLI flag plumbing. The registry
+  supports strict mode programmatically today; wiring it through
+  the CLI/server construction path is a separate concern.
+
 ### Fixed — cross-ACL attribute leak on upsert_entity (#48)
 - `GraphStore.upsert_entity` now rejects writes that would change an
   entity's `acl_ref` to a different non-None value (or to None, which
