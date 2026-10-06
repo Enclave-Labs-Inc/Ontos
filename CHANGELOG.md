@@ -14,7 +14,40 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
-Nothing yet. New work between releases lands here.
+0.4.0 track — storage-model foundations for exports and
+ontology-version provenance.
+
+### Added — Entity.type persistence (#38)
+- `GraphStore.upsert_entity` Protocol method — idempotent entity
+  write with MERGE semantics. Implemented in `NetworkxStore` and
+  `Neo4jStore`. Last-write-wins on repeated upserts; a
+  `structlog.warning` ("entity-type-overwrite") fires when the
+  type changes between writes so operators can audit the drift
+  against the resolver's `MergeRecord`.
+- `IngestPipeline.run()` now calls `upsert_entity` for every
+  extracted entity before the fact-write loop. Pre-#38, extracted
+  `Entity` objects were seen by the resolver (for merge counts)
+  and then dropped on the floor — the resulting graph had untyped
+  nodes with no provenance pointer. Unblocks #32 (Neo4j Bloom +
+  exports) and sets the pattern #34 (ontology-version stamp) will
+  follow.
+- Neo4j: new `entity_type_idx` on `(:Entity).type` so #32's
+  type-filtered exports stay O(matching-nodes) on 10k+ node
+  graphs. Lazy migration — existing untyped nodes get `type` on
+  the next ingest that touches them; no destructive one-shot.
+- `NetworkxStore` nodes now carry `type`, `canonical_name`,
+  `aliases`, `properties`, `provenance_source_id`,
+  `provenance_extractor_id` attrs. Pickle format unchanged
+  (`nx.MultiDiGraph` serializes node attrs natively) — no
+  `ONTOS-NX-STORE-V1` magic bump; existing dev-store pickles
+  stay readable.
+
+### Changed — Protocol surface
+- `GraphStore` Protocol gains one method (`upsert_entity`).
+  Additive, but any third-party store implementation (we ship
+  `NetworkxStore` + `Neo4jStore`) will need to adopt it. No
+  existing CI tests fail — no test implements `GraphStore`
+  outside the shipped backends.
 
 ## [0.3.0] - 2026-10-06 - UX unblockers
 

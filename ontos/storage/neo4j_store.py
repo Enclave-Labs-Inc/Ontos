@@ -30,7 +30,7 @@ from uuid import UUID
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from neo4j.time import DateTime as Neo4jDateTime
 
-from ontos.runtime.models import Confidence, Fact, Provenance
+from ontos.runtime.models import Confidence, Entity, Fact, Provenance
 
 # Cap traversal depth at the store boundary so a malformed caller can't
 # ask Neo4j for a billion-hop expansion. Callers may still cap lower.
@@ -114,6 +114,9 @@ class Neo4jStore:
         """Create indexes idempotently. Safe to call on every boot."""
         statements = [
             "CREATE INDEX entity_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.id)",
+            # #38: type-filtered reads (e.g. #32's export "all Person nodes")
+            # stay O(matching-nodes) on 10k+ node graphs with this index.
+            "CREATE INDEX entity_type_idx IF NOT EXISTS FOR (n:Entity) ON (n.type)",
             "CREATE INDEX fact_id_idx IF NOT EXISTS FOR ()-[r:RELATES]-() ON (r.fact_id)",
             "CREATE INDEX fact_predicate_idx IF NOT EXISTS FOR ()-[r:RELATES]-() ON (r.predicate)",
             "CREATE INDEX fact_validity_idx IF NOT EXISTS "
@@ -137,6 +140,32 @@ class Neo4jStore:
                 subject_id=fact.subject_id,
                 object_id=fact.object_id,
                 props=_fact_to_edge_props(fact),
+            )
+
+    async def upsert_entity(self, entity: Entity) -> None:
+        # #38: idempotent MERGE on (:Entity {id}). Last-write-wins on
+        # type / canonical_name / aliases / properties. IngestPipeline
+        # calls this before add_fact so every fact's subject_id /
+        # object_id has a backing typed node.
+        query = """
+        MERGE (n:Entity {id: $id})
+        SET n.type = $type,
+            n.canonical_name = $canonical_name,
+            n.aliases = $aliases,
+            n.properties = $properties,
+            n.provenance_source_id = $provenance_source_id,
+            n.provenance_extractor_id = $provenance_extractor_id
+        """
+        async with self._driver.session(database=self._database) as session:
+            await session.run(
+                query,
+                id=entity.id,
+                type=entity.type,
+                canonical_name=entity.canonical_name,
+                aliases=list(entity.aliases),
+                properties=dict(entity.properties),
+                provenance_source_id=entity.provenance.source_id,
+                provenance_extractor_id=entity.provenance.extractor_id,
             )
 
     async def close_fact(

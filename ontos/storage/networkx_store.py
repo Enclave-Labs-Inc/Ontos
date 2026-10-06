@@ -33,9 +33,12 @@ from typing import Literal
 from uuid import UUID
 
 import networkx as nx
+import structlog
 
-from ontos.runtime.models import Fact
+from ontos.runtime.models import Entity, Fact
 from ontos.storage.base import StorageError
+
+log = structlog.get_logger(__name__)
 
 
 def _fact_alive_at(fact: Fact, ts: datetime | None) -> bool:
@@ -163,6 +166,40 @@ class NetworkxStore:
         # The stubs type edge keys as str, but MultiDiGraph accepts any hashable
         # (see networkx MultiDiGraph.add_edge docs); we key on the UUID at runtime.
         self._graph[current.subject_id][current.object_id][fact_id]["fact"] = replacement  # type: ignore[index]
+        self._dirty = True
+
+    async def upsert_entity(self, entity: Entity) -> None:
+        # networkx.add_node(id, **attrs) merges attrs on repeated calls
+        # (idempotent MERGE semantics). The persistence pickle serializes
+        # the raw MultiDiGraph which carries node attrs natively, so a
+        # second-process read sees these values without any format bump.
+        existing_type = self._graph.nodes.get(entity.id, {}).get("type")
+        if existing_type is not None and existing_type != entity.type:
+            # Last-write-wins is the stored contract, but surface the
+            # type drift so operators can audit a resolver bug or an
+            # upstream schema change rather than seeing silent overwrite.
+            log.warning(
+                "entity-type-overwrite",
+                entity_id=entity.id,
+                previous_type=existing_type,
+                new_type=entity.type,
+                canonical_name=entity.canonical_name,
+                message=(
+                    "upsert_entity is overwriting an existing entity's "
+                    "type. This usually indicates a resolver bug or a "
+                    "legitimate schema change — audit via the resolver's "
+                    "MergeRecord."
+                ),
+            )
+        self._graph.add_node(
+            entity.id,
+            type=entity.type,
+            canonical_name=entity.canonical_name,
+            aliases=list(entity.aliases),
+            properties=dict(entity.properties),
+            provenance_source_id=entity.provenance.source_id,
+            provenance_extractor_id=entity.provenance.extractor_id,
+        )
         self._dirty = True
 
     async def get_fact(self, fact_id: UUID) -> Fact | None:
