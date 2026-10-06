@@ -142,8 +142,13 @@ class IngestPipeline:
             # resolver's MergeRecord still tracks "these are the same"
             # for the merge-count tally below and for future
             # consolidation work.
+            #
+            # Propagate the doc's ACL to the entity on first write so
+            # entities extracted only from restricted docs don't leak
+            # via a future entity-attribute read path (#32's exporter).
+            # upsert_entity itself enforces first-write-wins on acl_ref.
             for entity in extraction.entities:
-                await self._store.upsert_entity(entity)
+                await self._store.upsert_entity(entity, acl_ref=doc.acl_ref)
 
             if self._resolver is not None and extraction.entities:
                 resolution = await self._resolver.resolve(list(extraction.entities))

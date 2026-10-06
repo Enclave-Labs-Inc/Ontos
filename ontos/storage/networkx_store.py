@@ -168,12 +168,13 @@ class NetworkxStore:
         self._graph[current.subject_id][current.object_id][fact_id]["fact"] = replacement  # type: ignore[index]
         self._dirty = True
 
-    async def upsert_entity(self, entity: Entity) -> None:
+    async def upsert_entity(self, entity: Entity, *, acl_ref: str | None = None) -> None:
         # networkx.add_node(id, **attrs) merges attrs on repeated calls
         # (idempotent MERGE semantics). The persistence pickle serializes
         # the raw MultiDiGraph which carries node attrs natively, so a
         # second-process read sees these values without any format bump.
-        existing_type = self._graph.nodes.get(entity.id, {}).get("type")
+        existing_attrs = self._graph.nodes.get(entity.id, {})
+        existing_type = existing_attrs.get("type")
         if existing_type is not None and existing_type != entity.type:
             # Last-write-wins is the stored contract, but surface the
             # type drift so operators can audit a resolver bug or an
@@ -184,13 +185,12 @@ class NetworkxStore:
                 previous_type=existing_type,
                 new_type=entity.type,
                 canonical_name=entity.canonical_name,
-                message=(
-                    "upsert_entity is overwriting an existing entity's "
-                    "type. This usually indicates a resolver bug or a "
-                    "legitimate schema change — audit via the resolver's "
-                    "MergeRecord."
-                ),
             )
+        # ACL is first-write-wins: a restricted doc's stamp persists
+        # even when a later public ingest re-upserts the same entity.
+        # Avoids a silent downgrade that would expose a previously-
+        # restricted entity's name via #32's exporter.
+        effective_acl = existing_attrs.get("acl_ref") or acl_ref
         self._graph.add_node(
             entity.id,
             type=entity.type,
@@ -199,6 +199,7 @@ class NetworkxStore:
             properties=dict(entity.properties),
             provenance_source_id=entity.provenance.source_id,
             provenance_extractor_id=entity.provenance.extractor_id,
+            acl_ref=effective_acl,
         )
         self._dirty = True
 

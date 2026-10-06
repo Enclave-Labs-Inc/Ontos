@@ -155,6 +155,70 @@ async def test_migration_safety_pre_38_nodes_gain_type_on_reingest() -> None:
     assert set(store._facts) == pre_fact_ids  # noqa: SLF001
 
 
+async def test_entity_inherits_acl_from_restricted_source_doc() -> None:
+    """#38 review: a doc with acl_ref must stamp its extracted entities
+    with the same acl_ref so #32's exporter can enforce the invariant
+    that returning entity attrs to an unauthorized caller leaks nothing.
+    """
+    ontology = load_ontology(STARTER)
+    prov = _prov()
+    entities = [
+        Entity(id="alice", type="Person", canonical_name="Alice", provenance=prov),
+    ]
+
+    store = NetworkxStore()
+
+    class _RestrictedConnector:
+        id = "restricted-conn"
+        source_kind = "test"
+
+        async def iter_documents(self):
+            yield SourceDocument(source_id="doc1", text="ignored", acl_ref="acl:finance")
+
+    pipeline = IngestPipeline(
+        connector=_RestrictedConnector(),
+        extractor=_FixtureExtractor({"doc1": (entities, [])}),
+        resolver=None,
+        store=store,
+        ontology=ontology,
+        error_policy=ErrorPolicy.FAIL_FAST,
+    )
+    await pipeline.run()
+    assert store._graph.nodes["alice"]["acl_ref"] == "acl:finance"  # noqa: SLF001
+
+
+async def test_entity_acl_not_downgraded_by_later_public_ingest() -> None:
+    """Prevents a silent leak: an entity first stamped by a restricted
+    doc must NOT lose its acl_ref if a later public doc re-upserts it."""
+    ontology = load_ontology(STARTER)
+    prov = _prov()
+    entities = [
+        Entity(id="alice", type="Person", canonical_name="Alice", provenance=prov),
+    ]
+
+    store = NetworkxStore()
+
+    class _TwoDocConnector:
+        id = "test-conn"
+        source_kind = "test"
+
+        async def iter_documents(self):
+            yield SourceDocument(source_id="restricted", text="x", acl_ref="acl:finance")
+            yield SourceDocument(source_id="public", text="x", acl_ref=None)
+
+    pipeline = IngestPipeline(
+        connector=_TwoDocConnector(),
+        extractor=_FixtureExtractor({"restricted": (entities, []), "public": (entities, [])}),
+        resolver=None,
+        store=store,
+        ontology=ontology,
+        error_policy=ErrorPolicy.FAIL_FAST,
+    )
+    await pipeline.run()
+    # Restrictive stamp survives the later public ingest.
+    assert store._graph.nodes["alice"]["acl_ref"] == "acl:finance"  # noqa: SLF001
+
+
 async def test_resolver_type_merge_last_write_wins_with_audit_warning() -> None:
     """When two Entity candidates with different types resolve to the
     same id, the final node has a deterministic type (last-write-wins)

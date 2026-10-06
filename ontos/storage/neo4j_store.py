@@ -22,15 +22,19 @@ Indexes and constraints are created idempotently on `initialize()`.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
+import structlog
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from neo4j.time import DateTime as Neo4jDateTime
 
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
+
+log = structlog.get_logger(__name__)
 
 # Cap traversal depth at the store boundary so a malformed caller can't
 # ask Neo4j for a billion-hop expansion. Callers may still cap lower.
@@ -142,30 +146,63 @@ class Neo4jStore:
                 props=_fact_to_edge_props(fact),
             )
 
-    async def upsert_entity(self, entity: Entity) -> None:
+    async def upsert_entity(self, entity: Entity, *, acl_ref: str | None = None) -> None:
         # #38: idempotent MERGE on (:Entity {id}). Last-write-wins on
         # type / canonical_name / aliases / properties. IngestPipeline
         # calls this before add_fact so every fact's subject_id /
         # object_id has a backing typed node.
+        #
+        # Neo4j property values must be primitives or arrays of primitives.
+        # `Entity.properties: dict[str, str]` is a map, which Neo4j rejects
+        # as a node property — JSON-encode it on write (reviewer catch;
+        # the pre-review version broke every Neo4j ingest). Readers (#32's
+        # exporter) decode via `json.loads(n.properties)` back into a dict.
+        properties_json = json.dumps(dict(entity.properties), sort_keys=True)
+        # OPTIONAL MATCH captures the pre-upsert type so we can fire the
+        # same "entity-type-overwrite" audit warning as NetworkxStore
+        # when a resolver bug or legitimate schema change rewrites the
+        # type. Single statement; no extra round-trip.
+        # ACL is first-write-wins: an entity first stamped by a
+        # restricted doc stays restricted even when a later public doc
+        # re-upserts it. coalesce(n.acl_ref, $acl_ref) picks the first
+        # non-null, so a None later-write never downgrades. Operators
+        # that want to broaden an entity's ACL use a dedicated admin
+        # path, not routine ingest.
         query = """
+        OPTIONAL MATCH (existing:Entity {id: $id})
+        WITH existing.type AS prev_type, existing.acl_ref AS prev_acl_ref
         MERGE (n:Entity {id: $id})
         SET n.type = $type,
             n.canonical_name = $canonical_name,
             n.aliases = $aliases,
-            n.properties = $properties,
+            n.properties = $properties_json,
             n.provenance_source_id = $provenance_source_id,
-            n.provenance_extractor_id = $provenance_extractor_id
+            n.provenance_extractor_id = $provenance_extractor_id,
+            n.acl_ref = coalesce(prev_acl_ref, $acl_ref)
+        RETURN prev_type
         """
         async with self._driver.session(database=self._database) as session:
-            await session.run(
+            result = await session.run(
                 query,
                 id=entity.id,
                 type=entity.type,
                 canonical_name=entity.canonical_name,
                 aliases=list(entity.aliases),
-                properties=dict(entity.properties),
+                properties_json=properties_json,
                 provenance_source_id=entity.provenance.source_id,
                 provenance_extractor_id=entity.provenance.extractor_id,
+                acl_ref=acl_ref,
+            )
+            record = await result.single()
+            prev_type = record["prev_type"] if record else None
+
+        if prev_type is not None and prev_type != entity.type:
+            log.warning(
+                "entity-type-overwrite",
+                entity_id=entity.id,
+                previous_type=prev_type,
+                new_type=entity.type,
+                canonical_name=entity.canonical_name,
             )
 
     async def close_fact(

@@ -207,9 +207,9 @@ async def test_pipeline_calls_upsert_entity_before_add_fact() -> None:
     real_add_fact = store.add_fact
     call_order: list[str] = []
 
-    async def _spy_upsert(entity: Entity) -> None:
+    async def _spy_upsert(entity: Entity, *, acl_ref: str | None = None) -> None:
         call_order.append(f"upsert:{entity.id}")
-        await real_upsert(entity)
+        await real_upsert(entity, acl_ref=acl_ref)
 
     async def _spy_add_fact(fact: Fact) -> None:
         call_order.append(f"add_fact:{fact.subject_id}->{fact.object_id}")
@@ -236,6 +236,37 @@ async def test_pipeline_calls_upsert_entity_before_add_fact() -> None:
         "add_fact:alice->acme",
     ]
     _ = AsyncMock  # keep import satisfied if moved around
+
+
+async def test_upsert_entity_stamps_acl_ref_on_first_write() -> None:
+    """#38 review: entity extracted from a restricted doc should get
+    the doc's acl_ref so future entity-attribute reads can enforce it."""
+    store = NetworkxStore()
+    await store.upsert_entity(_entity(), acl_ref="acl:finance")
+    assert store._graph.nodes["alice"]["acl_ref"] == "acl:finance"  # noqa: SLF001
+
+
+async def test_upsert_entity_acl_is_first_write_wins() -> None:
+    """A later public ingest must NOT downgrade a previously-stamped ACL.
+    Prevents a silent leak of a restricted entity via #32's exporter."""
+    store = NetworkxStore()
+    await store.upsert_entity(_entity(), acl_ref="acl:finance")
+    # Re-upsert with no acl_ref — restrictive stamp must persist.
+    await store.upsert_entity(_entity(canonical_name="Alice Updated"), acl_ref=None)
+    attrs = store._graph.nodes["alice"]  # noqa: SLF001
+    assert attrs["acl_ref"] == "acl:finance"
+    # Other attrs still last-write-wins.
+    assert attrs["canonical_name"] == "Alice Updated"
+
+
+async def test_upsert_entity_acl_also_first_write_wins_vs_different_label() -> None:
+    """Even a *different* non-null ACL on a later write doesn't overwrite
+    the stamped one — operators who need to broaden ACLs use a dedicated
+    admin path, not routine ingest."""
+    store = NetworkxStore()
+    await store.upsert_entity(_entity(), acl_ref="acl:finance")
+    await store.upsert_entity(_entity(), acl_ref="acl:hr")
+    assert store._graph.nodes["alice"]["acl_ref"] == "acl:finance"  # noqa: SLF001
 
 
 async def test_upsert_entity_round_trips_through_persistence(tmp_path) -> None:
