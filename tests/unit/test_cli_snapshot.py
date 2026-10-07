@@ -16,7 +16,11 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from ontos.cli import app
-from ontos.cli.main import _collect_snapshot_metadata, _compute_snapshot_id
+from ontos.cli.main import (
+    _collect_snapshot_metadata,
+    _compute_snapshot_id,
+    _load_snapshot,
+)
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.runtime.server import SnapshotMetadata
 from ontos.storage.base import StorageError
@@ -84,16 +88,33 @@ def test_snapshot_and_storage_path_are_mutually_exclusive(tmp_path: Path) -> Non
     assert "mutually exclusive" in result.stdout.lower() + result.stderr.lower()
 
 
-def test_snapshot_rejects_unsupported_extension_with_pointer_to_issue_32(
-    tmp_path: Path,
-) -> None:
-    bogus = tmp_path / "snap.jsonld"
+def test_snapshot_rejects_unsupported_extension(tmp_path: Path) -> None:
+    bogus = tmp_path / "snap.xyz"
     bogus.write_text("{}")
     result = runner.invoke(app, ["serve", "--snapshot", str(bogus)])
     assert result.exit_code != 0
     combined = (result.stdout + result.stderr).lower()
     assert "not supported" in combined
-    assert "#32" in result.stdout + result.stderr
+
+
+def test_snapshot_loads_jsonld_with_manifest_metadata(tmp_path: Path) -> None:
+    snap = tmp_path / "snap.jsonld"
+    snap.write_text(
+        """{"manifest":{"ontologyId":"ontos.starter","ontologyVersion":"0.4"},"@graph":[]}""",
+        encoding="utf-8",
+    )
+
+    store, metadata = _load_snapshot(snap)
+    scan = asyncio.run(store.scan())
+
+    assert scan.entities == []
+    assert scan.facts == []
+    assert scan.merges == []
+    assert isinstance(metadata, SnapshotMetadata)
+    assert metadata.id == _compute_snapshot_id(snap)
+    assert metadata.format == "ontos-jsonld-v1"
+    assert metadata.ontology_id == "ontos.starter"
+    assert metadata.ontology_version == "0.4"
 
 
 def test_snapshot_rejects_missing_file(tmp_path: Path) -> None:

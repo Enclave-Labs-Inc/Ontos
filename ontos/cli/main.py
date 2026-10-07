@@ -68,10 +68,10 @@ def serve(
             "--snapshot",
             help=(
                 "Serve MCP over a frozen graph snapshot (read-only). "
-                "Accepts an ONTOS-NX-STORE-V2 pickle today (.pkl / "
-                ".pickle); JSON-LD / GraphML / Cypher paths arrive "
-                "with issue #32. WARNING: today's snapshot format is "
-                "a Python pickle — loading an untrusted file executes "
+                "Accepts ONTOS-NX-STORE-V2 pickle (.pkl / .pickle) "
+                "and JSON-LD (.jsonld) snapshots. GraphML / Cypher "
+                "support arrives with issue #32. WARNING: pickle "
+                "snapshots use Python pickle — loading an untrusted file executes "
                 "arbitrary code. The magic-header check in the loader "
                 "is a FORMAT check (it rejects non-Ontos files), NOT "
                 "a safety mitigation — a crafted pickle with the right "
@@ -174,12 +174,48 @@ def _collect_snapshot_metadata(path: Path, store: object) -> object:
     )
 
 
+def _load_snapshot(path: Path) -> tuple[object, object]:
+    """Load a supported frozen snapshot and its load-time metadata."""
+    from datetime import UTC, datetime
+
+    from ontos.runtime.server import SnapshotMetadata
+    from ontos.storage.networkx_store import NetworkxStore
+
+    suffix = path.suffix.lower()
+    if suffix not in (".pkl", ".pickle", ".jsonld"):
+        raise typer.BadParameter(
+            f"snapshot format {path.suffix!r} is not supported. "
+            "Supported formats: .pkl, .pickle, .jsonld."
+        )
+    if not path.exists():
+        raise typer.BadParameter(f"snapshot file not found: {path}")
+
+    if suffix in (".pkl", ".pickle"):
+        store = NetworkxStore(path=path)
+        # Structural read-only: null the persistence path after load.
+        store._path = None
+        return store, _collect_snapshot_metadata(path, store)
+
+    from ontos.exporters.jsonld import load_jsonld
+
+    scan, manifest = load_jsonld(path)
+    store = NetworkxStore.from_scan(scan)
+    metadata = SnapshotMetadata(
+        id=_compute_snapshot_id(path),
+        mtime=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
+        format="ontos-jsonld-v1",
+        ontology_id=manifest["ontologyId"],
+        ontology_version=manifest["ontologyVersion"],
+    )
+    return store, metadata
+
+
 def _serve_snapshot(path: Path) -> None:
     """Boot an MCP server over a frozen NetworkxStore snapshot.
 
-    Dispatches on file extension: `.pkl` / `.pickle` loads today's
-    ONTOS-NX-STORE-V2 pickle. JSON-LD / GraphML / Cypher paths raise
-    with a pointer at #32 until that work ships.
+    Dispatches on file extension: `.pkl` / `.pickle` loads an
+    ONTOS-NX-STORE-V2 pickle; `.jsonld` loads the #32 JSON-LD snapshot
+    format. GraphML / Cypher remain unsupported until their loaders land.
 
     The loaded store's `_path` is set to `None` after load so a
     future write tool cannot silently mutate the "frozen" file —
@@ -192,28 +228,19 @@ def _serve_snapshot(path: Path) -> None:
 
     log = structlog.get_logger()
 
-    if path.suffix.lower() not in (".pkl", ".pickle"):
-        raise typer.BadParameter(
-            f"snapshot format {path.suffix!r} is not supported yet. "
-            "Today's snapshot format is an ONTOS-NX-STORE-V2 pickle "
-            "(.pkl / .pickle); JSON-LD / GraphML / Cypher support "
-            "arrives with issue #32."
+    if path.suffix.lower() in (".pkl", ".pickle"):
+        log.warning(
+            "snapshot-pickle-loaded",
+            path=str(path.resolve()),
+            reason=(
+                "ONTOS-NX-STORE-V2 is a Python pickle format; loading a "
+                "crafted file executes arbitrary code. The loader's "
+                "magic-header check is a FORMAT check only (rejects "
+                "non-Ontos files), NOT a safety mitigation — a crafted "
+                "pickle with the right prefix still runs. Only load "
+                "trusted pickle snapshots."
+            ),
         )
-    if not path.exists():
-        raise typer.BadParameter(f"snapshot file not found: {path}")
-
-    log.warning(
-        "snapshot-pickle-loaded",
-        path=str(path.resolve()),
-        reason=(
-            "ONTOS-NX-STORE-V2 is a Python pickle format; loading a "
-            "crafted file executes arbitrary code. The loader's "
-            "magic-header check is a FORMAT check only (rejects "
-            "non-Ontos files), NOT a safety mitigation — a crafted "
-            "pickle with the right prefix still runs. Only load from "
-            "trusted sources until #32's text formats land."
-        ),
-    )
 
     # Deferred imports for help-latency parity with live `serve`.
     from ontos.runtime.config import RuntimeConfig
@@ -222,18 +249,9 @@ def _serve_snapshot(path: Path) -> None:
         build_server,
         run_server,
     )
-    from ontos.storage.networkx_store import NetworkxStore
-
     _default_dev_signing_key_if_missing()
 
-    store = NetworkxStore(path=path)
-    # Structural read-only: null the persistence path AFTER load so
-    # `NetworkxStore.flush()` early-returns if any future write tool
-    # ever lands. The "frozen" guarantee is now enforced, not left
-    # to the convention that today's six tools don't write.
-    store._path = None
-
-    metadata = _collect_snapshot_metadata(path, store)
+    store, metadata = _load_snapshot(path)
     cfg = RuntimeConfig.from_env()
     server = build_server(cfg, store=store, snapshot_metadata=metadata)  # type: ignore[arg-type]
     run_server(
