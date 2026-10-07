@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from uuid import UUID
 
-from ontos.exporters.jsonld import render_jsonld
+from ontos.exporters.jsonld import load_jsonld, render_jsonld
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.models import GraphScan, StoredEntity
@@ -155,4 +155,19 @@ def test_render_jsonld_manifest_is_empty_when_snapshot_has_no_facts() -> None:
     assert document["manifest"] == {
         "ontologyId": "",
         "ontologyVersion": "",
+    }
+
+
+
+def test_load_jsonld_round_trips_exported_snapshot(tmp_path) -> None:
+    original = _scan()
+    snapshot = tmp_path / "snapshot.jsonld"
+    snapshot.write_text(render_jsonld(original), encoding="utf-8")
+
+    loaded, manifest = load_jsonld(snapshot)
+
+    assert render_jsonld(loaded) == render_jsonld(original)
+    assert manifest == {
+        "ontologyId": "ontos.starter",
+        "ontologyVersion": "0.4",
     }
