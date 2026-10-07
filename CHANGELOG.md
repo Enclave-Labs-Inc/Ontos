@@ -16,6 +16,46 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 0.5.0 track.
 
+### Added — Anthropic (Claude) LLM backend + sovereignty guardrails
+- `AnthropicBackend` in `ontos/llm/anthropic.py`, behind a new
+  `[anthropic]` extra. Implements both `LLMBackend` (extraction) and
+  `LLMPlannerBackend` (planning) with Claude structured outputs
+  (`messages.parse`), using the same Pydantic response models as
+  `OpenAIBackend` — both adapters accept and reject identical output.
+  Default model `claude-opus-5`.
+- Server-side refusal fallbacks enabled by default (`fallbacks=False`
+  opts out). A refusal from the whole chain raises a typed
+  `AnthropicRefusalError`; `max_tokens` truncation raises with the
+  limit in the message. Both surface through `LlmExtractor` /
+  `LlmPlanner` as `ExtractionError` / `PlannerError`.
+- `LLMUsage` (`ontos/llm/usage.py`): `AnthropicBackend.usage`
+  accumulates input / output / cache tokens per instance, with
+  `snapshot()` and subtraction for per-run deltas. Protocols unchanged.
+- `ontos ingest` / `ontos query` gain `--llm-backend
+  [ollama|anthropic]` (default `ollama` — no behavior change),
+  `--anthropic-model`, and `--anthropic-api-key-env` (default
+  `ANTHROPIC_API_KEY`). Missing key or unknown backend exits 2 with
+  an actionable message. Anthropic runs print token usage to stderr.
+- **BRIDGE sovereignty guardrails** (new, `ontos/llm/_sovereignty.py`):
+  every BRIDGE backend construction emits a loud structlog
+  `bridge-backend-instantiated` warning so operators of in-VPC
+  deploys see the posture break in logs. In `ONTOS_ENV=prod` the
+  backend refuses to instantiate — `SovereigntyError` — unless
+  `ONTOS_ALLOW_BRIDGE_BACKENDS=1` is also set (opt-in disclosed in
+  the error message). Mirrors `ontos.runtime.server`'s dev-signing-
+  key default-refuse pattern.
+- `OpenAIBackend` retroactively marked BRIDGE too — same instantiation
+  warning and the same prod-env refusal. The `openai` pyproject
+  extra description carries the posture. Pre-this-change the
+  OpenAIBackend ran silently in prod environments; parity with
+  Anthropic closes that gap.
+
+### Changed — shared structured-output models
+- `_ExtractionResponse`, `_PlanResponse`, and `_reify_plan` moved
+  from `ontos/llm/openai.py` to `ontos/llm/_structured.py`.
+  `ontos.llm.openai` re-exports the models, so existing imports keep
+  working.
+
 ### Added — `ontos serve --snapshot` MCP server over a frozen graph (#33)
 - New CLI flag that boots a read-only MCP server bound to a frozen
   `NetworkxStore` pickle snapshot. All existing read tools (`search`,

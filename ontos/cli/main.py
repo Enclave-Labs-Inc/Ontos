@@ -22,7 +22,7 @@ import dataclasses
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 
@@ -293,6 +293,28 @@ def ingest(
             ),
         ),
     ] = 60.0,
+    llm_backend: Annotated[
+        str,
+        typer.Option(
+            "--llm-backend",
+            help=(
+                "LLM for extraction. 'ollama' is sovereign (local, in-VPC). "
+                "'anthropic' is BRIDGE (Claude via api.anthropic.com — prompts "
+                "and document text leave the VPC; install the [anthropic] extra)."
+            ),
+        ),
+    ] = "ollama",
+    anthropic_model: Annotated[
+        str,
+        typer.Option("--anthropic-model", help="Claude model for --llm-backend anthropic."),
+    ] = "claude-opus-5",
+    anthropic_api_key_env: Annotated[
+        str,
+        typer.Option(
+            "--anthropic-api-key-env",
+            help="Env var holding the Anthropic API key.",
+        ),
+    ] = "ANTHROPIC_API_KEY",
     error_policy: Annotated[
         str,
         typer.Option(
@@ -334,10 +356,9 @@ def ingest(
         ),
     ] = None,
 ) -> None:
-    """Ingest a directory of .txt / .md / .pdf files via Ollama + the resolver cascade."""
+    """Ingest a directory of .txt / .md / .pdf files via an LLM extractor + the resolver cascade."""
     # Deferred imports keep --help fast.
     from ontos.extraction import LlmExtractor
-    from ontos.llm import OllamaBackend
     from ontos.ontology import load_ontology
     from ontos.pipeline import ErrorPolicy, IngestPipeline
     from ontos.resolver import ExactMatchResolver
@@ -355,7 +376,14 @@ def ingest(
     _warn_if_ephemeral(resolved_path, cfg.storage_backend)
 
     ontology = load_ontology(ontology_path)
-    llm = OllamaBackend(ollama_model, base_url=ollama_url, timeout_s=ollama_timeout)
+    llm = _build_llm(
+        llm_backend,
+        ollama_model=ollama_model,
+        ollama_url=ollama_url,
+        ollama_timeout=ollama_timeout,
+        anthropic_model=anthropic_model,
+        anthropic_api_key_env=anthropic_api_key_env,
+    )
     extractor = LlmExtractor(llm, ontology)
     resolver = ExactMatchResolver()
     store = build_store(cfg)
@@ -373,6 +401,7 @@ def ingest(
         try:
             report = await pipeline.run()
             typer.echo(report.model_dump_json(indent=2))
+            _echo_llm_usage(llm)
         finally:
             # Explicit close so NetworkxStore(path=...) flushes the
             # pickle to disk. #29: pre-fix, process exit happened
@@ -412,6 +441,28 @@ def query(
             ),
         ),
     ] = 60.0,
+    llm_backend: Annotated[
+        str,
+        typer.Option(
+            "--llm-backend",
+            help=(
+                "LLM for query planning. 'ollama' is sovereign (local, in-VPC). "
+                "'anthropic' is BRIDGE (Claude via api.anthropic.com — prompts "
+                "and document text leave the VPC; install the [anthropic] extra)."
+            ),
+        ),
+    ] = "ollama",
+    anthropic_model: Annotated[
+        str,
+        typer.Option("--anthropic-model", help="Claude model for --llm-backend anthropic."),
+    ] = "claude-opus-5",
+    anthropic_api_key_env: Annotated[
+        str,
+        typer.Option(
+            "--anthropic-api-key-env",
+            help="Env var holding the Anthropic API key.",
+        ),
+    ] = "ANTHROPIC_API_KEY",
     storage_path: Annotated[
         str | None,
         typer.Option(
@@ -427,7 +478,6 @@ def query(
 ) -> None:
     """Run one NL question through planner + executor locally; print ranked hits."""
     from ontos.executor import DeterministicExecutor
-    from ontos.llm import OllamaBackend
     from ontos.ontology import load_ontology
     from ontos.planner import LlmPlanner
     from ontos.runtime.server import build_store
@@ -437,7 +487,14 @@ def query(
     _warn_if_ephemeral(resolved_path, cfg.storage_backend)
 
     ontology = load_ontology(ontology_path)
-    llm = OllamaBackend(ollama_model, base_url=ollama_url, timeout_s=ollama_timeout)
+    llm = _build_llm(
+        llm_backend,
+        ollama_model=ollama_model,
+        ollama_url=ollama_url,
+        ollama_timeout=ollama_timeout,
+        anthropic_model=anthropic_model,
+        anthropic_api_key_env=anthropic_api_key_env,
+    )
     planner = LlmPlanner(llm, ontology)
     executor = DeterministicExecutor()
     store = build_store(cfg)
@@ -457,6 +514,7 @@ def query(
                     default=str,
                 )
             )
+            _echo_llm_usage(llm)
         finally:
             # Query is read-only. The dirty-flag gate on
             # NetworkxStore.flush() ensures close() does NOT rewrite
@@ -619,6 +677,51 @@ def _read_source_dir(source_dir: Path) -> dict[str, str]:
 def _collect_pdf_paths(source_dir: Path) -> list[Path]:
     return sorted(
         p for p in source_dir.rglob("*") if p.is_file() and p.suffix.lower() in PDF_EXTENSIONS
+    )
+
+
+def _build_llm(
+    llm_backend: str,
+    *,
+    ollama_model: str,
+    ollama_url: str,
+    ollama_timeout: float,
+    anthropic_model: str,
+    anthropic_api_key_env: str,
+) -> Any:
+    """Construct the extraction/planning LLM, failing loud on bad config."""
+    if llm_backend == "ollama":
+        from ontos.llm import OllamaBackend
+
+        return OllamaBackend(ollama_model, base_url=ollama_url, timeout_s=ollama_timeout)
+    if llm_backend == "anthropic":
+        api_key = os.environ.get(anthropic_api_key_env)
+        if not api_key:
+            typer.secho(
+                f"--llm-backend anthropic requires {anthropic_api_key_env} to be set.",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(2)
+        from ontos.llm import AnthropicBackend
+
+        return AnthropicBackend(model=anthropic_model, api_key=api_key)
+    typer.secho(
+        f"unknown --llm-backend {llm_backend!r}. Supported: ollama, anthropic.",
+        fg=typer.colors.RED,
+        err=True,
+    )
+    raise typer.Exit(2)
+
+
+def _echo_llm_usage(llm: Any) -> None:
+    usage = getattr(llm, "usage", None)
+    if usage is None or not usage.calls:
+        return
+    typer.echo(
+        f"{llm.id}: {usage.calls} call(s), {usage.input_tokens} input tokens "
+        f"({usage.cache_read_input_tokens} cached), {usage.output_tokens} output tokens",
+        err=True,
     )
 
 
