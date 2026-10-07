@@ -211,3 +211,66 @@ async def test_emit_sync_signature_raises_pointer_to_async(
             model_versions={},
             policy_decisions=[],
         )
+
+
+async def test_concurrent_emits_do_not_fork_the_chain(
+    emitter: PostgresAuditEmitter,
+) -> None:
+    """Without the advisory lock, concurrent emitters read the same prev_hash."""
+    import asyncio
+
+    await asyncio.gather(*(_emit(emitter, query_text=f"q{i}") for i in range(50)))
+
+    assert await emitter.count_async() == 50
+    assert await emitter.verify_chain_async()
+
+    async with emitter._engine.connect() as conn:
+        from sqlalchemy import func, select
+
+        from ontos.audit.postgres import _audit_table
+
+        result = await conn.execute(
+            select(func.count()).select_from(_audit_table).where(_audit_table.c.prev_hash.is_(None))
+        )
+        assert result.scalar_one() == 1  # exactly one genesis record
+
+
+async def test_schemas_hold_independent_chains(postgres_container) -> None:
+    from sqlalchemy import text
+
+    url = postgres_container.get_connection_url()
+    engine = _engine_from_url(url)
+    async with engine.begin() as conn:
+        for schema in ("tenant_a", "tenant_b"):
+            await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            await conn.execute(text(f"CREATE SCHEMA {schema}"))
+
+    a = PostgresAuditEmitter(engine, b"key-a", schema="tenant_a")
+    b = PostgresAuditEmitter(engine, b"key-b", schema="tenant_b")
+    try:
+        await a.initialize()
+        await b.initialize()
+
+        for i in range(3):
+            await _emit(a, query_text=f"a{i}")
+        record_b = await b.emit_async(
+            query_id=None,
+            agent_identity="agent:b",
+            acting_on_behalf_of=None,
+            query_text="b0",
+            tool_invoked="search",
+            tool_arguments={},
+            result_fact_ids=[],
+            latency_ms=1.0,
+            model_versions={},
+            policy_decisions=[],
+        )
+
+        assert await a.count_async() == 3
+        assert await b.count_async() == 1
+        assert record_b.prev_hash is None  # b's chain starts fresh
+        assert await a.by_query_id_async(record_b.query_id) is None
+        assert await a.verify_chain_async()
+        assert await b.verify_chain_async()
+    finally:
+        await engine.dispose()

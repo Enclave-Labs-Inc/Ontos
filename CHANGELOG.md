@@ -14,6 +14,24 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+0.5.0 track.
+
+### Fixed — PostgresAuditEmitter chain forks under concurrency
+- `emit_async` read the latest `prev_hash` and inserted the new row
+  without any lock, so two concurrent emitters could chain off the
+  same parent — after which `verify_chain_async()` reported the log
+  as tampered. Writers now take a transaction-scoped Postgres
+  advisory lock keyed on the audit table before reading `prev_hash`.
+  SQLite is unaffected (it serializes writers already).
+
+### Added — PostgresAuditEmitter `schema=`
+- `PostgresAuditEmitter(engine, key, schema="...")` and
+  `from_url(..., schema=...)` place the audit table in a named
+  Postgres schema, so several independent hash chains (e.g. one per
+  tenant) can share one database. Default (`None`) is unchanged.
+- `count_async` uses a SQLAlchemy `count()` instead of raw SQL, so it
+  respects the schema.
+
 ## [0.4.0] - 2026-10-06 - storage audit maturity
 
 Four storage-layer invariants shipped together: Entity.type persists
