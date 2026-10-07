@@ -16,6 +16,25 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 0.5.0 track.
 
+### Added — `ontos serve --snapshot` MCP server over a frozen graph (#33)
+- New CLI flag that boots a read-only MCP server bound to a frozen
+  `NetworkxStore` pickle snapshot. All existing read tools (`search`,
+  `traverse`, `explain`, `provenance`, `audit_lookup`, `ask`) work
+  unchanged against the snapshot; a new `snapshot_info` tool reports
+  fact count, ontology stamp, and the snapshot file's mtime so
+  orchestrators can disambiguate across sources.
+- Honors bitemporal `as_of`, ACL filtering, and the Article-12 audit
+  chain exactly as the live server does.
+- Dispatches on file extension: `.pkl` / `.pickle` loads today's
+  `ONTOS-NX-STORE-V2` format. JSON-LD / GraphML / Cypher paths will
+  plug in once #32 lands (dispatch wired, loaders deferred).
+- Mutually exclusive with `--storage-path` — the snapshot serves a
+  frozen file, `--storage-path` binds the live dev store.
+- WARNING: today's snapshot format is a Python pickle; only load
+  snapshots from trusted sources. A one-time structlog warning
+  (`snapshot-pickle-loaded`) fires at load. Text-based safe-to-load
+  formats arrive with #32.
+
 ### Fixed — PostgresAuditEmitter chain forks under concurrency
 - `emit_async` read the latest `prev_hash` and inserted the new row
   without any lock, so two concurrent emitters could chain off the

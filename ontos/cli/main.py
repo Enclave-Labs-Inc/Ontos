@@ -62,15 +62,52 @@ def serve(
             ),
         ),
     ] = None,
+    snapshot: Annotated[
+        Path | None,
+        typer.Option(
+            "--snapshot",
+            help=(
+                "Serve MCP over a frozen graph snapshot (read-only). "
+                "Accepts an ONTOS-NX-STORE-V2 pickle today (.pkl / "
+                ".pickle); JSON-LD / GraphML / Cypher paths arrive "
+                "with issue #32. WARNING: today's snapshot format is "
+                "a Python pickle — loading an untrusted file executes "
+                "arbitrary code. Only load snapshots from trusted "
+                "sources until #32's text formats land."
+            ),
+        ),
+    ] = None,
 ) -> None:
-    """Boot the FastMCP server on streamable-HTTP transport."""
-    # Deferred import so `ontos --help` doesn't drag in fastmcp.
-    from ontos.runtime.server import main as _serve_main
+    """Boot the FastMCP server on streamable-HTTP transport.
+
+    Two modes:
+
+    - **Live** (default) — binds the configured `GraphStore`
+      (NetworkxStore under the dev path, or Neo4j via env) and
+      serves the full MCP tool surface.
+    - **Snapshot** (`--snapshot <path>`) — loads a frozen graph
+      from `<path>` and serves the same tool surface read-only
+      against it. Mutually exclusive with `--storage-path`.
+    """
+    if snapshot is not None and storage_path is not None:
+        raise typer.BadParameter(
+            "--snapshot and --storage-path are mutually exclusive. "
+            "The snapshot flag serves a frozen file; --storage-path "
+            "binds the live dev NetworkxStore."
+        )
 
     if host is not None:
         os.environ["ONTOS_LISTEN_HOST"] = host
     if port is not None:
         os.environ["ONTOS_LISTEN_PORT"] = str(port)
+
+    if snapshot is not None:
+        _serve_snapshot(snapshot)
+        return
+
+    # Deferred import so `ontos --help` doesn't drag in fastmcp.
+    from ontos.runtime.server import main as _serve_main
+
     # Thread the CLI's resolved storage path through the env so the
     # server picks it up via RuntimeConfig.from_env(). `serve` is
     # read-only against the dev store today — the MCP tools in
@@ -86,6 +123,95 @@ def serve(
         # Explicit opt-out: clear any inherited env.
         os.environ.pop("ONTOS_STORAGE_PATH", None)
     _serve_main()
+
+
+def _serve_snapshot(path: Path) -> None:
+    """Boot an MCP server over a frozen NetworkxStore snapshot.
+
+    Dispatches on file extension: `.pkl` / `.pickle` loads today's
+    ONTOS-NX-STORE-V2 pickle. JSON-LD / GraphML / Cypher paths raise
+    with a pointer at #32 until that work ships.
+    """
+    import structlog
+
+    log = structlog.get_logger()
+
+    if path.suffix.lower() not in (".pkl", ".pickle"):
+        raise typer.BadParameter(
+            f"snapshot format {path.suffix!r} is not supported yet. "
+            "Today's snapshot format is an ONTOS-NX-STORE-V2 pickle "
+            "(.pkl / .pickle); JSON-LD / GraphML / Cypher support "
+            "arrives with issue #32."
+        )
+    if not path.exists():
+        raise typer.BadParameter(f"snapshot file not found: {path}")
+
+    log.warning(
+        "snapshot-pickle-loaded",
+        path=str(path.resolve()),
+        reason=(
+            "ONTOS-NX-STORE-V2 is a Python pickle format; loading an "
+            "untrusted snapshot file executes arbitrary code. Safer "
+            "text-based snapshots arrive with #32."
+        ),
+    )
+
+    # Deferred imports for help-latency parity with live `serve`.
+    from ontos.runtime.config import RuntimeConfig
+    from ontos.runtime.server import (
+        _default_dev_signing_key_if_missing,
+        build_server,
+        run_server,
+    )
+    from ontos.storage.networkx_store import NetworkxStore
+
+    _default_dev_signing_key_if_missing()
+
+    store = NetworkxStore(path=path)
+    cfg = RuntimeConfig.from_env()
+    server = build_server(cfg, store=store)
+    _register_snapshot_info(server, path, store)
+    run_server(server, host=cfg.listen_host, port=cfg.listen_port, mode="snapshot")
+
+
+def _register_snapshot_info(
+    server: object,  # fastmcp.FastMCP — kept lazy so this file imports fast
+    path: Path,
+    store: object,  # ontos.storage.networkx_store.NetworkxStore
+) -> None:
+    """Register the `snapshot_info` tool on a snapshot-backed server.
+
+    Reports:
+    - `snapshot_path` — absolute path on disk
+    - `snapshot_mtime` — ISO-8601 UTC mtime of the pickle
+    - `fact_count` — number of facts in the loaded store
+    - `ontology_id` / `ontology_version` — the ontology stamp from
+      the first fact (all facts within one snapshot agree by #34's
+      ingest-side contract)
+    - `format` — `"ontos-nx-store-v2"` today; future formats land
+      alongside #32.
+
+    The tool shape stays stable across future snapshot formats so
+    orchestrators can rely on the same keys.
+    """
+    from datetime import UTC, datetime
+
+    @server.tool(name="snapshot_info")  # type: ignore[attr-defined,untyped-decorator]
+    async def snapshot_info() -> dict[str, object]:
+        """Metadata about the frozen snapshot this server is bound to."""
+        facts = store._facts  # type: ignore[attr-defined]
+        fact_count = len(facts)
+        sample = next(iter(facts.values()), None)
+        ontology_id = sample.provenance.ontology_id if sample is not None else ""
+        ontology_version = sample.provenance.ontology_version if sample is not None else ""
+        return {
+            "snapshot_path": str(path.resolve()),
+            "snapshot_mtime": datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
+            "fact_count": fact_count,
+            "ontology_id": ontology_id,
+            "ontology_version": ontology_version,
+            "format": "ontos-nx-store-v2",
+        }
 
 
 @app.command()
