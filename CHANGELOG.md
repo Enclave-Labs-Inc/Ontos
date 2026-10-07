@@ -16,6 +16,37 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 0.5.0 track.
 
+### Added — `ontos serve --snapshot` MCP server over a frozen graph (#33)
+- New CLI flag that boots a read-only MCP server bound to a frozen
+  `NetworkxStore` pickle snapshot. All existing read tools (`search`,
+  `traverse`, `explain`, `provenance`, `audit_lookup`, `ask`) work
+  unchanged against the snapshot; a new `snapshot_info` tool reports
+  a content-hash id, the file's mtime, format, and ontology stamp
+  so orchestrators can disambiguate across sources. Deliberately
+  does NOT report `fact_count` (unfiltered total would leak forbidden-
+  fact existence across ACLs) or the absolute path (leaks server
+  filesystem layout).
+- `snapshot_info` emits an Article-12 audit record on every call,
+  threading through the same `_emit` closure the other MCP tools use —
+  it's registered inside `build_server(snapshot_metadata=...)`, not
+  at the CLI shim layer.
+- The loaded store's `_path` is set to `None` after load; the
+  "frozen" guarantee is structural (`flush()` early-returns) rather
+  than left to the convention that today's six tools don't write.
+- Honors bitemporal `as_of`, ACL filtering, and the Article-12 audit
+  chain exactly as the live server does.
+- Dispatches on file extension: `.pkl` / `.pickle` loads today's
+  `ONTOS-NX-STORE-V2` format. JSON-LD / GraphML / Cypher paths will
+  plug in once #32 lands (dispatch wired, loaders deferred).
+- Mutually exclusive with `--storage-path` — the snapshot serves a
+  frozen file, `--storage-path` binds the live dev store.
+- WARNING: today's snapshot format is a Python pickle; the loader's
+  magic-header check is a FORMAT check only (rejects non-Ontos files),
+  NOT a safety mitigation — a crafted pickle with the right prefix
+  still runs. Only load snapshots from trusted sources until #32's
+  text formats land. A one-time structlog warning
+  (`snapshot-pickle-loaded`) fires at load.
+
 ### Fixed — PostgresAuditEmitter chain forks under concurrency
 - `emit_async` read the latest `prev_hash` and inserted the new row
   without any lock, so two concurrent emitters could chain off the

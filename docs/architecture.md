@@ -21,6 +21,8 @@ Sources → Extractors → Provenance-tagged Facts → GraphStore → Executor �
 
 Every request path passes through the audit sink before returning. No exceptions.
 
+`ontos serve --snapshot <path>` boots the same pipeline over a frozen `NetworkxStore` pickle instead of a live store, with a `snapshot_info` tool reporting the file's ontology stamp. All existing read tools, `as_of`, ACL filtering, and the audit chain work unchanged.
+
 ## Module contracts
 
 | Module | Public entry | Input → Output |
