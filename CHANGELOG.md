@@ -14,7 +14,13 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
-0.5.0 track.
+## [0.5.0] - 2026-10-07 - sovereignty signals and offline operation
+
+Three deliverables that tighten the sovereign posture (BRIDGE
+guardrails on all cloud LLM backends), unlock offline review
+(snapshot MCP server over a frozen graph), and fix a real
+Article-12 correctness bug under concurrency (Postgres audit chain
+forks). CHANGELOG keeps `[Unreleased]` empty for the next cycle.
 
 ### Added — Anthropic (Claude) LLM backend + sovereignty guardrails
 - `AnthropicBackend` in `ontos/llm/anthropic.py`, behind a new
