@@ -19,6 +19,10 @@ from __future__ import annotations
 from typing import Any
 
 from ontos.extraction import RawTriple
+from ontos.llm._sovereignty import (
+    enforce_prod_bridge_opt_in,
+    warn_bridge_backend_instantiated,
+)
 from ontos.llm._structured import _ExtractionResponse, _PlanResponse, _reify_plan
 from ontos.llm.prompts import extraction_prompt, planner_prompt
 from ontos.llm.usage import LLMUsage
@@ -55,6 +59,12 @@ class AnthropicBackend:
         max_tokens: int = 16000,
         fallbacks: bool = True,
     ) -> None:
+        backend_id = f"anthropic:{model}"
+        # Enforce FIRST so the sovereignty refusal in ONTOS_ENV=prod
+        # is not preceded by the warning announcing an instantiation
+        # that never happens.
+        enforce_prod_bridge_opt_in(backend_id)
+        warn_bridge_backend_instantiated(backend_id)
         self._model = model
         self._client = client
         self._api_key = api_key

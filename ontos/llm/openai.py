@@ -16,6 +16,10 @@ from __future__ import annotations
 from typing import Any
 
 from ontos.extraction import RawTriple
+from ontos.llm._sovereignty import (
+    enforce_prod_bridge_opt_in,
+    warn_bridge_backend_instantiated,
+)
 from ontos.llm._structured import (
     _ExtractionResponse,
     _PlanResponse,
@@ -46,6 +50,12 @@ class OpenAIBackend:
         client: Any | None = None,
         api_key: str | None = None,
     ) -> None:
+        backend_id = f"openai:{model}"
+        # Enforce FIRST so the sovereignty refusal in ONTOS_ENV=prod
+        # is not preceded by a warning announcing an instantiation
+        # that never happens.
+        enforce_prod_bridge_opt_in(backend_id)
+        warn_bridge_backend_instantiated(backend_id)
         self._model = model
         self._client = client
         self._api_key = api_key
