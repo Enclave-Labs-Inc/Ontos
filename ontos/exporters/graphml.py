@@ -34,6 +34,8 @@ _EDGE_KEYS = {
     "source_id": "e_source_id",
     "extractor_id": "e_extractor_id",
     "extractor_version": "e_extractor_version",
+    "ontology_id": "e_ontology_id",
+    "ontology_version": "e_ontology_version",
     "confidence": "e_confidence",
     "confidence_score": "e_confidence_score",
     "t_valid": "e_t_valid",
@@ -120,6 +122,8 @@ def render_graphml(scan: GraphScan) -> str:
         _add_data(edge, _EDGE_KEYS["source_id"], fact.provenance.source_id)
         _add_data(edge, _EDGE_KEYS["extractor_id"], fact.provenance.extractor_id)
         _add_data(edge, _EDGE_KEYS["extractor_version"], fact.provenance.extractor_version)
+        _add_data(edge, _EDGE_KEYS["ontology_id"], fact.provenance.ontology_id)
+        _add_data(edge, _EDGE_KEYS["ontology_version"], fact.provenance.ontology_version)
         _add_data(edge, _EDGE_KEYS["confidence"], fact.provenance.confidence.value)
         _add_data(edge, _EDGE_KEYS["confidence_score"], fact.provenance.confidence_score)
         _add_data(edge, _EDGE_KEYS["t_valid"], fact.t_valid.isoformat())

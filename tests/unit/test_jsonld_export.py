@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from ontos.exporters.jsonld import render_jsonld
-
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.models import GraphScan, StoredEntity
@@ -24,6 +23,8 @@ def _scan() -> GraphScan:
             source_id="doc:1",
             extractor_id="extractor:test",
             extractor_version="1.2.3",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
             confidence=Confidence.EXTRACTED,
             confidence_score=0.97,
         ),
@@ -101,6 +102,8 @@ def test_render_jsonld_exports_fact_with_provenance_and_time() -> None:
     assert fact["predicate"] == "works_at"
     assert fact["object"] == {"@id": "company:acme-1"}
     assert fact["sourceId"] == "doc:1"
+    assert fact["ontologyId"] == "ontos.starter"
+    assert fact["ontologyVersion"] == "0.4"
     assert fact["extractorId"] == "extractor:test"
     assert fact["confidence"] == "EXTRACTED"
     assert fact["confidenceScore"] == 0.97

@@ -145,6 +145,8 @@ def _fact_attrs(fact: Fact) -> dict[str, str]:
         "data-source-id": fact.provenance.source_id,
         "data-extractor-id": fact.provenance.extractor_id,
         "data-extractor-version": fact.provenance.extractor_version,
+        "data-ontology-id": fact.provenance.ontology_id,
+        "data-ontology-version": fact.provenance.ontology_version,
         "data-confidence": fact.provenance.confidence.value,
         "data-t-valid": fact.t_valid.isoformat(),
         "data-ingested-at": fact.ingested_at.isoformat(),

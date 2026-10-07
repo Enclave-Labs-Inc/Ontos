@@ -22,6 +22,8 @@ def _scan() -> GraphScan:
             source_id="doc:1",
             extractor_id="extractor:test",
             extractor_version="1.2.3",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
             confidence=Confidence.EXTRACTED,
             confidence_score=0.97,
         ),
@@ -94,6 +96,8 @@ def test_render_cypher_exports_fact_and_merge_edges() -> None:
     assert expected_fact in cypher
     assert "predicate: 'works_at'" in cypher
     assert "source_id: 'doc:1'" in cypher
+    assert "ontology_id: 'ontos.starter'" in cypher
+    assert "ontology_version: '0.4'" in cypher
     assert "confidence: 'EXTRACTED'" in cypher
     assert "acl_ref: 'acl:finance'" in cypher
 

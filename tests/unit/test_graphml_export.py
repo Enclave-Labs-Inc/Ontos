@@ -25,6 +25,8 @@ def _fact() -> Fact:
             source_id="doc:1",
             extractor_id="extractor:test",
             extractor_version="1.2.3",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
             confidence=Confidence.EXTRACTED,
             confidence_score=0.97,
         ),
@@ -112,6 +114,8 @@ def test_render_graphml_preserves_raw_nodes_and_fact_metadata() -> None:
     assert fact_data["kind"] == "fact"
     assert fact_data["predicate"] == "works_at"
     assert fact_data["source_id"] == "doc:1"
+    assert fact_data["ontology_id"] == "ontos.starter"
+    assert fact_data["ontology_version"] == "0.4"
     assert fact_data["confidence"] == "EXTRACTED"
     assert fact_data["confidence_score"] == "0.97"
     assert fact_data["acl_ref"] == "acl:finance"

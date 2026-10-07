@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from ontos.exporters.svg import render_svg
-
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.models import GraphScan, StoredEntity
@@ -44,6 +43,8 @@ def _scan() -> GraphScan:
                     source_id="doc:1",
                     extractor_id="extractor:test",
                     extractor_version="1.2.3",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
                     confidence=Confidence.EXTRACTED,
                     confidence_score=0.97,
                 ),
@@ -81,6 +82,8 @@ def test_render_svg_contains_fact_metadata() -> None:
     assert 'data-kind="fact"' in svg
     assert 'data-predicate="works_at"' in svg
     assert 'data-source-id="doc:1"' in svg
+    assert 'data-ontology-id="ontos.starter"' in svg
+    assert 'data-ontology-version="0.4"' in svg
     assert 'data-acl-ref="acl:finance"' in svg
     assert ">works_at<" in svg
 

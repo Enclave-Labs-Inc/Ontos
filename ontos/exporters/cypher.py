@@ -136,6 +136,8 @@ def render_cypher(scan: GraphScan) -> str:
                     ("source_id", fact.provenance.source_id),
                     ("extractor_id", fact.provenance.extractor_id),
                     ("extractor_version", fact.provenance.extractor_version),
+                    ("ontology_id", fact.provenance.ontology_id),
+                    ("ontology_version", fact.provenance.ontology_version),
                     ("confidence", fact.provenance.confidence.value),
                     ("confidence_score", fact.provenance.confidence_score),
                     ("t_valid", fact.t_valid.isoformat()),
