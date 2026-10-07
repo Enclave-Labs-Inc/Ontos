@@ -138,3 +138,21 @@ def test_render_jsonld_is_deterministic() -> None:
     )
 
     assert render_jsonld(scan) == render_jsonld(reversed_scan)
+
+
+def test_render_jsonld_manifest_carries_ontology_stamp() -> None:
+    document = json.loads(render_jsonld(_scan()))
+
+    assert document["manifest"] == {
+        "ontologyId": "ontos.starter",
+        "ontologyVersion": "0.4",
+    }
+
+
+def test_render_jsonld_manifest_is_empty_when_snapshot_has_no_facts() -> None:
+    document = json.loads(render_jsonld(GraphScan()))
+
+    assert document["manifest"] == {
+        "ontologyId": "",
+        "ontologyVersion": "",
+    }

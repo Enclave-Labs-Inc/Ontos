@@ -124,8 +124,17 @@ def render_jsonld(scan: GraphScan) -> str:
 
     graph.extend(_merge_nodes(scan))
 
+    first_fact = min(scan.facts, key=lambda item: str(item.id), default=None)
+    manifest = {
+        "ontologyId": first_fact.provenance.ontology_id if first_fact is not None else "",
+        "ontologyVersion": (
+            first_fact.provenance.ontology_version if first_fact is not None else ""
+        ),
+    }
+
     document = {
         "@context": _CONTEXT,
+        "manifest": manifest,
         "@graph": graph,
     }
     return json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
