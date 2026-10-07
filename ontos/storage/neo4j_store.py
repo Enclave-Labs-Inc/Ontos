@@ -35,6 +35,7 @@ from neo4j.time import DateTime as Neo4jDateTime
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
 from ontos.storage.base import CrossAclUpsertError
+from ontos.storage.models import GraphScan, StoredEntity
 
 log = structlog.get_logger(__name__)
 
@@ -440,6 +441,208 @@ class Neo4jStore:
             )
             records = await result.data()
         return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]
+
+    async def scan(
+        self,
+        *,
+        as_of: datetime | None = None,
+        include_closed: bool = False,
+        acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
+    ) -> GraphScan:
+        """Return an ACL-safe, backend-neutral snapshot for graph export."""
+
+        if include_closed and as_of is not None:
+            raise ValueError("include_closed cannot be combined with as_of")
+
+        entity_visibility = """
+            (
+                n.acl_ref IS NULL
+                OR ($allowed_acls IS NOT NULL AND n.acl_ref IN $allowed_acls)
+                OR (
+                    $allowed_acls IS NULL
+                    AND $acl_subject IS NOT NULL
+                    AND n.acl_ref = $acl_subject
+                )
+            )
+        """
+
+        entity_query = f"""
+        MATCH (n:Entity)
+        WHERE {entity_visibility}
+        RETURN n.id AS id, properties(n) AS props
+        """
+
+        fact_query = """
+        MATCH (s:Entity)-[r:RELATES]->(o:Entity)
+        WHERE
+            (
+                $include_closed
+                OR (
+                    $as_of IS NULL
+                    AND r.t_invalid IS NULL
+                )
+                OR (
+                    $as_of IS NOT NULL
+                    AND r.t_valid <= $as_of
+                    AND (r.t_invalid IS NULL OR r.t_invalid > $as_of)
+                )
+            )
+            AND (
+                r.acl_ref IS NULL
+                OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
+                OR (
+                    $allowed_acls IS NULL
+                    AND $acl_subject IS NOT NULL
+                    AND r.acl_ref = $acl_subject
+                )
+            )
+            AND (
+                s.acl_ref IS NULL
+                OR ($allowed_acls IS NOT NULL AND s.acl_ref IN $allowed_acls)
+                OR (
+                    $allowed_acls IS NULL
+                    AND $acl_subject IS NOT NULL
+                    AND s.acl_ref = $acl_subject
+                )
+            )
+            AND (
+                o.acl_ref IS NULL
+                OR ($allowed_acls IS NOT NULL AND o.acl_ref IN $allowed_acls)
+                OR (
+                    $allowed_acls IS NULL
+                    AND $acl_subject IS NOT NULL
+                    AND o.acl_ref = $acl_subject
+                )
+            )
+        RETURN s.id AS subject_id,
+               o.id AS object_id,
+               properties(r) AS props
+        """
+
+        merge_query = """
+        MATCH (m:Entity)-[r:MERGED_WITH]->(c:Entity)
+        WITH c,
+             r.resolver_id AS resolver_id,
+             r.resolver_version AS resolver_version,
+             r.resolved_at AS resolved_at,
+             r.reason AS reason,
+             collect(m) AS merged_nodes
+        WHERE
+            (
+                c.acl_ref IS NULL
+                OR ($allowed_acls IS NOT NULL AND c.acl_ref IN $allowed_acls)
+                OR (
+                    $allowed_acls IS NULL
+                    AND $acl_subject IS NOT NULL
+                    AND c.acl_ref = $acl_subject
+                )
+            )
+            AND ALL(
+                mn IN merged_nodes
+                WHERE
+                    mn.acl_ref IS NULL
+                    OR ($allowed_acls IS NOT NULL AND mn.acl_ref IN $allowed_acls)
+                    OR (
+                        $allowed_acls IS NULL
+                        AND $acl_subject IS NOT NULL
+                        AND mn.acl_ref = $acl_subject
+                    )
+            )
+        RETURN c.id AS canonical_id,
+               [mn IN merged_nodes | mn.id] AS merged_ids,
+               resolver_id,
+               resolver_version,
+               resolved_at,
+               reason
+        """
+
+        async with self._driver.session(database=self._database) as session:
+            entity_result = await session.run(
+                entity_query,
+                acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
+            )
+            entity_rows = await entity_result.data()
+
+            fact_result = await session.run(
+                fact_query,
+                as_of=as_of,
+                include_closed=include_closed,
+                acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
+            )
+            fact_rows = await fact_result.data()
+
+            merge_result = await session.run(
+                merge_query,
+                acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
+            )
+            merge_rows = await merge_result.data()
+
+        entities: list[StoredEntity] = []
+        for row in entity_rows:
+            props = row["props"]
+            properties_raw = props.get("properties")
+            if isinstance(properties_raw, str):
+                try:
+                    properties = json.loads(properties_raw)
+                except json.JSONDecodeError:
+                    properties = {}
+            else:
+                properties = {}
+
+            entities.append(
+                StoredEntity(
+                    id=row["id"],
+                    type=props.get("type"),
+                    canonical_name=props.get("canonical_name"),
+                    aliases=list(props.get("aliases") or []),
+                    properties=properties,
+                    provenance_source_id=props.get("provenance_source_id"),
+                    provenance_extractor_id=props.get("provenance_extractor_id"),
+                    acl_ref=props.get("acl_ref"),
+                )
+            )
+
+        facts = [
+            _edge_props_to_fact(
+                row["subject_id"],
+                row["object_id"],
+                row["props"],
+            )
+            for row in fact_rows
+        ]
+
+        merges: list[MergeRecord] = []
+        for row in merge_rows:
+            resolved_at_raw = row["resolved_at"]
+            resolved_at = _to_python_datetime(resolved_at_raw)
+            merges.append(
+                MergeRecord(
+                    canonical_id=row["canonical_id"],
+                    merged_ids=list(row["merged_ids"]),
+                    resolver_id=row["resolver_id"],
+                    resolver_version=row["resolver_version"],
+                    resolved_at=resolved_at,
+                    reason=row["reason"] or "",
+                )
+            )
+
+        return GraphScan(
+            entities=sorted(entities, key=lambda entity: entity.id),
+            facts=sorted(facts, key=lambda fact: str(fact.id)),
+            merges=sorted(
+                merges,
+                key=lambda record: (
+                    record.canonical_id,
+                    tuple(record.merged_ids),
+                    record.resolver_id,
+                    record.resolved_at.isoformat(),
+                ),
+            ),
+        )
 
     async def entity_acl(self, entity_id: str) -> str | None:
         # PR #49: read-only ACL lookup used by IngestPipeline to

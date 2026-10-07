@@ -727,3 +727,225 @@ async def test_legacy_edge_without_ontology_props_loads_with_empty_sentinel(
     assert got is not None
     assert got.provenance.ontology_id == ""
     assert got.provenance.ontology_version == ""
+
+
+# ---------------------------------------------------------------------------
+# #32 — backend-neutral graph scan for export
+# ---------------------------------------------------------------------------
+
+
+async def test_scan_preserves_raw_ids_and_stored_entity_attributes(
+    store: Neo4jStore,
+) -> None:
+    from ontos.runtime.models import Entity
+
+    await store.upsert_entity(
+        Entity(
+            id="person:alice",
+            type="Person",
+            canonical_name="Alice",
+            aliases=["A. Smith"],
+            properties={"team": "finance"},
+            provenance=_provenance(),
+        )
+    )
+    await store.upsert_entity(
+        Entity(
+            id="company:acme-1",
+            type="Company",
+            canonical_name="Acme",
+            provenance=_provenance(),
+        )
+    )
+
+    fact = _make_fact("person:alice", "works_at", "company:acme-1")
+    await store.add_fact(fact)
+
+    scan = await store.scan()
+
+    entities = {entity.id: entity for entity in scan.entities}
+    assert set(entities) == {"person:alice", "company:acme-1"}
+    assert entities["person:alice"].type == "Person"
+    assert entities["person:alice"].canonical_name == "Alice"
+    assert entities["person:alice"].aliases == ["A. Smith"]
+    assert entities["person:alice"].properties == {"team": "finance"}
+    assert entities["person:alice"].provenance_source_id == "test-source"
+    assert entities["person:alice"].provenance_extractor_id == "test"
+
+    assert len(scan.facts) == 1
+    assert scan.facts[0].id == fact.id
+    assert scan.facts[0].subject_id == "person:alice"
+    assert scan.facts[0].object_id == "company:acme-1"
+
+
+async def test_scan_temporal_modes(store: Neo4jStore) -> None:
+    fact = _make_fact(
+        "person:alice",
+        "works_at",
+        "company:acme-1",
+        t_valid=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    await store.add_fact(fact)
+    await store.close_fact(
+        fact.id,
+        t_invalid=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+
+    active = await store.scan()
+    historical = await store.scan(as_of=datetime(2026, 3, 1, tzinfo=UTC))
+    audit = await store.scan(include_closed=True)
+
+    assert active.facts == []
+    assert [item.id for item in historical.facts] == [fact.id]
+    assert [item.id for item in audit.facts] == [fact.id]
+
+    with pytest.raises(ValueError, match="include_closed"):
+        await store.scan(
+            as_of=datetime(2026, 3, 1, tzinfo=UTC),
+            include_closed=True,
+        )
+
+
+async def test_scan_denies_restricted_entities_and_endpoint_facts_by_default(
+    store: Neo4jStore,
+) -> None:
+    from ontos.runtime.models import Entity
+
+    await store.upsert_entity(
+        Entity(
+            id="person:alice",
+            type="Person",
+            canonical_name="Alice Finance",
+            provenance=_provenance(),
+        ),
+        acl_ref="acl:finance",
+    )
+    await store.upsert_entity(
+        Entity(
+            id="company:public",
+            type="Company",
+            canonical_name="Public Co",
+            provenance=_provenance(),
+        )
+    )
+
+    # Public fact, restricted endpoint: the fact must still be dropped
+    # because returning its raw endpoint id would leak restricted existence.
+    await store.add_fact(
+        _make_fact("person:alice", "works_at", "company:public")
+    )
+
+    scan = await store.scan()
+
+    assert {entity.id for entity in scan.entities} == {"company:public"}
+    assert scan.facts == []
+
+
+async def test_scan_allows_restricted_graph_when_acl_is_authorized(
+    store: Neo4jStore,
+) -> None:
+    from ontos.runtime.models import Entity
+
+    await store.upsert_entity(
+        Entity(
+            id="person:alice",
+            type="Person",
+            canonical_name="Alice Finance",
+            provenance=_provenance(),
+        ),
+        acl_ref="acl:finance",
+    )
+    await store.upsert_entity(
+        Entity(
+            id="company:acme-1",
+            type="Company",
+            canonical_name="Acme",
+            provenance=_provenance(),
+        ),
+        acl_ref="acl:finance",
+    )
+
+    fact = _make_fact(
+        "person:alice",
+        "works_at",
+        "company:acme-1",
+        acl_ref="acl:finance",
+    )
+    await store.add_fact(fact)
+
+    denied = await store.scan()
+    allowed = await store.scan(allowed_acls=["acl:finance"])
+
+    assert denied.entities == []
+    assert denied.facts == []
+
+    assert {entity.id for entity in allowed.entities} == {
+        "person:alice",
+        "company:acme-1",
+    }
+    assert [item.id for item in allowed.facts] == [fact.id]
+
+
+async def test_scan_filters_merge_records_and_keeps_raw_ids(
+    store: Neo4jStore,
+) -> None:
+    from ontos.resolver.base import MergeRecord
+    from ontos.runtime.models import Entity
+
+    await store.upsert_entity(
+        Entity(
+            id="company:acme-1",
+            type="Company",
+            canonical_name="Acme",
+            provenance=_provenance(),
+        )
+    )
+    await store.upsert_entity(
+        Entity(
+            id="company:acme-2",
+            type="Company",
+            canonical_name="Acme Holdings",
+            provenance=_provenance(),
+        ),
+        acl_ref="acl:finance",
+    )
+    await store.upsert_entity(
+        Entity(
+            id="person:alice",
+            type="Person",
+            canonical_name="Alice",
+            provenance=_provenance(),
+        )
+    )
+
+    fact = _make_fact(
+        "person:alice",
+        "works_at",
+        "company:acme-2",
+        acl_ref="acl:finance",
+    )
+    await store.add_fact(fact)
+
+    await store.record_merge(
+        MergeRecord(
+            canonical_id="company:acme-1",
+            merged_ids=["company:acme-2"],
+            resolver_id="exact-match",
+            resolver_version="1.0",
+            resolved_at=datetime(2026, 1, 3, tzinfo=UTC),
+            reason="same registration number",
+        )
+    )
+
+    denied = await store.scan()
+    allowed = await store.scan(allowed_acls=["acl:finance"])
+
+    assert denied.merges == []
+    assert "company:acme-2" not in {entity.id for entity in denied.entities}
+
+    assert len(allowed.merges) == 1
+    assert allowed.merges[0].canonical_id == "company:acme-1"
+    assert allowed.merges[0].merged_ids == ["company:acme-2"]
+
+    # Resolver grouping stays separate; the stored fact endpoint remains raw.
+    assert allowed.facts[0].object_id == "company:acme-2"
