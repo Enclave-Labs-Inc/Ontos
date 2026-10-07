@@ -441,22 +441,37 @@ def build_server(
     return mcp
 
 
-def main() -> None:
-    """CLI entry — boots the server with streamable-HTTP transport."""
-    # Dev-only: default a signing key if operator did not set one; refuse in prod.
+def _default_dev_signing_key_if_missing() -> None:
+    """Default a dev signing key when running outside prod.
+
+    Factored so both the live-serve (`main`) and snapshot-serve
+    (`ontos.cli.main.serve_snapshot`) paths share the same guard.
+    """
     if os.environ.get("ONTOS_ENV") != "prod" and not os.environ.get("ONTOS_AUDIT_SIGNING_KEY"):
         os.environ["ONTOS_AUDIT_SIGNING_KEY"] = "dev-only-signing-key-do-not-use"
         log.warning("using dev signing key — never do this in prod")
 
+
+def run_server(server: FastMCP, *, host: str, port: int, mode: str = "live") -> None:
+    """Boot a built MCP server with streamable-HTTP transport.
+
+    `mode` is logged for operator orientation — `"live"` for the
+    standard `ontos serve` path, `"snapshot"` when serving a frozen
+    pickle via `ontos serve --snapshot`. Behavior is identical;
+    the string just lands in the structured log line so a dashboard
+    can slice by it.
+    """
+    log.info("ontos starting", host=host, port=port, mode=mode)
+    server.run(transport="http", host=host, port=port)
+
+
+def main() -> None:
+    """CLI entry — boots the live server with streamable-HTTP transport."""
+    _default_dev_signing_key_if_missing()
     cfg = RuntimeConfig.from_env()
     server = build_server(cfg)
-    log.info(
-        "ontos starting",
-        host=cfg.listen_host,
-        port=cfg.listen_port,
-        backend=cfg.storage_backend,
-    )
-    server.run(transport="http", host=cfg.listen_host, port=cfg.listen_port)
+    log.info("backend", backend=cfg.storage_backend)
+    run_server(server, host=cfg.listen_host, port=cfg.listen_port, mode="live")
 
 
 if __name__ == "__main__":
