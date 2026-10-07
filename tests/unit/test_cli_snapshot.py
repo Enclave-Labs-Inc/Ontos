@@ -1,9 +1,9 @@
 """#33 — `ontos serve --snapshot` CLI tests.
 
 Isolate the shim's error-handling (mutually-exclusive flags, extension
-dispatch, missing-file / bad-magic rejection) and the `snapshot_info`
-tool's shape. Does not boot the fastmcp HTTP server — that path is
-exercised in `tests/integration/test_snapshot_serve.py`.
+dispatch, missing-file / bad-magic rejection) and `_collect_snapshot_metadata`'s
+shape. End-to-end MCP exercises live in
+`tests/unit/test_snapshot_serve_in_memory.py`.
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from ontos.cli import app
-from ontos.cli.main import _register_snapshot_info
+from ontos.cli.main import _collect_snapshot_metadata, _compute_snapshot_id
 from ontos.runtime.models import Confidence, Fact, Provenance
+from ontos.runtime.server import SnapshotMetadata
 from ontos.storage.base import StorageError
 from ontos.storage.networkx_store import NetworkxStore
 
@@ -65,9 +66,12 @@ def test_serve_help_documents_snapshot_flag() -> None:
     assert result.exit_code == 0
     assert "--snapshot" in result.stdout
     # Warning text must be visible in --help so operators see the
-    # pickle-trust caveat before they ever load a file.
+    # pickle-trust caveat before they ever load a file. The review
+    # (PR #53) called out that the magic-header check is a FORMAT
+    # check, not a safety mitigation — --help must reflect that.
     assert "pickle" in result.stdout.lower()
     assert "trusted" in result.stdout.lower()
+    assert "format check" in result.stdout.lower()
 
 
 def test_snapshot_and_storage_path_are_mutually_exclusive(tmp_path: Path) -> None:
@@ -99,72 +103,63 @@ def test_snapshot_rejects_missing_file(tmp_path: Path) -> None:
     assert "not found" in combined
 
 
-def test_snapshot_rejects_bad_magic_header(tmp_path: Path) -> None:
+def test_snapshot_rejects_bad_magic_header_raises_storage_error(tmp_path: Path) -> None:
     """A `.pkl` file that isn't an ONTOS-NX-STORE-V2 payload must fail
-    loudly at load time, before any pickle.loads runs. Mirrors
-    `NetworkxStore._load_from`'s existing fail-loud behavior."""
+    loudly before pickle.loads runs. The review (PR #53) called out the
+    original brittle assertion — `isinstance(result.exception, StorageError)`
+    alone is the right form."""
     bogus = tmp_path / "bogus.pkl"
     bogus.write_bytes(b"not-an-ontos-store\n" + pickle.dumps({}))
     result = runner.invoke(app, ["serve", "--snapshot", str(bogus)])
     assert result.exit_code != 0
-    # StorageError bubbles up through typer with a non-zero exit; the
-    # magic-header message surfaces for operator orientation.
-    err_text = (result.stdout + result.stderr).lower()
-    assert "magic" in err_text or "format" in err_text or isinstance(result.exception, StorageError)
+    assert isinstance(result.exception, StorageError)
 
 
-def test_snapshot_info_tool_reports_fact_count_and_ontology_stamp(tmp_path: Path) -> None:
-    """The snapshot_info tool returns the stamp from the first fact.
-    Builds the tool-registration directly rather than going through
-    the HTTP server (that path is in the integration tests)."""
+def test_snapshot_metadata_is_captured_at_load_time(tmp_path: Path) -> None:
+    """`_collect_snapshot_metadata` produces a frozen `SnapshotMetadata`
+    with the ontology stamp from the first fact and a content-derived
+    id — no fact_count (would leak forbidden counts) and no absolute
+    path (would leak server filesystem layout)."""
     snap = tmp_path / "snap.pkl"
     _write_snapshot_pickle(snap, with_fact=True)
     store = NetworkxStore(path=snap)
 
-    # Capture the registered callable without needing a real FastMCP.
-    captured: dict[str, object] = {}
-
-    class _FakeServer:
-        def tool(self, *, name: str):  # noqa: ANN001 - mimics fastmcp
-            def _decorator(fn):  # noqa: ANN001
-                captured[name] = fn
-                return fn
-
-            return _decorator
-
-    _register_snapshot_info(_FakeServer(), snap, store)
-    info = asyncio.run(captured["snapshot_info"]())  # type: ignore[operator]
-
-    assert info["snapshot_path"] == str(snap.resolve())
-    assert info["fact_count"] == 1
-    assert info["ontology_id"] == "ontos.starter"
-    assert info["ontology_version"] == "0.1"
-    assert info["format"] == "ontos-nx-store-v2"
-    # mtime should parse as ISO-8601.
-    datetime.fromisoformat(info["snapshot_mtime"])  # type: ignore[arg-type]
+    metadata = _collect_snapshot_metadata(snap, store)
+    assert isinstance(metadata, SnapshotMetadata)
+    assert metadata.ontology_id == "ontos.starter"
+    assert metadata.ontology_version == "0.1"
+    assert metadata.format == "ontos-nx-store-v2"
+    # id is a stable 16-hex-char digest of the file bytes.
+    assert len(metadata.id) == 16
+    assert metadata.id == _compute_snapshot_id(snap)
+    # mtime parses as ISO-8601.
+    datetime.fromisoformat(metadata.mtime)
+    # Review BLOCKING #2 + SUGGESTION #4: metadata exposes no
+    # fact_count and no filesystem path.
+    serialized = metadata.model_dump(mode="json")
+    assert "fact_count" not in serialized
+    assert "snapshot_path" not in serialized
+    assert "path" not in serialized
 
 
-def test_snapshot_info_tool_on_empty_snapshot_returns_zeros_not_raises(
-    tmp_path: Path,
-) -> None:
+def test_snapshot_metadata_on_empty_snapshot_leaves_stamp_empty(tmp_path: Path) -> None:
     """A snapshot with zero facts is a valid edge case (operator
-    freezes an empty store for reproducibility)."""
+    freezes an empty store for reproducibility). Ontology stamp
+    fields come back empty; no raise."""
     snap = tmp_path / "empty.pkl"
     _write_snapshot_pickle(snap, with_fact=False)
     store = NetworkxStore(path=snap)
+    metadata = _collect_snapshot_metadata(snap, store)
+    assert isinstance(metadata, SnapshotMetadata)
+    assert metadata.ontology_id == ""
+    assert metadata.ontology_version == ""
 
-    captured: dict[str, object] = {}
 
-    class _FakeServer:
-        def tool(self, *, name: str):  # noqa: ANN001
-            def _decorator(fn):  # noqa: ANN001
-                captured[name] = fn
-                return fn
-
-            return _decorator
-
-    _register_snapshot_info(_FakeServer(), snap, store)
-    info = asyncio.run(captured["snapshot_info"]())  # type: ignore[operator]
-    assert info["fact_count"] == 0
-    assert info["ontology_id"] == ""
-    assert info["ontology_version"] == ""
+def test_snapshot_id_changes_when_file_bytes_change(tmp_path: Path) -> None:
+    """A re-exported snapshot gets a new id by design, so orchestrators
+    can tell versions apart without consulting mtime."""
+    snap_a = tmp_path / "a.pkl"
+    snap_b = tmp_path / "b.pkl"
+    _write_snapshot_pickle(snap_a, with_fact=True)
+    _write_snapshot_pickle(snap_b, with_fact=False)
+    assert _compute_snapshot_id(snap_a) != _compute_snapshot_id(snap_b)

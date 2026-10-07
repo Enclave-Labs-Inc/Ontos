@@ -39,6 +39,39 @@ class ToolResponse(BaseModel):
     payload: Any
 
 
+class SnapshotMetadata(BaseModel):
+    """Load-time metadata for a `ontos serve --snapshot` session.
+
+    Passed into `build_server(snapshot_metadata=...)` to register the
+    `snapshot_info` MCP tool. Values are captured at load time (before
+    any caller context exists), so the tool returns the SAME frozen
+    values to every caller regardless of ACL — nothing on this struct
+    is a per-caller view onto the graph.
+
+    - `id` — stable short hash of the snapshot bytes; disambiguates
+      multiple snapshots an orchestrator may have loaded.
+    - `mtime` — ISO-8601 UTC mtime of the source file (operator
+      orientation: "when was this snapshot taken").
+    - `format` — snapshot format identifier (`"ontos-nx-store-v2"`
+      today; new values land alongside #32's text formats).
+    - `ontology_id` / `ontology_version` — the ontology stamp from
+      #34 (all facts within one snapshot agree). Captured at load
+      time from one fact under the loader's root context; does not
+      re-read `_facts` on every tool call.
+
+    No `fact_count`, no `path`. Both were present in the first draft
+    and both leak: `fact_count` exposes the unfiltered total pre-ACL
+    (CLAUDE.md: no counts, no markers), and the absolute path exposes
+    the operator's filesystem layout.
+    """
+
+    id: str
+    mtime: str
+    format: str
+    ontology_id: str
+    ontology_version: str
+
+
 def build_store(config: RuntimeConfig) -> GraphStore:
     if config.storage_backend == "networkx":
         return NetworkxStore(path=config.storage_path)
@@ -103,6 +136,7 @@ def build_server(
     authz: AuthzBackend | None = None,
     planner: Planner | None = None,
     executor: Executor | None = None,
+    snapshot_metadata: SnapshotMetadata | None = None,
 ) -> FastMCP:
     cfg = config if config is not None else RuntimeConfig.from_env()
     store = store if store is not None else build_store(cfg)
@@ -438,6 +472,42 @@ def build_server(
             },
         )
 
+    if snapshot_metadata is not None:
+        # #33 PR #53 review: register snapshot_info INSIDE build_server
+        # so it threads through the same `_emit` closure every other
+        # tool uses. Pre-review the tool was registered at the CLI shim
+        # layer and bypassed the audit path entirely — a CLAUDE.md
+        # violation. All values are captured at load time (frozen on
+        # SnapshotMetadata), so the tool returns the same bytes to
+        # every caller regardless of ACL.
+        metadata_payload = snapshot_metadata.model_dump(mode="json")
+
+        @mcp.tool()
+        async def snapshot_info(agent_identity: str) -> ToolResponse:
+            """Load-time metadata about the frozen snapshot bound to this server.
+
+            Returns `{id, mtime, format, ontology_id, ontology_version}` —
+            no fact count (would leak the unfiltered total pre-ACL) and
+            no absolute path (would leak server filesystem layout).
+            """
+            started = time.perf_counter()
+            latency_ms = (time.perf_counter() - started) * 1000
+            record = _emit(
+                tool="snapshot_info",
+                agent_identity=agent_identity,
+                acting_on_behalf_of=None,
+                query_text="",
+                tool_arguments={},
+                result_fact_ids=[],
+                latency_ms=latency_ms,
+                policy_decisions=[],
+            )
+            return ToolResponse(
+                query_id=record.query_id,
+                audit_hash=record.hash,
+                payload=metadata_payload,
+            )
+
     return mcp
 
 
@@ -445,23 +515,32 @@ def _default_dev_signing_key_if_missing() -> None:
     """Default a dev signing key when running outside prod.
 
     Factored so both the live-serve (`main`) and snapshot-serve
-    (`ontos.cli.main.serve_snapshot`) paths share the same guard.
+    (`ontos.cli.main._serve_snapshot`) paths share the same guard.
     """
     if os.environ.get("ONTOS_ENV") != "prod" and not os.environ.get("ONTOS_AUDIT_SIGNING_KEY"):
         os.environ["ONTOS_AUDIT_SIGNING_KEY"] = "dev-only-signing-key-do-not-use"
         log.warning("using dev signing key — never do this in prod")
 
 
-def run_server(server: FastMCP, *, host: str, port: int, mode: str = "live") -> None:
+def run_server(
+    server: FastMCP,
+    *,
+    host: str,
+    port: int,
+    mode: str = "live",
+    backend: str = "networkx",
+) -> None:
     """Boot a built MCP server with streamable-HTTP transport.
 
-    `mode` is logged for operator orientation — `"live"` for the
-    standard `ontos serve` path, `"snapshot"` when serving a frozen
-    pickle via `ontos serve --snapshot`. Behavior is identical;
-    the string just lands in the structured log line so a dashboard
-    can slice by it.
+    `mode` is `"live"` for the standard `ontos serve` path, `"snapshot"`
+    when serving a frozen pickle via `ontos serve --snapshot`. Behavior
+    is identical; the string lands in the structured log line so a
+    dashboard can slice by it. `backend` reports the storage backend
+    name on the same startup line — kept as a kwarg so dashboards that
+    previously parsed `backend=…` out of the live-serve startup record
+    continue to work.
     """
-    log.info("ontos starting", host=host, port=port, mode=mode)
+    log.info("ontos starting", host=host, port=port, mode=mode, backend=backend)
     server.run(transport="http", host=host, port=port)
 
 
@@ -470,8 +549,13 @@ def main() -> None:
     _default_dev_signing_key_if_missing()
     cfg = RuntimeConfig.from_env()
     server = build_server(cfg)
-    log.info("backend", backend=cfg.storage_backend)
-    run_server(server, host=cfg.listen_host, port=cfg.listen_port, mode="live")
+    run_server(
+        server,
+        host=cfg.listen_host,
+        port=cfg.listen_port,
+        mode="live",
+        backend=cfg.storage_backend,
+    )
 
 
 if __name__ == "__main__":

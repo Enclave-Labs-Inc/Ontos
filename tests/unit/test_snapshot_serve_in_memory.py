@@ -23,7 +23,7 @@ import pytest
 from fastmcp import Client, FastMCP
 
 from ontos.audit.emitter import AuditEmitter
-from ontos.cli.main import _register_snapshot_info
+from ontos.cli.main import _collect_snapshot_metadata
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.models import ArticleTwelveField, Confidence, Fact, Provenance
 from ontos.runtime.server import build_server
@@ -103,9 +103,11 @@ def audit(monkeypatch: pytest.MonkeyPatch) -> AuditEmitter:
 @pytest.fixture
 def snapshot_server(snapshot_path: Path, audit: AuditEmitter) -> tuple[FastMCP, Path]:
     store = NetworkxStore(path=snapshot_path)
+    # Structural read-only — mirrors _serve_snapshot's post-load guard.
+    store._path = None
+    metadata = _collect_snapshot_metadata(snapshot_path, store)
     cfg = RuntimeConfig.from_env()
-    server = build_server(cfg, store=store, audit=audit)
-    _register_snapshot_info(server, snapshot_path, store)
+    server = build_server(cfg, store=store, audit=audit, snapshot_metadata=metadata)
     return server, snapshot_path
 
 
@@ -130,15 +132,22 @@ async def test_snapshot_search_returns_the_loaded_fact(
 async def test_snapshot_info_tool_reports_stamp_through_mcp(
     snapshot_server: tuple[FastMCP, Path],
 ) -> None:
-    server, path = snapshot_server
+    server, _ = snapshot_server
     async with Client(server) as client:
-        result = await client.call_tool("snapshot_info", {})
-    payload = _unwrap(result)
-    assert payload["snapshot_path"] == str(path.resolve())
-    assert payload["fact_count"] == 2
+        result = await client.call_tool("snapshot_info", {"agent_identity": "test:client"})
+    outer = _unwrap(result)
+    # The snapshot_info tool returns a ToolResponse wrapper like every
+    # other MCP tool; the metadata lives under .payload.
+    payload = outer["payload"]
     assert payload["ontology_id"] == "ontos.starter"
     assert payload["ontology_version"] == "0.1"
     assert payload["format"] == "ontos-nx-store-v2"
+    assert len(payload["id"]) == 16
+    assert "mtime" in payload
+    # Review BLOCKING #2 + SUGGESTION #4: no fact_count, no snapshot_path.
+    assert "fact_count" not in payload
+    assert "snapshot_path" not in payload
+    assert "path" not in payload
 
 
 async def test_snapshot_tool_calls_land_in_audit_chain(
@@ -157,5 +166,25 @@ async def test_snapshot_tool_calls_land_in_audit_chain(
     # from M1 holds unchanged.
     for field in ArticleTwelveField:
         assert field in record.article12, f"Article-12 field missing: {field.value}"
-    assert record.article12[ArticleTwelveField.TOOL_INVOKED] == "search"
+
+
+async def test_snapshot_info_also_emits_article_twelve_audit_record(
+    snapshot_server: tuple[FastMCP, Path], audit: AuditEmitter
+) -> None:
+    """Review BLOCKING #1: `snapshot_info` is a new MCP tool, so it
+    MUST emit an Article-12 record just like the other six. Pre-review
+    the tool was registered at the CLI shim layer and bypassed the
+    audit path; now it's registered inside build_server and threads
+    through the same `_emit` closure. This test is the regression gate."""
+    server, _ = snapshot_server
+    async with Client(server) as client:
+        info_result = await client.call_tool("snapshot_info", {"agent_identity": "test:client"})
+    payload = _unwrap(info_result)
+    assert payload["query_id"]
+    assert payload["audit_hash"]
+    record = audit.by_query_id(UUID(payload["query_id"]))
+    assert record is not None
+    for field in ArticleTwelveField:
+        assert field in record.article12, f"Article-12 field missing: {field.value}"
+    assert record.article12[ArticleTwelveField.TOOL_INVOKED] == "snapshot_info"
     assert record.article12[ArticleTwelveField.AGENT_IDENTITY] == "test:client"

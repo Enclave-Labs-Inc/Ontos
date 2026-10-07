@@ -107,9 +107,9 @@ Serve the MCP tool surface over a frozen graph export instead of the live store:
 ontos serve --snapshot ~/snapshots/graph-2026-10-07.pkl --port 7788
 ```
 
-Boots a read-only MCP server bound to the pickle. All existing read tools (`search`, `traverse`, `explain`, `provenance`, `audit_lookup`, `ask`) work unchanged; a new `snapshot_info` tool reports the fact count, ontology stamp, and the file's mtime so orchestrators can disambiguate across sources. Mutually exclusive with `--storage-path`. Honors `as_of`, ACL filtering, and the Article-12 audit chain exactly as live-serve does.
+Boots a read-only MCP server bound to the pickle. All existing read tools (`search`, `traverse`, `explain`, `provenance`, `audit_lookup`, `ask`) work unchanged; a new `snapshot_info` tool reports a content-hash id, the file's mtime, format, and the ontology stamp from #34 so orchestrators can disambiguate across sources. Mutually exclusive with `--storage-path`. Honors `as_of`, ACL filtering, and the Article-12 audit chain exactly as live-serve does — `snapshot_info` is itself audited, and intentionally reports no fact count or filesystem path.
 
-Today's snapshot format is an `ONTOS-NX-STORE-V2` Python pickle (`.pkl` / `.pickle`). Loading an untrusted pickle executes arbitrary code — only load snapshots from trusted sources. Text-based safe-to-load formats (JSON-LD, GraphML, Cypher) land with issue #32.
+Today's snapshot format is an `ONTOS-NX-STORE-V2` Python pickle (`.pkl` / `.pickle`). The loader's magic-header check is a format check (rejects non-Ontos files), not a safety mitigation — a crafted pickle with the right prefix still runs on load, so only load snapshots from trusted sources. Text-based safe-to-load formats (JSON-LD, GraphML, Cypher) land with issue #32.
 
 ## Design pillars
 

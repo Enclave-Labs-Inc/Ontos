@@ -72,8 +72,11 @@ def serve(
                 ".pickle); JSON-LD / GraphML / Cypher paths arrive "
                 "with issue #32. WARNING: today's snapshot format is "
                 "a Python pickle — loading an untrusted file executes "
-                "arbitrary code. Only load snapshots from trusted "
-                "sources until #32's text formats land."
+                "arbitrary code. The magic-header check in the loader "
+                "is a FORMAT check (it rejects non-Ontos files), NOT "
+                "a safety mitigation — a crafted pickle with the right "
+                "prefix still runs on load. Only load snapshots from "
+                "trusted sources until #32's text formats land."
             ),
         ),
     ] = None,
@@ -125,12 +128,65 @@ def serve(
     _serve_main()
 
 
+def _compute_snapshot_id(path: Path) -> str:
+    """Short stable identifier derived from the snapshot's bytes.
+
+    64 bits (first 16 hex chars of sha256) is more than enough to
+    disambiguate the handful of snapshots an orchestrator might juggle
+    at once. Not security-critical. A byte-level change invalidates the
+    id by design, so operators see a different id after a re-export.
+
+    NOT derived from `path.name` or the absolute path — the review
+    noted the first draft returned the full filesystem path to any
+    MCP caller, which leaks the server's layout and the operator's
+    naming scheme.
+    """
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
+def _collect_snapshot_metadata(path: Path, store: object) -> object:
+    """Build the `SnapshotMetadata` passed into `build_server`.
+
+    Captured at LOAD time, pre-ACL, so the resulting values are the
+    same bytes returned to every caller regardless of acl_subject.
+    Deliberately NO fact_count — unfiltered total would leak the
+    existence of forbidden facts (CLAUDE.md: no counts, no markers).
+    Deliberately NO absolute path — leaks server filesystem layout.
+    Ontology stamp is read here under the loader's root context, not
+    at tool-call time, so no per-caller code touches the facts dict.
+    """
+    from datetime import UTC, datetime
+
+    from ontos.runtime.server import SnapshotMetadata
+
+    facts = store._facts  # type: ignore[attr-defined]
+    sample = next(iter(facts.values()), None)
+    ontology_id = sample.provenance.ontology_id if sample is not None else ""
+    ontology_version = sample.provenance.ontology_version if sample is not None else ""
+    return SnapshotMetadata(
+        id=_compute_snapshot_id(path),
+        mtime=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
+        format="ontos-nx-store-v2",
+        ontology_id=ontology_id,
+        ontology_version=ontology_version,
+    )
+
+
 def _serve_snapshot(path: Path) -> None:
     """Boot an MCP server over a frozen NetworkxStore snapshot.
 
     Dispatches on file extension: `.pkl` / `.pickle` loads today's
     ONTOS-NX-STORE-V2 pickle. JSON-LD / GraphML / Cypher paths raise
     with a pointer at #32 until that work ships.
+
+    The loaded store's `_path` is set to `None` after load so a
+    future write tool cannot silently mutate the "frozen" file —
+    `NetworkxStore.flush()` early-returns on `None`, making the
+    read-only guarantee structural rather than by omission (today's
+    six MCP tools don't write, but nothing enforces that invariant;
+    this does).
     """
     import structlog
 
@@ -150,9 +206,12 @@ def _serve_snapshot(path: Path) -> None:
         "snapshot-pickle-loaded",
         path=str(path.resolve()),
         reason=(
-            "ONTOS-NX-STORE-V2 is a Python pickle format; loading an "
-            "untrusted snapshot file executes arbitrary code. Safer "
-            "text-based snapshots arrive with #32."
+            "ONTOS-NX-STORE-V2 is a Python pickle format; loading a "
+            "crafted file executes arbitrary code. The loader's "
+            "magic-header check is a FORMAT check only (rejects "
+            "non-Ontos files), NOT a safety mitigation — a crafted "
+            "pickle with the right prefix still runs. Only load from "
+            "trusted sources until #32's text formats land."
         ),
     )
 
@@ -168,50 +227,22 @@ def _serve_snapshot(path: Path) -> None:
     _default_dev_signing_key_if_missing()
 
     store = NetworkxStore(path=path)
+    # Structural read-only: null the persistence path AFTER load so
+    # `NetworkxStore.flush()` early-returns if any future write tool
+    # ever lands. The "frozen" guarantee is now enforced, not left
+    # to the convention that today's six tools don't write.
+    store._path = None
+
+    metadata = _collect_snapshot_metadata(path, store)
     cfg = RuntimeConfig.from_env()
-    server = build_server(cfg, store=store)
-    _register_snapshot_info(server, path, store)
-    run_server(server, host=cfg.listen_host, port=cfg.listen_port, mode="snapshot")
-
-
-def _register_snapshot_info(
-    server: object,  # fastmcp.FastMCP — kept lazy so this file imports fast
-    path: Path,
-    store: object,  # ontos.storage.networkx_store.NetworkxStore
-) -> None:
-    """Register the `snapshot_info` tool on a snapshot-backed server.
-
-    Reports:
-    - `snapshot_path` — absolute path on disk
-    - `snapshot_mtime` — ISO-8601 UTC mtime of the pickle
-    - `fact_count` — number of facts in the loaded store
-    - `ontology_id` / `ontology_version` — the ontology stamp from
-      the first fact (all facts within one snapshot agree by #34's
-      ingest-side contract)
-    - `format` — `"ontos-nx-store-v2"` today; future formats land
-      alongside #32.
-
-    The tool shape stays stable across future snapshot formats so
-    orchestrators can rely on the same keys.
-    """
-    from datetime import UTC, datetime
-
-    @server.tool(name="snapshot_info")  # type: ignore[attr-defined,untyped-decorator]
-    async def snapshot_info() -> dict[str, object]:
-        """Metadata about the frozen snapshot this server is bound to."""
-        facts = store._facts  # type: ignore[attr-defined]
-        fact_count = len(facts)
-        sample = next(iter(facts.values()), None)
-        ontology_id = sample.provenance.ontology_id if sample is not None else ""
-        ontology_version = sample.provenance.ontology_version if sample is not None else ""
-        return {
-            "snapshot_path": str(path.resolve()),
-            "snapshot_mtime": datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
-            "fact_count": fact_count,
-            "ontology_id": ontology_id,
-            "ontology_version": ontology_version,
-            "format": "ontos-nx-store-v2",
-        }
+    server = build_server(cfg, store=store, snapshot_metadata=metadata)  # type: ignore[arg-type]
+    run_server(
+        server,
+        host=cfg.listen_host,
+        port=cfg.listen_port,
+        mode="snapshot",
+        backend="networkx-snapshot",
+    )
 
 
 @app.command()
