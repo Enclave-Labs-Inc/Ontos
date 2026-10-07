@@ -89,6 +89,65 @@ class NetworkxStore:
         if path is not None and path.exists() and path.stat().st_size > 0:
             self._load_from(path)
 
+    @classmethod
+    def from_scan(cls, scan: GraphScan) -> NetworkxStore:
+        """Build an in-memory store from a backend-neutral graph snapshot.
+
+        This restores stored node attributes directly rather than routing
+        through ``upsert_entity``. ``StoredEntity`` intentionally allows
+        minimal raw nodes whose type/canonical_name are unknown, while the
+        ingestion-time ``Entity`` model requires both fields.
+        """
+        store = cls()
+
+        for entity in scan.entities:
+            store._graph.add_node(
+                entity.id,
+                type=entity.type,
+                canonical_name=entity.canonical_name,
+                aliases=list(entity.aliases),
+                properties=dict(entity.properties),
+                provenance_source_id=entity.provenance_source_id,
+                provenance_extractor_id=entity.provenance_extractor_id,
+                acl_ref=entity.acl_ref,
+            )
+
+        for fact in scan.facts:
+            store._graph.add_node(fact.subject_id)
+            store._graph.add_node(fact.object_id)
+            store._graph.add_edge(
+                fact.subject_id,
+                fact.object_id,
+                key=fact.id,
+                fact=fact,
+            )
+            store._facts[fact.id] = fact
+
+        for record in scan.merges:
+            normalized_merged = [
+                merged_id
+                for merged_id in record.merged_ids
+                if merged_id != record.canonical_id
+            ]
+            if not normalized_merged:
+                continue
+
+            normalized = record.model_copy(
+                update={"merged_ids": normalized_merged}
+            )
+            for merged_id in normalized_merged:
+                key = (
+                    record.canonical_id,
+                    merged_id,
+                    record.resolver_id,
+                )
+                store._merges[key] = normalized
+
+        # Snapshot hydration is a load operation, not a mutation that
+        # should trigger persistence.
+        store._dirty = False
+        return store
+
     def _load_from(self, path: Path) -> None:
         """Load state from path. Fail loud on magic mismatch or corrupt payload.
 

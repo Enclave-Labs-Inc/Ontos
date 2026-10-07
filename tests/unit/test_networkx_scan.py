@@ -9,6 +9,7 @@ import pytest
 
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
+from ontos.storage.models import GraphScan, StoredEntity
 from ontos.storage.networkx_store import NetworkxStore
 
 
@@ -271,3 +272,23 @@ async def test_scan_filters_merge_records_and_keeps_raw_ids() -> None:
 
     # Resolver output is separate audit metadata; fact endpoints remain raw.
     assert allowed.facts[0].object_id == "company:acme-2"
+
+
+
+async def test_from_scan_preserves_minimal_raw_entity() -> None:
+    original = GraphScan(
+        entities=[
+            StoredEntity(
+                id="company:legacy-raw",
+                type=None,
+                canonical_name=None,
+            )
+        ],
+        facts=[],
+        merges=[],
+    )
+
+    store = NetworkxStore.from_scan(original)
+    loaded = await store.scan()
+
+    assert loaded == original
