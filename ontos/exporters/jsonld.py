@@ -44,11 +44,12 @@ _CONTEXT: dict[str, object] = {
 def _entity_node(entity: StoredEntity) -> dict[str, object]:
     node: dict[str, object] = {
         "@id": entity.id,
-        "@type": entity.type or "Entity",
         "rawId": entity.id,
         "aliases": list(entity.aliases),
         "properties": dict(entity.properties),
     }
+    if entity.type is not None:
+        node["@type"] = entity.type
     if entity.canonical_name is not None:
         node["canonicalName"] = entity.canonical_name
     if entity.provenance_source_id is not None:
@@ -155,6 +156,54 @@ def load_jsonld(path: Path) -> tuple[GraphScan, dict[str, str]]:
 
         item_type = item.get("@type")
 
+        # Exported entity nodes are identified by rawId, not by @type.
+        # Ontology entity types are user-defined and may legitimately be
+        # named "Fact" or "Merge".
+        if "rawId" in item:
+            entity_id = item.get("rawId")
+            if not isinstance(entity_id, str):
+                raise ValueError("Entity rawId must be a string")
+
+            aliases_raw = item.get("aliases", [])
+            properties_raw = item.get("properties", {})
+            if not isinstance(aliases_raw, list):
+                raise ValueError("Entity aliases must be a list")
+            if not isinstance(properties_raw, dict):
+                raise ValueError("Entity properties must be an object")
+
+            entities.append(
+                StoredEntity(
+                    id=entity_id,
+                    type=str(item_type) if item_type is not None else None,
+                    canonical_name=(
+                        str(item["canonicalName"])
+                        if item.get("canonicalName") is not None
+                        else None
+                    ),
+                    aliases=[str(alias) for alias in aliases_raw],
+                    properties={
+                        str(key): str(value)
+                        for key, value in properties_raw.items()
+                    },
+                    provenance_source_id=(
+                        str(item["provenanceSourceId"])
+                        if item.get("provenanceSourceId") is not None
+                        else None
+                    ),
+                    provenance_extractor_id=(
+                        str(item["provenanceExtractorId"])
+                        if item.get("provenanceExtractorId") is not None
+                        else None
+                    ),
+                    acl_ref=(
+                        str(item["aclRef"])
+                        if item.get("aclRef") is not None
+                        else None
+                    ),
+                )
+            )
+            continue
+
         if item_type == "Fact":
             fact_id_raw = item.get("@id")
             if not isinstance(fact_id_raw, str) or not fact_id_raw.startswith(
@@ -224,48 +273,6 @@ def load_jsonld(path: Path) -> tuple[GraphScan, dict[str, str]]:
             merge_groups.setdefault(key, set()).add(merged_id)
             continue
 
-        entity_id = item.get("rawId", item.get("@id"))
-        if not isinstance(entity_id, str):
-            raise ValueError("Entity entry must contain rawId or string @id")
-
-        aliases_raw = item.get("aliases", [])
-        properties_raw = item.get("properties", {})
-        if not isinstance(aliases_raw, list):
-            raise ValueError("Entity aliases must be a list")
-        if not isinstance(properties_raw, dict):
-            raise ValueError("Entity properties must be an object")
-
-        entities.append(
-            StoredEntity(
-                id=entity_id,
-                type=str(item_type) if item_type is not None else None,
-                canonical_name=(
-                    str(item["canonicalName"])
-                    if item.get("canonicalName") is not None
-                    else None
-                ),
-                aliases=[str(alias) for alias in aliases_raw],
-                properties={
-                    str(key): str(value)
-                    for key, value in properties_raw.items()
-                },
-                provenance_source_id=(
-                    str(item["provenanceSourceId"])
-                    if item.get("provenanceSourceId") is not None
-                    else None
-                ),
-                provenance_extractor_id=(
-                    str(item["provenanceExtractorId"])
-                    if item.get("provenanceExtractorId") is not None
-                    else None
-                ),
-                acl_ref=(
-                    str(item["aclRef"])
-                    if item.get("aclRef") is not None
-                    else None
-                ),
-            )
-        )
 
     merges = [
         MergeRecord(

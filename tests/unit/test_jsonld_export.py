@@ -171,3 +171,25 @@ def test_load_jsonld_round_trips_exported_snapshot(tmp_path) -> None:
         "ontologyId": "ontos.starter",
         "ontologyVersion": "0.4",
     }
+
+
+
+def test_jsonld_round_trip_preserves_unknown_entity_type(tmp_path) -> None:
+    original = GraphScan(
+        entities=[
+            StoredEntity(
+                id="company:legacy-raw",
+                type=None,
+                canonical_name=None,
+            )
+        ],
+        facts=[],
+        merges=[],
+    )
+    snapshot = tmp_path / "minimal.jsonld"
+    snapshot.write_text(render_jsonld(original), encoding="utf-8")
+
+    loaded, _manifest = load_jsonld(snapshot)
+
+    assert loaded.entities[0].type is None
+    assert loaded.entities[0].canonical_name is None
