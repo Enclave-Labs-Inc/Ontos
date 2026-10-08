@@ -69,8 +69,8 @@ def serve(
             help=(
                 "Serve MCP over a frozen graph snapshot (read-only). "
                 "Accepts ONTOS-NX-STORE-V2 pickle (.pkl / .pickle) "
-                "and JSON-LD (.jsonld) snapshots. GraphML / Cypher "
-                "support arrives with issue #32. WARNING: pickle "
+                "JSON-LD (.jsonld), and GraphML (.graphml) snapshots. "
+                "Cypher support arrives with issue #32. WARNING: pickle "
                 "snapshots use Python pickle — loading an untrusted file executes "
                 "arbitrary code. The magic-header check in the loader "
                 "is a FORMAT check (it rejects non-Ontos files), NOT "
@@ -182,10 +182,10 @@ def _load_snapshot(path: Path) -> tuple[object, object]:
     from ontos.storage.networkx_store import NetworkxStore
 
     suffix = path.suffix.lower()
-    if suffix not in (".pkl", ".pickle", ".jsonld"):
+    if suffix not in (".pkl", ".pickle", ".jsonld", ".graphml"):
         raise typer.BadParameter(
             f"snapshot format {path.suffix!r} is not supported. "
-            "Supported formats: .pkl, .pickle, .jsonld."
+            "Supported formats: .pkl, .pickle, .jsonld, .graphml."
         )
     if not path.exists():
         raise typer.BadParameter(f"snapshot file not found: {path}")
@@ -196,16 +196,35 @@ def _load_snapshot(path: Path) -> tuple[object, object]:
         store._path = None
         return store, _collect_snapshot_metadata(path, store)
 
-    from ontos.exporters.jsonld import load_jsonld
+    if suffix == ".jsonld":
+        from ontos.exporters.jsonld import load_jsonld
 
-    scan, manifest = load_jsonld(path)
+        scan, manifest = load_jsonld(path)
+        store = NetworkxStore.from_scan(scan)
+        metadata = SnapshotMetadata(
+            id=_compute_snapshot_id(path),
+            mtime=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
+            format="ontos-jsonld-v1",
+            ontology_id=manifest["ontologyId"],
+            ontology_version=manifest["ontologyVersion"],
+        )
+        return store, metadata
+
+    from ontos.exporters.graphml import load_graphml
+
+    scan = load_graphml(path)
     store = NetworkxStore.from_scan(scan)
+    first_fact = min(scan.facts, key=lambda item: str(item.id), default=None)
     metadata = SnapshotMetadata(
         id=_compute_snapshot_id(path),
         mtime=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
-        format="ontos-jsonld-v1",
-        ontology_id=manifest["ontologyId"],
-        ontology_version=manifest["ontologyVersion"],
+        format="ontos-graphml-v1",
+        ontology_id=(
+            first_fact.provenance.ontology_id if first_fact is not None else ""
+        ),
+        ontology_version=(
+            first_fact.provenance.ontology_version if first_fact is not None else ""
+        ),
     )
     return store, metadata
 
@@ -214,8 +233,8 @@ def _serve_snapshot(path: Path) -> None:
     """Boot an MCP server over a frozen NetworkxStore snapshot.
 
     Dispatches on file extension: `.pkl` / `.pickle` loads an
-    ONTOS-NX-STORE-V2 pickle; `.jsonld` loads the #32 JSON-LD snapshot
-    format. GraphML / Cypher remain unsupported until their loaders land.
+    ONTOS-NX-STORE-V2 pickle; `.jsonld` loads JSON-LD; `.graphml`
+    loads GraphML. Cypher remains unsupported until its loader lands.
 
     The loaded store's `_path` is set to `None` after load so a
     future write tool cannot silently mutate the "frozen" file —

@@ -21,9 +21,11 @@ from ontos.cli.main import (
     _compute_snapshot_id,
     _load_snapshot,
 )
+from ontos.exporters.graphml import render_graphml
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.runtime.server import SnapshotMetadata
 from ontos.storage.base import StorageError
+from ontos.storage.models import GraphScan, StoredEntity
 from ontos.storage.networkx_store import NetworkxStore
 
 runner = CliRunner(env={"COLUMNS": "200", "TERM": "dumb", "NO_COLOR": "1"})
@@ -184,3 +186,51 @@ def test_snapshot_id_changes_when_file_bytes_change(tmp_path: Path) -> None:
     _write_snapshot_pickle(snap_a, with_fact=True)
     _write_snapshot_pickle(snap_b, with_fact=False)
     assert _compute_snapshot_id(snap_a) != _compute_snapshot_id(snap_b)
+
+
+
+def test_snapshot_loads_graphml_with_fact_metadata(tmp_path: Path) -> None:
+    when = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="demo",
+            extractor_id="demo",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=when,
+        ingested_at=when,
+    )
+    scan = GraphScan(
+        entities=[
+            StoredEntity(
+                id="person:alice",
+                type="Person",
+                canonical_name="Alice",
+            ),
+            StoredEntity(
+                id="company:acme",
+                type="Company",
+                canonical_name="Acme",
+            ),
+        ],
+        facts=[fact],
+        merges=[],
+    )
+    snap = tmp_path / "snap.graphml"
+    snap.write_text(render_graphml(scan), encoding="utf-8")
+
+    store, metadata = _load_snapshot(snap)
+    loaded = asyncio.run(store.scan())
+
+    assert [item.id for item in loaded.facts] == [fact.id]
+    assert metadata.id == _compute_snapshot_id(snap)
+    assert metadata.format == "ontos-graphml-v1"
+    assert metadata.ontology_id == "ontos.starter"
+    assert metadata.ontology_version == "0.4"
