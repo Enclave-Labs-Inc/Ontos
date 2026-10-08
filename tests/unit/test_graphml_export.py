@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 from xml.etree import ElementTree as ET
 
-from ontos.exporters.graphml import render_graphml
+from ontos.exporters.graphml import load_graphml, render_graphml
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.models import GraphScan, StoredEntity
@@ -153,3 +154,14 @@ def test_render_graphml_is_deterministic_for_input_order() -> None:
     )
 
     assert render_graphml(scan) == render_graphml(reversed_scan)
+
+
+
+def test_load_graphml_round_trips_exported_snapshot(tmp_path: Path) -> None:
+    original = _scan()
+    snapshot = tmp_path / "snapshot.graphml"
+    snapshot.write_text(render_graphml(original), encoding="utf-8")
+
+    loaded = load_graphml(snapshot)
+
+    assert render_graphml(loaded) == render_graphml(original)

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
+from pathlib import Path
+from uuid import UUID
 from xml.etree import ElementTree as ET
 
 from ontos.resolver.base import MergeRecord
-from ontos.storage.models import GraphScan
+from ontos.runtime.models import Confidence, Fact, Provenance
+from ontos.storage.models import GraphScan, StoredEntity
 
 _GRAPHML_NS = "http://graphml.graphdrawing.org/xmlns"
 ET.register_namespace("", _GRAPHML_NS)
@@ -81,6 +85,175 @@ def _add_data(parent: ET.Element, key_id: str, value: object | None) -> None:
     data = ET.SubElement(parent, _q("data"), key=key_id)
     data.text = str(value)
 
+
+
+def _data_values(
+    element: ET.Element,
+    key_names: dict[str, str],
+) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for data in element.findall(_q("data")):
+        key_id = data.attrib.get("key")
+        if key_id is None or key_id not in key_names:
+            continue
+        values[key_names[key_id]] = data.text or ""
+    return values
+
+
+def load_graphml(path: Path) -> GraphScan:
+    """Load a #32 GraphML snapshot into the backend-neutral graph model."""
+
+    root = ET.fromstring(path.read_text(encoding="utf-8"))
+    if root.tag != _q("graphml"):
+        raise ValueError("GraphML snapshot root must be <graphml>")
+
+    node_key_names: dict[str, str] = {}
+    edge_key_names: dict[str, str] = {}
+    for key in root.findall(_q("key")):
+        key_id = key.attrib.get("id")
+        attr_name = key.attrib.get("attr.name")
+        key_kind = key.attrib.get("for")
+        if key_id is None or attr_name is None:
+            continue
+        if key_kind == "node":
+            node_key_names[key_id] = attr_name
+        elif key_kind == "edge":
+            edge_key_names[key_id] = attr_name
+
+    graph = root.find(_q("graph"))
+    if graph is None:
+        raise ValueError("GraphML snapshot must contain a <graph> element")
+
+    entities: list[StoredEntity] = []
+    facts: list[Fact] = []
+    merge_groups: dict[
+        tuple[str, str, str, datetime, str],
+        set[str],
+    ] = {}
+
+    for node in graph.findall(_q("node")):
+        values = _data_values(node, node_key_names)
+        raw_id = values.get("raw_id", node.attrib.get("id"))
+        if raw_id is None:
+            raise ValueError("GraphML node must contain raw_id or id")
+
+        aliases_raw = json.loads(values.get("aliases", "[]"))
+        properties_raw = json.loads(values.get("properties", "{}"))
+        if not isinstance(aliases_raw, list):
+            raise ValueError("GraphML entity aliases must decode to a list")
+        if not isinstance(properties_raw, dict):
+            raise ValueError("GraphML entity properties must decode to an object")
+
+        entities.append(
+            StoredEntity(
+                id=raw_id,
+                type=values.get("type"),
+                canonical_name=values.get("canonical_name"),
+                aliases=[str(alias) for alias in aliases_raw],
+                properties={
+                    str(key): str(value)
+                    for key, value in properties_raw.items()
+                },
+                provenance_source_id=values.get("provenance_source_id"),
+                provenance_extractor_id=values.get("provenance_extractor_id"),
+                acl_ref=values.get("acl_ref"),
+            )
+        )
+
+    for edge in graph.findall(_q("edge")):
+        values = _data_values(edge, edge_key_names)
+        kind = values.get("kind")
+        source = edge.attrib.get("source")
+        target = edge.attrib.get("target")
+        if source is None or target is None:
+            raise ValueError("GraphML edge must contain source and target")
+
+        if kind == "fact":
+            fact_id_raw = values.get("fact_id", edge.attrib.get("id"))
+            if fact_id_raw is None:
+                raise ValueError("GraphML fact edge must contain fact_id or id")
+
+            superseded_raw = values.get("superseded_by")
+            facts.append(
+                Fact(
+                    id=UUID(fact_id_raw),
+                    subject_id=source,
+                    predicate=values["predicate"],
+                    object_id=target,
+                    provenance=Provenance(
+                        source_id=values["source_id"],
+                        extractor_id=values["extractor_id"],
+                        extractor_version=values["extractor_version"],
+                        ontology_id=values.get("ontology_id", ""),
+                        ontology_version=values.get("ontology_version", ""),
+                        confidence=Confidence(values["confidence"]),
+                        confidence_score=float(values["confidence_score"]),
+                    ),
+                    t_valid=datetime.fromisoformat(values["t_valid"]),
+                    t_invalid=(
+                        datetime.fromisoformat(values["t_invalid"])
+                        if values.get("t_invalid")
+                        else None
+                    ),
+                    ingested_at=datetime.fromisoformat(values["ingested_at"]),
+                    superseded_by=UUID(superseded_raw) if superseded_raw else None,
+                    acl_ref=values.get("acl_ref"),
+                )
+            )
+            continue
+
+        if kind == "merge":
+            if values.get("predicate") != "MERGED_WITH":
+                raise ValueError("GraphML merge edge must use MERGED_WITH")
+
+            resolved_at = datetime.fromisoformat(values["resolved_at"])
+            resolver_id = values["resolver_id"]
+            resolver_version = values["resolver_version"]
+            reason = values.get("reason", "")
+
+            key = (
+                target,
+                resolver_id,
+                resolver_version,
+                resolved_at,
+                reason,
+            )
+            merge_groups.setdefault(key, set()).add(source)
+            continue
+
+        raise ValueError(f"Unsupported GraphML edge kind: {kind!r}")
+
+    merges = [
+        MergeRecord(
+            canonical_id=canonical_id,
+            merged_ids=sorted(merged_ids),
+            resolver_id=resolver_id,
+            resolver_version=resolver_version,
+            resolved_at=resolved_at,
+            reason=reason,
+        )
+        for (
+            canonical_id,
+            resolver_id,
+            resolver_version,
+            resolved_at,
+            reason,
+        ), merged_ids in merge_groups.items()
+    ]
+
+    return GraphScan(
+        entities=sorted(entities, key=lambda item: item.id),
+        facts=sorted(facts, key=lambda item: str(item.id)),
+        merges=sorted(
+            merges,
+            key=lambda item: (
+                item.canonical_id,
+                tuple(item.merged_ids),
+                item.resolver_id,
+                item.resolved_at.isoformat(),
+            ),
+        ),
+    )
 
 def render_graphml(scan: GraphScan) -> str:
     """Render a deterministic GraphML document from a ``GraphScan``."""
