@@ -842,3 +842,356 @@ def test_query_threads_anthropic_model_and_key_into_backend(
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     assert captured_kwargs == {"model": "claude-sonnet-5", "api_key": "sk-test"}
+
+
+
+def test_export_help_lists_supported_formats() -> None:
+    result = runner.invoke(app, ["export", "--help"])
+
+    assert result.exit_code == 0
+    assert "neo4j" in result.stdout
+    assert "graphml" in result.stdout
+    assert "svg" in result.stdout
+    assert "json-ld" in result.stdout
+
+
+
+def test_export_graphml_writes_snapshot_file(tmp_path: Path) -> None:
+    import asyncio
+    from datetime import UTC, datetime
+    from xml.etree import ElementTree as ET
+
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "graph.graphml"
+
+    writer = NetworkxStore(path=store_path)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="doc:1",
+            extractor_id="extractor:test",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=datetime(2026, 1, 2, tzinfo=UTC),
+        ingested_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    asyncio.run(writer.add_fact(fact))
+    asyncio.run(writer.close())
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "graphml",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert output_path.exists()
+
+    root = ET.fromstring(output_path.read_text(encoding="utf-8"))
+    assert root.tag.endswith("graphml")
+    assert str(fact.id) in output_path.read_text(encoding="utf-8")
+
+
+
+def test_export_json_ld_writes_snapshot_file(tmp_path: Path) -> None:
+    import asyncio
+    import json
+    from datetime import UTC, datetime
+
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "graph.jsonld"
+
+    writer = NetworkxStore(path=store_path)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="doc:1",
+            extractor_id="extractor:test",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=datetime(2026, 1, 2, tzinfo=UTC),
+        ingested_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    asyncio.run(writer.add_fact(fact))
+    asyncio.run(writer.close())
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "json-ld",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert output_path.exists()
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert "@graph" in payload
+    assert str(fact.id) in output_path.read_text(encoding="utf-8")
+
+
+
+def test_export_svg_writes_snapshot_file(tmp_path: Path) -> None:
+    import asyncio
+    from datetime import UTC, datetime
+    from xml.etree import ElementTree as ET
+
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "graph.svg"
+
+    writer = NetworkxStore(path=store_path)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="doc:1",
+            extractor_id="extractor:test",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=datetime(2026, 1, 2, tzinfo=UTC),
+        ingested_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    asyncio.run(writer.add_fact(fact))
+    asyncio.run(writer.close())
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "svg",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert output_path.exists()
+
+    root = ET.fromstring(output_path.read_text(encoding="utf-8"))
+    assert root.tag.endswith("svg")
+    assert "person:alice" in output_path.read_text(encoding="utf-8")
+
+
+
+def test_export_neo4j_writes_cypher_file(tmp_path: Path) -> None:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "cypher.txt"
+
+    writer = NetworkxStore(path=store_path)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="doc:1",
+            extractor_id="extractor:test",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=datetime(2026, 1, 2, tzinfo=UTC),
+        ingested_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    asyncio.run(writer.add_fact(fact))
+    asyncio.run(writer.close())
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "neo4j",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert output_path.exists()
+
+    cypher = output_path.read_text(encoding="utf-8")
+    assert "MERGE" in cypher
+    assert "person:alice" in cypher
+    assert str(fact.id) in cypher
+
+
+
+def test_export_graphml_as_of_includes_historical_fact(tmp_path: Path) -> None:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "historical.graphml"
+
+    writer = NetworkxStore(path=store_path)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="doc:1",
+            extractor_id="extractor:test",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=datetime(2026, 1, 1, tzinfo=UTC),
+        ingested_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    asyncio.run(writer.add_fact(fact))
+    asyncio.run(
+        writer.close_fact(
+            fact.id,
+            t_invalid=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+    )
+    asyncio.run(writer.close())
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "graphml",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+            "--as-of",
+            "2026-03-01T00:00:00+00:00",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert str(fact.id) in output_path.read_text(encoding="utf-8")
+
+
+
+def test_export_graphml_include_closed_includes_closed_fact(tmp_path: Path) -> None:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "audit.graphml"
+
+    writer = NetworkxStore(path=store_path)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="doc:1",
+            extractor_id="extractor:test",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=datetime(2026, 1, 1, tzinfo=UTC),
+        ingested_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    asyncio.run(writer.add_fact(fact))
+    asyncio.run(
+        writer.close_fact(
+            fact.id,
+            t_invalid=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+    )
+    asyncio.run(writer.close())
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "graphml",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+            "--include-closed",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert str(fact.id) in output_path.read_text(encoding="utf-8")
+
+
+
+def test_export_rejects_as_of_with_include_closed(tmp_path: Path) -> None:
+    output_path = tmp_path / "graph.graphml"
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "graphml",
+            "--storage-path",
+            "",
+            "--output",
+            str(output_path),
+            "--as-of",
+            "2026-03-01T00:00:00+00:00",
+            "--include-closed",
+        ],
+    )
+
+    assert result.exit_code == 2
+    output = (result.stdout + result.stderr).lower()
+    assert "as-of" in output
+    assert "include-closed" in output

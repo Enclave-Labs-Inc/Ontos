@@ -21,6 +21,7 @@ import asyncio
 import dataclasses
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -29,6 +30,7 @@ import typer
 if TYPE_CHECKING:
     from ontos.ingest import Connector, MultiConnector
     from ontos.runtime.config import RuntimeConfig
+    from ontos.storage.models import GraphScan
 
 
 # When the operator runs the CLI without overriding storage, we want
@@ -569,6 +571,240 @@ def query(
             await _close_store_without_masking(store)
 
     asyncio.run(_run())
+
+
+export_app = typer.Typer(help="Export graph snapshots for visualization.")
+app.add_typer(export_app, name="export")
+
+
+def _scan_for_export(
+    storage_path: str | None,
+    *,
+    as_of: str | None = None,
+    include_closed: bool = False,
+) -> GraphScan:
+    """Load the configured store, scan it, and close it safely."""
+    from ontos.runtime.server import build_store
+
+    try:
+        as_of_timestamp = datetime.fromisoformat(as_of) if as_of is not None else None
+    except ValueError as exc:
+        raise typer.BadParameter(
+            "--as-of must be a valid ISO-8601 timestamp."
+        ) from exc
+
+    if as_of_timestamp is not None and include_closed:
+        raise typer.BadParameter(
+            "--as-of and --include-closed cannot be used together."
+        )
+
+    resolved_path = _resolve_storage_path(storage_path)
+    cfg = _build_cli_runtime_config(resolved_path)
+    _warn_if_ephemeral(resolved_path, cfg.storage_backend)
+    store = build_store(cfg)
+
+    async def _run() -> GraphScan:
+        try:
+            return await store.scan(
+                as_of=as_of_timestamp,
+                include_closed=include_closed,
+            )
+        finally:
+            await _close_store_without_masking(store)
+
+    return asyncio.run(_run())
+
+
+@export_app.command("neo4j")
+def export_neo4j(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Destination Cypher file.",
+        ),
+    ] = Path("cypher.txt"),
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of",
+            help="Export the graph as it existed at this ISO-8601 timestamp.",
+        ),
+    ] = None,
+    include_closed: Annotated[
+        bool,
+        typer.Option(
+            "--include-closed",
+            help="Include closed historical facts in the export.",
+        ),
+    ] = False,
+) -> None:
+    """Export visualization-oriented Neo4j Cypher."""
+    from ontos.exporters.cypher import render_cypher
+
+    scan = _scan_for_export(
+        storage_path,
+        as_of=as_of,
+        include_closed=include_closed,
+    )
+    output.write_text(render_cypher(scan), encoding="utf-8")
+    typer.echo(f"wrote Neo4j Cypher snapshot to {output}")
+
+
+@export_app.command("graphml")
+def export_graphml(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Destination GraphML file.",
+        ),
+    ] = Path("graph.graphml"),
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of",
+            help="Export the graph as it existed at this ISO-8601 timestamp.",
+        ),
+    ] = None,
+    include_closed: Annotated[
+        bool,
+        typer.Option(
+            "--include-closed",
+            help="Include closed historical facts in the export.",
+        ),
+    ] = False,
+) -> None:
+    """Export GraphML for graph visualization tools."""
+    from ontos.exporters.graphml import render_graphml
+
+    scan = _scan_for_export(
+        storage_path,
+        as_of=as_of,
+        include_closed=include_closed,
+    )
+    output.write_text(render_graphml(scan), encoding="utf-8")
+    typer.echo(f"wrote GraphML snapshot to {output}")
+
+
+@export_app.command("svg")
+def export_svg(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Destination SVG file.",
+        ),
+    ] = Path("graph.svg"),
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of",
+            help="Export the graph as it existed at this ISO-8601 timestamp.",
+        ),
+    ] = None,
+    include_closed: Annotated[
+        bool,
+        typer.Option(
+            "--include-closed",
+            help="Include closed historical facts in the export.",
+        ),
+    ] = False,
+) -> None:
+    """Export a static SVG graph visualization."""
+    from ontos.exporters.svg import render_svg
+
+    scan = _scan_for_export(
+        storage_path,
+        as_of=as_of,
+        include_closed=include_closed,
+    )
+    output.write_text(render_svg(scan), encoding="utf-8")
+    typer.echo(f"wrote SVG snapshot to {output}")
+
+
+@export_app.command("json-ld")
+def export_json_ld(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Destination JSON-LD file.",
+        ),
+    ] = Path("graph.jsonld"),
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of",
+            help="Export the graph as it existed at this ISO-8601 timestamp.",
+        ),
+    ] = None,
+    include_closed: Annotated[
+        bool,
+        typer.Option(
+            "--include-closed",
+            help="Include closed historical facts in the export.",
+        ),
+    ] = False,
+) -> None:
+    """Export JSON-LD graph data."""
+    from ontos.exporters.jsonld import render_jsonld
+
+    scan = _scan_for_export(
+        storage_path,
+        as_of=as_of,
+        include_closed=include_closed,
+    )
+    output.write_text(render_jsonld(scan), encoding="utf-8")
+    typer.echo(f"wrote JSON-LD snapshot to {output}")
 
 
 audit_app = typer.Typer(help="Audit chain commands.")
