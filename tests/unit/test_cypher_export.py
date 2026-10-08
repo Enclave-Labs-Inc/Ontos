@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
-from ontos.exporters.cypher import render_cypher, sanitize_identifier
+from ontos.exporters.cypher import load_cypher, render_cypher, sanitize_identifier
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.models import GraphScan, StoredEntity
@@ -121,3 +122,14 @@ def test_render_cypher_is_deterministic() -> None:
     )
 
     assert render_cypher(scan) == render_cypher(reversed_scan)
+
+
+
+def test_load_cypher_round_trips_exported_snapshot(tmp_path: Path) -> None:
+    original = _scan()
+    snapshot = tmp_path / "snapshot.cypher"
+    snapshot.write_text(render_cypher(original), encoding="utf-8")
+
+    loaded = load_cypher(snapshot)
+
+    assert render_cypher(loaded) == render_cypher(original)
