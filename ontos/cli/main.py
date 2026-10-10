@@ -582,6 +582,8 @@ def _scan_for_export(
     *,
     as_of: str | None = None,
     include_closed: bool = False,
+    entity: str | None = None,
+    hops: int | None = None,
 ) -> GraphScan:
     """Load the configured store, scan it, and close it safely."""
     from ontos.runtime.server import build_store
@@ -612,7 +614,84 @@ def _scan_for_export(
         finally:
             await _close_store_without_masking(store)
 
-    return asyncio.run(_run())
+    scan = asyncio.run(_run())
+
+    if entity is None:
+        if hops is not None:
+            raise typer.BadParameter("--hops requires --entity.")
+        return scan
+
+    neighborhood_hops = 2 if hops is None else hops
+    return _filter_export_neighborhood(
+        scan,
+        entity=entity,
+        hops=neighborhood_hops,
+    )
+
+
+def _filter_export_neighborhood(
+    scan: GraphScan,
+    *,
+    entity: str,
+    hops: int,
+) -> GraphScan:
+    """Restrict an already permission-filtered scan to an entity neighborhood."""
+    adjacency: dict[str, set[str]] = {}
+
+    def connect(left: str, right: str) -> None:
+        adjacency.setdefault(left, set()).add(right)
+        adjacency.setdefault(right, set()).add(left)
+
+    for fact in scan.facts:
+        connect(fact.subject_id, fact.object_id)
+
+    for record in scan.merges:
+        for merged_id in record.merged_ids:
+            connect(merged_id, record.canonical_id)
+
+    visible_ids = {item.id for item in scan.entities}
+    if entity not in visible_ids:
+        return scan.model_copy(
+            update={"entities": [], "facts": [], "merges": []}
+        )
+
+    included = {entity}
+    frontier = {entity}
+
+    for _ in range(hops):
+        next_frontier: set[str] = set()
+        for current in frontier:
+            next_frontier.update(adjacency.get(current, set()))
+        next_frontier -= included
+        included.update(next_frontier)
+        frontier = next_frontier
+        if not frontier:
+            break
+
+    entities = [item for item in scan.entities if item.id in included]
+    facts = [
+        fact
+        for fact in scan.facts
+        if fact.subject_id in included and fact.object_id in included
+    ]
+
+    merges = []
+    for record in scan.merges:
+        if record.canonical_id not in included:
+            continue
+        merged_ids = [
+            merged_id for merged_id in record.merged_ids if merged_id in included
+        ]
+        if merged_ids:
+            merges.append(record.model_copy(update={"merged_ids": merged_ids}))
+
+    return scan.model_copy(
+        update={
+            "entities": entities,
+            "facts": facts,
+            "merges": merges,
+        }
+    )
 
 
 @export_app.command("neo4j")
@@ -650,6 +729,21 @@ def export_neo4j(
             help="Include closed historical facts in the export.",
         ),
     ] = False,
+    entity: Annotated[
+        str | None,
+        typer.Option(
+            "--entity",
+            help="Restrict the export to this entity and its neighborhood.",
+        ),
+    ] = None,
+    hops: Annotated[
+        int | None,
+        typer.Option(
+            "--hops",
+            min=0,
+            help="Neighborhood depth for --entity. Default: 2.",
+        ),
+    ] = None,
 ) -> None:
     """Export visualization-oriented Neo4j Cypher."""
     from ontos.exporters.cypher import render_cypher
@@ -658,6 +752,8 @@ def export_neo4j(
         storage_path,
         as_of=as_of,
         include_closed=include_closed,
+        entity=entity,
+        hops=hops,
     )
     output.write_text(render_cypher(scan), encoding="utf-8")
     typer.echo(f"wrote Neo4j Cypher snapshot to {output}")
@@ -698,6 +794,21 @@ def export_graphml(
             help="Include closed historical facts in the export.",
         ),
     ] = False,
+    entity: Annotated[
+        str | None,
+        typer.Option(
+            "--entity",
+            help="Restrict the export to this entity and its neighborhood.",
+        ),
+    ] = None,
+    hops: Annotated[
+        int | None,
+        typer.Option(
+            "--hops",
+            min=0,
+            help="Neighborhood depth for --entity. Default: 2.",
+        ),
+    ] = None,
 ) -> None:
     """Export GraphML for graph visualization tools."""
     from ontos.exporters.graphml import render_graphml
@@ -706,6 +817,8 @@ def export_graphml(
         storage_path,
         as_of=as_of,
         include_closed=include_closed,
+        entity=entity,
+        hops=hops,
     )
     output.write_text(render_graphml(scan), encoding="utf-8")
     typer.echo(f"wrote GraphML snapshot to {output}")
@@ -746,6 +859,21 @@ def export_svg(
             help="Include closed historical facts in the export.",
         ),
     ] = False,
+    entity: Annotated[
+        str | None,
+        typer.Option(
+            "--entity",
+            help="Restrict the export to this entity and its neighborhood.",
+        ),
+    ] = None,
+    hops: Annotated[
+        int | None,
+        typer.Option(
+            "--hops",
+            min=0,
+            help="Neighborhood depth for --entity. Default: 2.",
+        ),
+    ] = None,
 ) -> None:
     """Export a static SVG graph visualization."""
     from ontos.exporters.svg import render_svg
@@ -754,6 +882,8 @@ def export_svg(
         storage_path,
         as_of=as_of,
         include_closed=include_closed,
+        entity=entity,
+        hops=hops,
     )
     output.write_text(render_svg(scan), encoding="utf-8")
     typer.echo(f"wrote SVG snapshot to {output}")
@@ -794,6 +924,21 @@ def export_json_ld(
             help="Include closed historical facts in the export.",
         ),
     ] = False,
+    entity: Annotated[
+        str | None,
+        typer.Option(
+            "--entity",
+            help="Restrict the export to this entity and its neighborhood.",
+        ),
+    ] = None,
+    hops: Annotated[
+        int | None,
+        typer.Option(
+            "--hops",
+            min=0,
+            help="Neighborhood depth for --entity. Default: 2.",
+        ),
+    ] = None,
 ) -> None:
     """Export JSON-LD graph data."""
     from ontos.exporters.jsonld import render_jsonld
@@ -802,6 +947,8 @@ def export_json_ld(
         storage_path,
         as_of=as_of,
         include_closed=include_closed,
+        entity=entity,
+        hops=hops,
     )
     output.write_text(render_jsonld(scan), encoding="utf-8")
     typer.echo(f"wrote JSON-LD snapshot to {output}")

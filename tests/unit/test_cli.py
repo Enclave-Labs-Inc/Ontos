@@ -1195,3 +1195,138 @@ def test_export_rejects_as_of_with_include_closed(tmp_path: Path) -> None:
     output = (result.stdout + result.stderr).lower()
     assert "as-of" in output
     assert "include-closed" in output
+
+
+
+def test_export_graphml_entity_hops_limits_neighborhood(tmp_path: Path) -> None:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "neighborhood.graphml"
+
+    writer = NetworkxStore(path=store_path)
+
+    def fact(subject: str, predicate: str, object_: str) -> Fact:
+        return Fact(
+            subject_id=subject,
+            predicate=predicate,
+            object_id=object_,
+            provenance=Provenance(
+                source_id="doc:1",
+                extractor_id="extractor:test",
+                extractor_version="1",
+                ontology_id="ontos.starter",
+                ontology_version="0.4",
+                confidence=Confidence.EXTRACTED,
+                confidence_score=1.0,
+            ),
+            t_valid=datetime(2026, 1, 1, tzinfo=UTC),
+            ingested_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+
+    asyncio.run(writer.add_fact(fact("entity:a", "rel", "entity:b")))
+    asyncio.run(writer.add_fact(fact("entity:b", "rel", "entity:c")))
+    asyncio.run(writer.add_fact(fact("entity:c", "rel", "entity:d")))
+    asyncio.run(writer.close())
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "graphml",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+            "--entity",
+            "entity:a",
+            "--hops",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    exported = output_path.read_text(encoding="utf-8")
+    assert "entity:a" in exported
+    assert "entity:b" in exported
+    assert "entity:c" in exported
+    assert "entity:d" not in exported
+
+
+
+def test_export_rejects_hops_without_entity(tmp_path: Path) -> None:
+    output_path = tmp_path / "graph.graphml"
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "graphml",
+            "--storage-path",
+            "",
+            "--output",
+            str(output_path),
+            "--hops",
+            "3",
+        ],
+    )
+
+    assert result.exit_code == 2
+    output = (result.stdout + result.stderr).lower()
+    assert "hops" in output
+    assert "entity" in output
+
+
+
+def test_export_entity_hops_includes_merge_lineage(tmp_path: Path) -> None:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from ontos.resolver.base import MergeRecord
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "merge-neighborhood.graphml"
+
+    writer = NetworkxStore(path=store_path)
+    asyncio.run(
+        writer.record_merge(
+            MergeRecord(
+                canonical_id="company:acme-1",
+                merged_ids=["company:acme-2"],
+                resolver_id="exact-match",
+                resolver_version="1.0",
+                resolved_at=datetime(2026, 1, 3, tzinfo=UTC),
+                reason="same registration number",
+            )
+        )
+    )
+    asyncio.run(writer.close())
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "graphml",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+            "--entity",
+            "company:acme-2",
+            "--hops",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    exported = output_path.read_text(encoding="utf-8")
+    assert "company:acme-2" in exported
+    assert "company:acme-1" in exported
+    assert "MERGED_WITH" in exported
