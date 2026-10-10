@@ -1330,3 +1330,135 @@ def test_export_entity_hops_includes_merge_lineage(tmp_path: Path) -> None:
     assert "company:acme-2" in exported
     assert "company:acme-1" in exported
     assert "MERGED_WITH" in exported
+
+
+
+def test_export_neo4j_help_documents_push_options() -> None:
+    result = runner.invoke(app, ["export", "neo4j", "--help"])
+
+    assert result.exit_code == 0
+    assert "--push" in result.stdout
+    assert "--user" in result.stdout
+    assert "--password" in result.stdout
+    assert "--database" in result.stdout
+
+
+
+def test_export_neo4j_push_uses_requested_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import neo4j
+
+    import ontos.exporters.cypher
+
+    captured: dict[str, object] = {}
+
+    class _FakeDriver:
+        async def close(self) -> None:
+            captured["closed"] = True
+
+    def _fake_driver(
+        uri: str,
+        *,
+        auth: tuple[str, str],
+    ) -> _FakeDriver:
+        captured["uri"] = uri
+        captured["auth"] = auth
+        return _FakeDriver()
+
+    async def _fake_push(
+        scan: object,
+        driver: object,
+        *,
+        database: str,
+    ) -> None:
+        captured["scan"] = scan
+        captured["driver"] = driver
+        captured["database"] = database
+
+    monkeypatch.setattr(neo4j.AsyncGraphDatabase, "driver", _fake_driver)
+    monkeypatch.setattr(ontos.exporters.cypher, "push_neo4j", _fake_push)
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "neo4j",
+            "--storage-path",
+            "",
+            "--push",
+            "bolt://viz.example:7687",
+            "--user",
+            "viz-user",
+            "--password",
+            "secret",
+            "--database",
+            "ontos-viz",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert captured["uri"] == "bolt://viz.example:7687"
+    assert captured["auth"] == ("viz-user", "secret")
+    assert captured["database"] == "ontos-viz"
+    assert captured["closed"] is True
+
+
+
+def test_export_neo4j_push_rejects_operational_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ONTOS_STORAGE_BACKEND", "neo4j")
+    monkeypatch.setenv("NEO4J_URI", "bolt://operational.example:7687")
+    monkeypatch.setenv("NEO4J_DATABASE", "neo4j")
+    monkeypatch.setenv("NEO4J_PASSWORD", "operational-secret")
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "neo4j",
+            "--push",
+            "bolt://operational.example:7687",
+            "--user",
+            "viz-user",
+            "--password",
+            "viz-secret",
+            "--database",
+            "neo4j",
+        ],
+    )
+
+    assert result.exit_code == 2
+    output = (result.stdout + result.stderr).lower()
+    assert "operational" in output
+    assert "separate" in output
+
+
+
+def test_export_neo4j_push_requires_password_before_scanning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ontos.cli.main
+
+    def _unexpected_scan(*args: object, **kwargs: object) -> object:
+        raise AssertionError("source graph must not be scanned before push validation")
+
+    monkeypatch.setattr(ontos.cli.main, "_scan_for_export", _unexpected_scan)
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "neo4j",
+            "--push",
+            "bolt://viz.example:7687",
+            "--database",
+            "ontos-viz",
+        ],
+    )
+
+    assert result.exit_code == 2
+    output = (result.stdout + result.stderr).lower()
+    assert "password" in output

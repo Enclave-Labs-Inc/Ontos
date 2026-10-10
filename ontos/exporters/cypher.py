@@ -7,11 +7,15 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.models import GraphScan, StoredEntity
+
+if TYPE_CHECKING:
+    from neo4j import AsyncDriver
 
 _IDENTIFIER_RE = re.compile(r"[^A-Za-z0-9_]+")
 
@@ -407,6 +411,110 @@ def load_cypher(path: Path) -> GraphScan:
             ),
         ),
     )
+
+async def push_neo4j(
+    scan: GraphScan,
+    driver: AsyncDriver,
+    *,
+    database: str = "neo4j",
+) -> None:
+    """Push the visualization schema into a Neo4j database idempotently."""
+
+    entities = sorted(scan.entities, key=lambda item: item.id)
+    labels_by_id = {entity.id: _entity_label(entity) for entity in entities}
+    labels = sorted(set(labels_by_id.values()))
+
+    async with driver.session(database=database) as session:
+        for label in labels:
+            await session.run(
+                f"CREATE INDEX IF NOT EXISTS FOR (n:`{label}`) ON (n.id)"
+            )
+
+        for entity in entities:
+            label = labels_by_id[entity.id]
+            props: dict[str, object] = {
+                "aliases": entity.aliases,
+                "properties": json.dumps(
+                    entity.properties,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            }
+            if entity.type is not None:
+                props["entity_type"] = entity.type
+            if entity.canonical_name is not None:
+                props["canonical_name"] = entity.canonical_name
+            if entity.provenance_source_id is not None:
+                props["provenance_source_id"] = entity.provenance_source_id
+            if entity.provenance_extractor_id is not None:
+                props["provenance_extractor_id"] = entity.provenance_extractor_id
+            if entity.acl_ref is not None:
+                props["acl_ref"] = entity.acl_ref
+
+            await session.run(
+                f"MERGE (n:`{label}` {{id: $id}}) SET n += $props",
+                id=entity.id,
+                props=props,
+            )
+
+        for fact in sorted(scan.facts, key=lambda item: str(item.id)):
+            subject_label = labels_by_id.get(fact.subject_id, "Entity")
+            object_label = labels_by_id.get(fact.object_id, "Entity")
+            rel_type = _relationship_type(fact.predicate)
+
+            props: dict[str, object] = {
+                "predicate": fact.predicate,
+                "source_id": fact.provenance.source_id,
+                "extractor_id": fact.provenance.extractor_id,
+                "extractor_version": fact.provenance.extractor_version,
+                "ontology_id": fact.provenance.ontology_id,
+                "ontology_version": fact.provenance.ontology_version,
+                "confidence": fact.provenance.confidence.value,
+                "confidence_score": fact.provenance.confidence_score,
+                "t_valid": fact.t_valid.isoformat(),
+                "ingested_at": fact.ingested_at.isoformat(),
+            }
+            if fact.t_invalid is not None:
+                props["t_invalid"] = fact.t_invalid.isoformat()
+            if fact.superseded_by is not None:
+                props["superseded_by"] = str(fact.superseded_by)
+            if fact.acl_ref is not None:
+                props["acl_ref"] = fact.acl_ref
+
+            await session.run(
+                (
+                    f"MATCH (s:`{subject_label}` {{id: $subject_id}}), "
+                    f"(o:`{object_label}` {{id: $object_id}}) "
+                    f"MERGE (s)-[r:`{rel_type}` {{fact_id: $fact_id}}]->(o) "
+                    "SET r += $props"
+                ),
+                subject_id=fact.subject_id,
+                object_id=fact.object_id,
+                fact_id=str(fact.id),
+                props=props,
+            )
+
+        for canonical_id, merged_id, _resolver_id, record in _merge_edges(scan):
+            canonical_label = labels_by_id.get(canonical_id, "Entity")
+            merged_label = labels_by_id.get(merged_id, "Entity")
+
+            await session.run(
+                (
+                    f"MATCH (m:`{merged_label}` {{id: $merged_id}}), "
+                    f"(c:`{canonical_label}` {{id: $canonical_id}}) "
+                    "MERGE (m)-[r:MERGED_WITH {resolver_id: $resolver_id}]->(c) "
+                    "SET r += $props"
+                ),
+                merged_id=merged_id,
+                canonical_id=canonical_id,
+                resolver_id=record.resolver_id,
+                props={
+                    "resolver_version": record.resolver_version,
+                    "resolved_at": record.resolved_at.isoformat(),
+                    "reason": record.reason,
+                },
+            )
+
 
 def render_cypher(scan: GraphScan) -> str:
     """Render deterministic, idempotent Cypher for a visualization database."""

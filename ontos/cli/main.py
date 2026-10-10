@@ -744,9 +744,55 @@ def export_neo4j(
             help="Neighborhood depth for --entity. Default: 2.",
         ),
     ] = None,
+    push: Annotated[
+        str | None,
+        typer.Option(
+            "--push",
+            help="Push directly to a separate Neo4j visualization database URI.",
+        ),
+    ] = None,
+    user: Annotated[
+        str,
+        typer.Option(
+            "--user",
+            help="Neo4j username for --push.",
+        ),
+    ] = "neo4j",
+    password: Annotated[
+        str | None,
+        typer.Option(
+            "--password",
+            help="Neo4j password for --push.",
+        ),
+    ] = None,
+    database: Annotated[
+        str,
+        typer.Option(
+            "--database",
+            help="Neo4j visualization database for --push.",
+        ),
+    ] = "neo4j",
 ) -> None:
     """Export visualization-oriented Neo4j Cypher."""
-    from ontos.exporters.cypher import render_cypher
+    from ontos.exporters.cypher import push_neo4j, render_cypher
+
+    if push is not None:
+        if password is None:
+            raise typer.BadParameter("--password is required with --push.")
+
+        if os.environ.get("ONTOS_STORAGE_BACKEND", "").lower() == "neo4j":
+            operational_uri = os.environ.get("NEO4J_URI")
+            operational_database = os.environ.get("NEO4J_DATABASE", "neo4j")
+
+            if (
+                operational_uri is not None
+                and push.rstrip("/") == operational_uri.rstrip("/")
+                and database == operational_database
+            ):
+                raise typer.BadParameter(
+                    "--push must target a separate Neo4j visualization database, "
+                    "not the operational Ontos database."
+                )
 
     scan = _scan_for_export(
         storage_path,
@@ -755,6 +801,28 @@ def export_neo4j(
         entity=entity,
         hops=hops,
     )
+
+    if push is not None:
+        from neo4j import AsyncGraphDatabase
+
+        driver = AsyncGraphDatabase.driver(
+            push,
+            auth=(user, password),
+        )
+
+        async def _push() -> None:
+            try:
+                await push_neo4j(scan, driver, database=database)
+            finally:
+                await driver.close()
+
+        asyncio.run(_push())
+        typer.echo(
+            f"pushed Neo4j visualization snapshot to {push} "
+            f"(database={database})"
+        )
+        return
+
     output.write_text(render_cypher(scan), encoding="utf-8")
     typer.echo(f"wrote Neo4j Cypher snapshot to {output}")
 

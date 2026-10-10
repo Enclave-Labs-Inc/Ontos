@@ -949,3 +949,74 @@ async def test_scan_filters_merge_records_and_keeps_raw_ids(
 
     # Resolver grouping stays separate; the stored fact endpoint remains raw.
     assert allowed.facts[0].object_id == "company:acme-2"
+
+
+
+async def test_push_neo4j_visualization_is_idempotent(store: Neo4jStore) -> None:
+    from ontos.exporters.cypher import push_neo4j
+    from ontos.resolver.base import MergeRecord
+    from ontos.storage.models import GraphScan, StoredEntity
+
+    when = datetime(2026, 1, 2, tzinfo=UTC)
+    fact = _make_fact(
+        "person:alice",
+        "works_at",
+        "company:acme-1",
+        t_valid=when,
+    )
+
+    scan = GraphScan(
+        entities=[
+            StoredEntity(
+                id="person:alice",
+                type="Person",
+                canonical_name="Alice",
+            ),
+            StoredEntity(
+                id="company:acme-1",
+                type="Company",
+                canonical_name="Acme",
+            ),
+            StoredEntity(
+                id="company:acme-2",
+                type="Company",
+                canonical_name="Acme Holdings",
+            ),
+        ],
+        facts=[fact],
+        merges=[
+            MergeRecord(
+                canonical_id="company:acme-1",
+                merged_ids=["company:acme-2"],
+                resolver_id="exact-match",
+                resolver_version="1.0",
+                resolved_at=datetime(2026, 1, 3, tzinfo=UTC),
+                reason="same registration number",
+            )
+        ],
+    )
+
+    await push_neo4j(scan, store._driver, database=store._database)  # noqa: SLF001
+    await push_neo4j(scan, store._driver, database=store._database)  # noqa: SLF001
+
+    async with store._driver.session(database=store._database) as session:  # noqa: SLF001
+        node_result = await session.run("MATCH (n) RETURN count(n) AS count")
+        node_record = await node_result.single()
+
+        fact_result = await session.run(
+            "MATCH ()-[r]->() WHERE r.fact_id = $fact_id RETURN count(r) AS count",
+            fact_id=str(fact.id),
+        )
+        fact_record = await fact_result.single()
+
+        merge_result = await session.run(
+            "MATCH ()-[r:MERGED_WITH]->() RETURN count(r) AS count"
+        )
+        merge_record = await merge_result.single()
+
+    assert node_record is not None
+    assert fact_record is not None
+    assert merge_record is not None
+    assert node_record["count"] == 3
+    assert fact_record["count"] == 1
+    assert merge_record["count"] == 1

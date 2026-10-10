@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from ontos.exporters.cypher import load_cypher, render_cypher, sanitize_identifier
+from ontos.exporters.cypher import load_cypher, push_neo4j, render_cypher, sanitize_identifier
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.models import GraphScan, StoredEntity
@@ -133,3 +133,59 @@ def test_load_cypher_round_trips_exported_snapshot(tmp_path: Path) -> None:
     loaded = load_cypher(snapshot)
 
     assert render_cypher(loaded) == render_cypher(original)
+
+
+
+def test_push_neo4j_writes_visualization_schema_with_parameters() -> None:
+    import asyncio
+
+    calls: list[tuple[str, dict[str, object]]] = []
+    databases: list[str] = []
+
+    class _FakeSession:
+        async def __aenter__(self) -> _FakeSession:
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object,
+            exc: object,
+            tb: object,
+        ) -> None:
+            return None
+
+        async def run(self, query: str, **params: object) -> None:
+            calls.append((query, params))
+
+    class _FakeDriver:
+        def session(self, *, database: str) -> _FakeSession:
+            databases.append(database)
+            return _FakeSession()
+
+    asyncio.run(
+        push_neo4j(
+            _scan(),
+            _FakeDriver(),
+            database="ontos-viz",
+        )
+    )
+
+    assert databases == ["ontos-viz"]
+
+    queries = [query for query, _params in calls]
+    assert any("CREATE INDEX IF NOT EXISTS" in query for query in queries)
+    assert any("MERGE (n:`Person` {id: $id})" in query for query in queries)
+    assert any("MERGE (s)-[r:`WORKS_AT` {fact_id: $fact_id}]->(o)" in query for query in queries)
+    assert any(
+        "MERGE (m)-[r:MERGED_WITH {resolver_id: $resolver_id}]->(c)" in query
+        for query in queries
+    )
+
+    assert any(
+        params.get("id") == "person:alice"
+        for _query, params in calls
+    )
+    assert any(
+        params.get("fact_id") == "00000000-0000-0000-0000-000000000123"
+        for _query, params in calls
+    )
