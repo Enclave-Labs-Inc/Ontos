@@ -125,16 +125,12 @@ class NetworkxStore:
 
         for record in scan.merges:
             normalized_merged = [
-                merged_id
-                for merged_id in record.merged_ids
-                if merged_id != record.canonical_id
+                merged_id for merged_id in record.merged_ids if merged_id != record.canonical_id
             ]
             if not normalized_merged:
                 continue
 
-            normalized = record.model_copy(
-                update={"merged_ids": normalized_merged}
-            )
+            normalized = record.model_copy(update={"merged_ids": normalized_merged})
             for merged_id in normalized_merged:
                 key = (
                     record.canonical_id,
@@ -451,6 +447,41 @@ class NetworkxStore:
         attrs = self._graph.nodes.get(entity_id, {})
         acl = attrs.get("acl_ref")
         return acl if isinstance(acl, str) else None
+
+    async def entities_for_source(
+        self,
+        source_id: str,
+        *,
+        acl_ref: str | None = None,
+    ) -> list[StoredEntity]:
+        """Return raw entity endpoints ever cited by facts from source_id."""
+        entity_ids: set[str] = set()
+
+        for fact in self._facts.values():
+            if fact.provenance.source_id != source_id:
+                continue
+            if fact.acl_ref != acl_ref:
+                continue
+            entity_ids.add(fact.subject_id)
+            entity_ids.add(fact.object_id)
+
+        entities: list[StoredEntity] = []
+        for entity_id in sorted(entity_ids):
+            attrs = self._graph.nodes.get(entity_id, {})
+            entities.append(
+                StoredEntity(
+                    id=entity_id,
+                    type=attrs.get("type"),
+                    canonical_name=attrs.get("canonical_name"),
+                    aliases=list(attrs.get("aliases") or []),
+                    properties=dict(attrs.get("properties") or {}),
+                    provenance_source_id=attrs.get("provenance_source_id"),
+                    provenance_extractor_id=attrs.get("provenance_extractor_id"),
+                    acl_ref=attrs.get("acl_ref"),
+                )
+            )
+
+        return entities
 
     async def scan(
         self,

@@ -133,6 +133,8 @@ class Neo4jStore:
             "CREATE INDEX entity_type_idx IF NOT EXISTS FOR (n:Entity) ON (n.type)",
             "CREATE INDEX fact_id_idx IF NOT EXISTS FOR ()-[r:RELATES]-() ON (r.fact_id)",
             "CREATE INDEX fact_predicate_idx IF NOT EXISTS FOR ()-[r:RELATES]-() ON (r.predicate)",
+            "CREATE INDEX fact_source_idx IF NOT EXISTS "
+            "FOR ()-[r:RELATES]-() ON (r.prov_source_id)",
             "CREATE INDEX fact_validity_idx IF NOT EXISTS "
             "FOR ()-[r:RELATES]-() ON (r.t_valid, r.t_invalid)",
             # #46: audit queries on the merge trail scan by resolver +
@@ -441,6 +443,58 @@ class Neo4jStore:
             )
             records = await result.data()
         return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]
+
+    async def entities_for_source(
+        self,
+        source_id: str,
+        *,
+        acl_ref: str | None = None,
+    ) -> list[StoredEntity]:
+        """Return raw entity endpoints ever cited by facts from source_id."""
+        query = """
+        MATCH (s:Entity)-[r:RELATES]->(o:Entity)
+        WHERE r.prov_source_id = $source_id
+          AND (
+              ($acl_ref IS NULL AND r.acl_ref IS NULL)
+              OR r.acl_ref = $acl_ref
+          )
+        WITH collect(DISTINCT s) + collect(DISTINCT o) AS nodes
+        UNWIND nodes AS n
+        WITH DISTINCT n
+        RETURN n.id AS id, properties(n) AS props
+        ORDER BY id
+        """
+
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(query, source_id=source_id, acl_ref=acl_ref)
+            rows = await result.data()
+
+        entities: list[StoredEntity] = []
+        for row in rows:
+            props = row["props"]
+            properties_raw = props.get("properties")
+            if isinstance(properties_raw, str):
+                try:
+                    properties = json.loads(properties_raw)
+                except json.JSONDecodeError:
+                    properties = {}
+            else:
+                properties = {}
+
+            entities.append(
+                StoredEntity(
+                    id=row["id"],
+                    type=props.get("type"),
+                    canonical_name=props.get("canonical_name"),
+                    aliases=list(props.get("aliases") or []),
+                    properties=properties,
+                    provenance_source_id=props.get("provenance_source_id"),
+                    provenance_extractor_id=props.get("provenance_extractor_id"),
+                    acl_ref=props.get("acl_ref"),
+                )
+            )
+
+        return entities
 
     async def scan(
         self,

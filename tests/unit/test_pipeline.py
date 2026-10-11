@@ -657,3 +657,453 @@ async def test_as_of_returns_the_right_historical_fact(ontology: Ontology) -> No
     current_works_at = [f for f in current if f.predicate == "works_at"]
     assert len(current_works_at) == 1
     assert current_works_at[0].object_id == "company:acme"
+
+
+async def test_same_source_reingest_reuses_prior_raw_entity_ids(
+    ontology: Ontology,
+) -> None:
+    """Same source + same canonical entities must survive LLM raw-ID drift."""
+    text = "David Lee works at Beta Systems."
+    store = NetworkxStore()
+
+    # First extraction chooses typed raw IDs.
+    first_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "Person:David Lee",
+                        "Person",
+                        "David Lee",
+                        "works_at",
+                        "Company:Beta Systems",
+                        "Company",
+                        "Beta Systems",
+                    )
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    first = await IngestPipeline(
+        connector=TextConnector({"hr.txt": text}),
+        extractor=first_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    ).run()
+
+    # Same source and same semantic entities, but the LLM chooses different
+    # raw IDs on the second extraction.
+    second_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "David Lee",
+                        "Person",
+                        "David Lee",
+                        "works_at",
+                        "Beta Systems",
+                        "Company",
+                        "Beta Systems",
+                    )
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    second = await IngestPipeline(
+        connector=TextConnector({"hr.txt": text}),
+        extractor=second_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    ).run()
+
+    assert first.facts_written == 1
+
+    # Re-ingesting the identical source should reuse the first raw entity
+    # identities, allowing the existing same-source fact reaffirmation path
+    # to recognize the fact as already stored.
+    assert second.facts_written == 0
+    assert second.facts_reaffirmed == 1
+
+    snapshot = await store.scan()
+
+    assert {(entity.id, entity.type, entity.canonical_name) for entity in snapshot.entities} == {
+        ("Person:David Lee", "Person", "David Lee"),
+        ("Company:Beta Systems", "Company", "Beta Systems"),
+    }
+
+    assert len(snapshot.facts) == 1
+    assert snapshot.facts[0].subject_id == "Person:David Lee"
+    assert snapshot.facts[0].object_id == "Company:Beta Systems"
+
+
+async def test_same_source_id_reconciliation_skips_ambiguous_namesakes(
+    ontology: Ontology,
+) -> None:
+    """Same-source reconciliation must not guess between namesakes."""
+    text = "Two different people named John Smith work at different companies."
+    store = NetworkxStore()
+
+    first_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "person:john-1",
+                        "Person",
+                        "John Smith",
+                        "works_at",
+                        "company:alpha",
+                        "Company",
+                        "Alpha Corp",
+                    ),
+                    _triple(
+                        "person:john-2",
+                        "Person",
+                        "John Smith",
+                        "works_at",
+                        "company:beta",
+                        "Company",
+                        "Beta Corp",
+                    ),
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    first = await IngestPipeline(
+        connector=TextConnector({"people.txt": text}),
+        extractor=first_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    ).run()
+
+    second_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "person:new-john-a",
+                        "Person",
+                        "John Smith",
+                        "works_at",
+                        "company:alpha",
+                        "Company",
+                        "Alpha Corp",
+                    ),
+                    _triple(
+                        "person:new-john-b",
+                        "Person",
+                        "John Smith",
+                        "works_at",
+                        "company:beta",
+                        "Company",
+                        "Beta Corp",
+                    ),
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    second = await IngestPipeline(
+        connector=TextConnector({"people.txt": text}),
+        extractor=second_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    ).run()
+
+    assert first.facts_written == 2
+
+    # Two current candidates share the same (type, canonical_name), so
+    # reconciliation must refuse to guess which prior John Smith is which.
+    assert second.facts_written == 2
+    assert second.facts_reaffirmed == 0
+
+    snapshot = await store.scan()
+    john_ids = {
+        entity.id
+        for entity in snapshot.entities
+        if entity.type == "Person" and entity.canonical_name == "John Smith"
+    }
+
+    assert john_ids == {
+        "person:john-1",
+        "person:john-2",
+        "person:new-john-a",
+        "person:new-john-b",
+    }
+
+
+async def test_same_source_id_reconciliation_is_strict_same_acl(
+    ontology: Ontology,
+) -> None:
+    """Raw IDs from one ACL scope must never be reused in another."""
+    text = "Alice works at Acme."
+    store = NetworkxStore()
+
+    first_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "person:alice-hr",
+                        "Person",
+                        "Alice",
+                        "works_at",
+                        "company:acme-hr",
+                        "Company",
+                        "Acme",
+                    )
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    first = await IngestPipeline(
+        connector=TextConnector(
+            {"shared.txt": text},
+            acl_ref_by_source={"shared.txt": "acl:hr"},
+        ),
+        extractor=first_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    ).run()
+
+    second_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "person:alice-finance",
+                        "Person",
+                        "Alice",
+                        "works_at",
+                        "company:acme-finance",
+                        "Company",
+                        "Acme",
+                    )
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    second = await IngestPipeline(
+        connector=TextConnector(
+            {"shared.txt": text},
+            acl_ref_by_source={"shared.txt": "acl:finance"},
+        ),
+        extractor=second_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    ).run()
+
+    assert first.facts_written == 1
+    assert second.facts_written == 1
+    assert second.facts_reaffirmed == 0
+
+    hr_facts = await store.search("works_at", allowed_acls=["acl:hr"])
+    finance_facts = await store.search("works_at", allowed_acls=["acl:finance"])
+
+    assert len(hr_facts) == 1
+    assert hr_facts[0].subject_id == "person:alice-hr"
+    assert hr_facts[0].object_id == "company:acme-hr"
+
+    assert len(finance_facts) == 1
+    assert finance_facts[0].subject_id == "person:alice-finance"
+    assert finance_facts[0].object_id == "company:acme-finance"
+
+
+async def test_same_source_reconciliation_handles_permuted_raw_ids(
+    ontology: Ontology,
+) -> None:
+    """Reused raw IDs must not overwrite different prior entity identities."""
+    text = "Alice works at Acme."
+    store = NetworkxStore()
+
+    # First run:
+    #   1 = Alice
+    #   2 = Acme
+    first_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "1",
+                        "Person",
+                        "Alice",
+                        "works_at",
+                        "2",
+                        "Company",
+                        "Acme",
+                    )
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    first = await IngestPipeline(
+        connector=TextConnector({"people.txt": text}),
+        extractor=first_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    ).run()
+
+    # Second run swaps the raw IDs:
+    #   2 = Alice
+    #   1 = Acme
+    second_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "2",
+                        "Person",
+                        "Alice",
+                        "works_at",
+                        "1",
+                        "Company",
+                        "Acme",
+                    )
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    second = await IngestPipeline(
+        connector=TextConnector({"people.txt": text}),
+        extractor=second_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    ).run()
+
+    assert first.facts_written == 1
+
+    # Same semantic fact from the same source: the second run must resolve
+    # back to the first run's raw identities rather than overwrite them.
+    assert second.facts_written == 0
+    assert second.facts_reaffirmed == 1
+
+    snapshot = await store.scan()
+
+    entities = {entity.id: (entity.type, entity.canonical_name) for entity in snapshot.entities}
+
+    assert entities == {
+        "1": ("Person", "Alice"),
+        "2": ("Company", "Acme"),
+    }
+
+    assert len(snapshot.facts) == 1
+    assert snapshot.facts[0].subject_id == "1"
+    assert snapshot.facts[0].object_id == "2"
+
+
+async def test_same_source_reconciliation_refuses_unresolvable_raw_id_collision(
+    ontology: Ontology,
+) -> None:
+    """A conflicting raw-ID reuse must never overwrite a prior entity."""
+    text = "Alice works at Acme."
+    store = NetworkxStore()
+
+    first_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "1",
+                        "Person",
+                        "Alice",
+                        "works_at",
+                        "2",
+                        "Company",
+                        "Acme",
+                    )
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    first = await IngestPipeline(
+        connector=TextConnector({"people.txt": text}),
+        extractor=first_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    ).run()
+
+    assert first.facts_written == 1
+
+    # The second extraction reuses raw id "1" for Charlie while Alice
+    # independently maps back to the previous raw id "1". There is no
+    # collision-free reconciliation, so the whole document must be rejected.
+    second_extractor = LlmExtractor(
+        ScriptedLLM(
+            {
+                text: [
+                    _triple(
+                        "1",
+                        "Person",
+                        "Charlie",
+                        "works_at",
+                        "4",
+                        "Company",
+                        "Gamma",
+                    ),
+                    _triple(
+                        "3",
+                        "Person",
+                        "Alice",
+                        "works_at",
+                        "2",
+                        "Company",
+                        "Acme",
+                    ),
+                ]
+            }
+        ),
+        ontology,
+    )
+
+    second = await IngestPipeline(
+        connector=TextConnector({"people.txt": text}),
+        extractor=second_extractor,
+        resolver=None,
+        store=store,
+        ontology=ontology,
+        error_policy=ErrorPolicy.SKIP_AND_LOG,
+    ).run()
+
+    assert second.facts_written == 0
+    assert len(second.errors) == 1
+
+    snapshot = await store.scan()
+
+    entities = {entity.id: (entity.type, entity.canonical_name) for entity in snapshot.entities}
+
+    # Most important invariant: the original meanings are untouched.
+    assert entities == {
+        "1": ("Person", "Alice"),
+        "2": ("Company", "Acme"),
+    }
+
+    assert len(snapshot.facts) == 1
+    assert snapshot.facts[0].subject_id == "1"
+    assert snapshot.facts[0].object_id == "2"

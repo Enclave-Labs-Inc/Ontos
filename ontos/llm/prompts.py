@@ -19,6 +19,31 @@ warnings. Assign an llm_confidence in [0, 1] for each triple:
   1.0  = explicit and unambiguous in the text
   0.7  = strongly implied
   0.4  = inferred with material uncertainty
+
+Process the entire input text before returning. Extract each distinct
+supported relationship once. Do not stop after finding a few valid triples;
+continue through the full input and include every relationship supported by
+the text and schema.
+
+Preserve relation direction exactly as defined by the schema and the
+meaning of the relation. The subject must play the relation's subject role,
+and the object must play its object role. Do not reverse a relationship just
+because the subject and object have the same entity type.
+
+Entity identity fields have distinct meanings:
+- subject_type / object_type contain the ontology entity type.
+- subject_canonical_name / object_canonical_name contain only the
+  human-readable entity name.
+- Never prefix or suffix a canonical_name with its entity type.
+
+Correct:
+  subject_type = "Person"
+  subject_canonical_name = "Alice Johnson"
+
+Incorrect:
+  subject_canonical_name = "Person:Alice Johnson"
+  subject_canonical_name = "Alice Johnson (Person)"
+
 Return valid JSON matching the requested schema exactly.
 """
 
@@ -73,7 +98,8 @@ def _schema_summary(ontology: Ontology) -> str:
         lines.append(f"  - {et.label}({props})")
     lines.append("Relation types:")
     for rt in ontology.relation_types:
-        lines.append(f"  - {rt.label} [{rt.cardinality}]")
+        description = f" — {rt.description}" if rt.description else ""
+        lines.append(f"  - {rt.label} [{rt.cardinality}]{description}")
     lines.append("Allowed patterns (subject_type - predicate -> object_type):")
     for p in ontology.patterns:
         lines.append(f"  - {p.subject_type} - {p.predicate} -> {p.object_type}")
