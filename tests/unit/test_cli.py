@@ -844,7 +844,6 @@ def test_query_threads_anthropic_model_and_key_into_backend(
     assert captured_kwargs == {"model": "claude-sonnet-5", "api_key": "sk-test"}
 
 
-
 def test_export_help_lists_supported_formats() -> None:
     result = runner.invoke(app, ["export", "--help"])
 
@@ -853,7 +852,6 @@ def test_export_help_lists_supported_formats() -> None:
     assert "graphml" in result.stdout
     assert "svg" in result.stdout
     assert "json-ld" in result.stdout
-
 
 
 def test_export_graphml_writes_snapshot_file(tmp_path: Path) -> None:
@@ -907,7 +905,6 @@ def test_export_graphml_writes_snapshot_file(tmp_path: Path) -> None:
     assert str(fact.id) in output_path.read_text(encoding="utf-8")
 
 
-
 def test_export_json_ld_writes_snapshot_file(tmp_path: Path) -> None:
     import asyncio
     import json
@@ -957,7 +954,6 @@ def test_export_json_ld_writes_snapshot_file(tmp_path: Path) -> None:
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert "@graph" in payload
     assert str(fact.id) in output_path.read_text(encoding="utf-8")
-
 
 
 def test_export_svg_writes_snapshot_file(tmp_path: Path) -> None:
@@ -1011,7 +1007,6 @@ def test_export_svg_writes_snapshot_file(tmp_path: Path) -> None:
     assert "person:alice" in output_path.read_text(encoding="utf-8")
 
 
-
 def test_export_neo4j_writes_cypher_file(tmp_path: Path) -> None:
     import asyncio
     from datetime import UTC, datetime
@@ -1061,7 +1056,6 @@ def test_export_neo4j_writes_cypher_file(tmp_path: Path) -> None:
     assert "MERGE" in cypher
     assert "person:alice" in cypher
     assert str(fact.id) in cypher
-
 
 
 def test_export_graphml_as_of_includes_historical_fact(tmp_path: Path) -> None:
@@ -1118,7 +1112,6 @@ def test_export_graphml_as_of_includes_historical_fact(tmp_path: Path) -> None:
     assert str(fact.id) in output_path.read_text(encoding="utf-8")
 
 
-
 def test_export_graphml_include_closed_includes_closed_fact(tmp_path: Path) -> None:
     import asyncio
     from datetime import UTC, datetime
@@ -1172,7 +1165,6 @@ def test_export_graphml_include_closed_includes_closed_fact(tmp_path: Path) -> N
     assert str(fact.id) in output_path.read_text(encoding="utf-8")
 
 
-
 def test_export_rejects_as_of_with_include_closed(tmp_path: Path) -> None:
     output_path = tmp_path / "graph.graphml"
 
@@ -1195,7 +1187,6 @@ def test_export_rejects_as_of_with_include_closed(tmp_path: Path) -> None:
     output = (result.stdout + result.stderr).lower()
     assert "as-of" in output
     assert "include-closed" in output
-
 
 
 def test_export_graphml_entity_hops_limits_neighborhood(tmp_path: Path) -> None:
@@ -1258,7 +1249,6 @@ def test_export_graphml_entity_hops_limits_neighborhood(tmp_path: Path) -> None:
     assert "entity:d" not in exported
 
 
-
 def test_export_rejects_hops_without_entity(tmp_path: Path) -> None:
     output_path = tmp_path / "graph.graphml"
 
@@ -1280,7 +1270,6 @@ def test_export_rejects_hops_without_entity(tmp_path: Path) -> None:
     output = (result.stdout + result.stderr).lower()
     assert "hops" in output
     assert "entity" in output
-
 
 
 def test_export_entity_hops_includes_merge_lineage(tmp_path: Path) -> None:
@@ -1332,7 +1321,6 @@ def test_export_entity_hops_includes_merge_lineage(tmp_path: Path) -> None:
     assert "MERGED_WITH" in exported
 
 
-
 def test_export_neo4j_help_documents_push_options() -> None:
     result = runner.invoke(app, ["export", "neo4j", "--help"])
 
@@ -1341,7 +1329,6 @@ def test_export_neo4j_help_documents_push_options() -> None:
     assert "--user" in result.stdout
     assert "--password" in result.stdout
     assert "--database" in result.stdout
-
 
 
 def test_export_neo4j_push_uses_requested_target(
@@ -1405,7 +1392,6 @@ def test_export_neo4j_push_uses_requested_target(
     assert captured["closed"] is True
 
 
-
 def test_export_neo4j_push_rejects_operational_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1436,7 +1422,6 @@ def test_export_neo4j_push_rejects_operational_database(
     assert "separate" in output
 
 
-
 def test_export_neo4j_push_requires_password_before_scanning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1462,3 +1447,180 @@ def test_export_neo4j_push_requires_password_before_scanning(
     assert result.exit_code == 2
     output = (result.stdout + result.stderr).lower()
     assert "password" in output
+
+
+def test_export_authorized_subject_can_see_allowed_acl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    from datetime import UTC, datetime
+
+    import ontos.runtime.server
+    from ontos.authz import VIEW, InMemoryAuthz
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "authorized.graphml"
+
+    writer = NetworkxStore(path=store_path)
+
+    def fact(
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        acl_ref: str | None = None,
+    ) -> Fact:
+        when = datetime(2026, 1, 1, tzinfo=UTC)
+        return Fact(
+            subject_id=subject,
+            predicate=predicate,
+            object_id=object_,
+            provenance=Provenance(
+                source_id="doc:1",
+                extractor_id="extractor:test",
+                extractor_version="1",
+                ontology_id="ontos.starter",
+                ontology_version="0.4",
+                confidence=Confidence.EXTRACTED,
+                confidence_score=1.0,
+            ),
+            t_valid=when,
+            ingested_at=when,
+            acl_ref=acl_ref,
+        )
+
+    public_fact = fact(
+        "company:acme",
+        "has_public_profile",
+        "profile:public",
+    )
+    finance_fact = fact(
+        "company:acme",
+        "has_finance_record",
+        "record:finance",
+        acl_ref="acl:finance",
+    )
+
+    asyncio.run(writer.add_fact(public_fact))
+    asyncio.run(writer.add_fact(finance_fact))
+    asyncio.run(writer.close())
+
+    authz = InMemoryAuthz()
+    authz.grant("user:alice", VIEW, "acl:finance")
+
+    monkeypatch.setattr(
+        ontos.runtime.server,
+        "build_authz",
+        lambda _cfg: authz,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "graphml",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+            "--acting-on-behalf-of",
+            "user:alice",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    exported = output_path.read_text(encoding="utf-8")
+    assert str(public_fact.id) in exported
+    assert str(finance_fact.id) in exported
+
+
+def test_export_unauthorized_subject_gets_public_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    from datetime import UTC, datetime
+
+    import ontos.runtime.server
+    from ontos.authz import InMemoryAuthz
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "unauthorized.graphml"
+
+    writer = NetworkxStore(path=store_path)
+
+    def fact(
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        acl_ref: str | None = None,
+    ) -> Fact:
+        when = datetime(2026, 1, 1, tzinfo=UTC)
+        return Fact(
+            subject_id=subject,
+            predicate=predicate,
+            object_id=object_,
+            provenance=Provenance(
+                source_id="doc:1",
+                extractor_id="extractor:test",
+                extractor_version="1",
+                ontology_id="ontos.starter",
+                ontology_version="0.4",
+                confidence=Confidence.EXTRACTED,
+                confidence_score=1.0,
+            ),
+            t_valid=when,
+            ingested_at=when,
+            acl_ref=acl_ref,
+        )
+
+    public_fact = fact(
+        "company:acme",
+        "has_public_profile",
+        "profile:public",
+    )
+    finance_fact = fact(
+        "company:acme",
+        "has_finance_record",
+        "record:finance",
+        acl_ref="acl:finance",
+    )
+
+    asyncio.run(writer.add_fact(public_fact))
+    asyncio.run(writer.add_fact(finance_fact))
+    asyncio.run(writer.close())
+
+    authz = InMemoryAuthz()
+
+    monkeypatch.setattr(
+        ontos.runtime.server,
+        "build_authz",
+        lambda _cfg: authz,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "graphml",
+            "--storage-path",
+            str(store_path),
+            "--output",
+            str(output_path),
+            "--acting-on-behalf-of",
+            "user:bob",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    exported = output_path.read_text(encoding="utf-8")
+    assert str(public_fact.id) in exported
+    assert str(finance_fact.id) not in exported

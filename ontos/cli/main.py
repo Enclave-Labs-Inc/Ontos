@@ -229,12 +229,8 @@ def _load_snapshot(path: Path) -> tuple[object, object]:
         id=_compute_snapshot_id(path),
         mtime=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
         format=format_name,
-        ontology_id=(
-            first_fact.provenance.ontology_id if first_fact is not None else ""
-        ),
-        ontology_version=(
-            first_fact.provenance.ontology_version if first_fact is not None else ""
-        ),
+        ontology_id=(first_fact.provenance.ontology_id if first_fact is not None else ""),
+        ontology_version=(first_fact.provenance.ontology_version if first_fact is not None else ""),
     )
     return store, metadata
 
@@ -278,6 +274,7 @@ def _serve_snapshot(path: Path) -> None:
         build_server,
         run_server,
     )
+
     _default_dev_signing_key_if_missing()
 
     store, metadata = _load_snapshot(path)
@@ -584,32 +581,40 @@ def _scan_for_export(
     include_closed: bool = False,
     entity: str | None = None,
     hops: int | None = None,
+    acting_on_behalf_of: str | None = None,
 ) -> GraphScan:
     """Load the configured store, scan it, and close it safely."""
-    from ontos.runtime.server import build_store
+    from ontos.authz import VIEW
+    from ontos.runtime.server import build_authz, build_store
 
     try:
         as_of_timestamp = datetime.fromisoformat(as_of) if as_of is not None else None
     except ValueError as exc:
-        raise typer.BadParameter(
-            "--as-of must be a valid ISO-8601 timestamp."
-        ) from exc
+        raise typer.BadParameter("--as-of must be a valid ISO-8601 timestamp.") from exc
 
     if as_of_timestamp is not None and include_closed:
-        raise typer.BadParameter(
-            "--as-of and --include-closed cannot be used together."
-        )
+        raise typer.BadParameter("--as-of and --include-closed cannot be used together.")
 
     resolved_path = _resolve_storage_path(storage_path)
     cfg = _build_cli_runtime_config(resolved_path)
     _warn_if_ephemeral(resolved_path, cfg.storage_backend)
     store = build_store(cfg)
+    authz = build_authz(cfg) if acting_on_behalf_of is not None else None
 
     async def _run() -> GraphScan:
         try:
+            allowed_acls: list[str] | None = None
+            if authz is not None and acting_on_behalf_of is not None:
+                allowed_acls = await authz.list_authorized_objects(
+                    acting_on_behalf_of,
+                    VIEW,
+                )
+
             return await store.scan(
                 as_of=as_of_timestamp,
                 include_closed=include_closed,
+                acl_subject=acting_on_behalf_of,
+                allowed_acls=allowed_acls,
             )
         finally:
             await _close_store_without_masking(store)
@@ -651,9 +656,7 @@ def _filter_export_neighborhood(
 
     visible_ids = {item.id for item in scan.entities}
     if entity not in visible_ids:
-        return scan.model_copy(
-            update={"entities": [], "facts": [], "merges": []}
-        )
+        return scan.model_copy(update={"entities": [], "facts": [], "merges": []})
 
     included = {entity}
     frontier = {entity}
@@ -670,18 +673,14 @@ def _filter_export_neighborhood(
 
     entities = [item for item in scan.entities if item.id in included]
     facts = [
-        fact
-        for fact in scan.facts
-        if fact.subject_id in included and fact.object_id in included
+        fact for fact in scan.facts if fact.subject_id in included and fact.object_id in included
     ]
 
     merges = []
     for record in scan.merges:
         if record.canonical_id not in included:
             continue
-        merged_ids = [
-            merged_id for merged_id in record.merged_ids if merged_id in included
-        ]
+        merged_ids = [merged_id for merged_id in record.merged_ids if merged_id in included]
         if merged_ids:
             merges.append(record.model_copy(update={"merged_ids": merged_ids}))
 
@@ -772,6 +771,13 @@ def export_neo4j(
             help="Neo4j visualization database for --push.",
         ),
     ] = "neo4j",
+    acting_on_behalf_of: Annotated[
+        str | None,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Caller identity used to resolve ACL permissions for export.",
+        ),
+    ] = None,
 ) -> None:
     """Export visualization-oriented Neo4j Cypher."""
     from ontos.exporters.cypher import push_neo4j, render_cypher
@@ -800,6 +806,7 @@ def export_neo4j(
         include_closed=include_closed,
         entity=entity,
         hops=hops,
+        acting_on_behalf_of=acting_on_behalf_of,
     )
 
     if push is not None:
@@ -817,10 +824,7 @@ def export_neo4j(
                 await driver.close()
 
         asyncio.run(_push())
-        typer.echo(
-            f"pushed Neo4j visualization snapshot to {push} "
-            f"(database={database})"
-        )
+        typer.echo(f"pushed Neo4j visualization snapshot to {push} (database={database})")
         return
 
     output.write_text(render_cypher(scan), encoding="utf-8")
@@ -877,6 +881,13 @@ def export_graphml(
             help="Neighborhood depth for --entity. Default: 2.",
         ),
     ] = None,
+    acting_on_behalf_of: Annotated[
+        str | None,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Caller identity used to resolve ACL permissions for export.",
+        ),
+    ] = None,
 ) -> None:
     """Export GraphML for graph visualization tools."""
     from ontos.exporters.graphml import render_graphml
@@ -887,6 +898,7 @@ def export_graphml(
         include_closed=include_closed,
         entity=entity,
         hops=hops,
+        acting_on_behalf_of=acting_on_behalf_of,
     )
     output.write_text(render_graphml(scan), encoding="utf-8")
     typer.echo(f"wrote GraphML snapshot to {output}")
@@ -942,6 +954,13 @@ def export_svg(
             help="Neighborhood depth for --entity. Default: 2.",
         ),
     ] = None,
+    acting_on_behalf_of: Annotated[
+        str | None,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Caller identity used to resolve ACL permissions for export.",
+        ),
+    ] = None,
 ) -> None:
     """Export a static SVG graph visualization."""
     from ontos.exporters.svg import render_svg
@@ -952,6 +971,7 @@ def export_svg(
         include_closed=include_closed,
         entity=entity,
         hops=hops,
+        acting_on_behalf_of=acting_on_behalf_of,
     )
     output.write_text(render_svg(scan), encoding="utf-8")
     typer.echo(f"wrote SVG snapshot to {output}")
@@ -1007,6 +1027,13 @@ def export_json_ld(
             help="Neighborhood depth for --entity. Default: 2.",
         ),
     ] = None,
+    acting_on_behalf_of: Annotated[
+        str | None,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Caller identity used to resolve ACL permissions for export.",
+        ),
+    ] = None,
 ) -> None:
     """Export JSON-LD graph data."""
     from ontos.exporters.jsonld import render_jsonld
@@ -1017,6 +1044,7 @@ def export_json_ld(
         include_closed=include_closed,
         entity=entity,
         hops=hops,
+        acting_on_behalf_of=acting_on_behalf_of,
     )
     output.write_text(render_jsonld(scan), encoding="utf-8")
     typer.echo(f"wrote JSON-LD snapshot to {output}")
