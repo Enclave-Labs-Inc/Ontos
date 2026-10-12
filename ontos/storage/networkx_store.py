@@ -554,6 +554,10 @@ class NetworkxStore:
                 continue
             seen_merges.add(dedupe_key)
 
+            # A historical snapshot must not show resolver decisions made later.
+            if as_of is not None and record.resolved_at > as_of:
+                continue
+
             if not include_all_acls and not self._merge_record_visible(record, merge_allowed_set):
                 continue
 

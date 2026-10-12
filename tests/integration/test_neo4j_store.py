@@ -806,6 +806,30 @@ async def test_scan_temporal_modes(store: Neo4jStore) -> None:
         )
 
 
+async def test_scan_as_of_excludes_merges_resolved_later(store: Neo4jStore) -> None:
+    from ontos.resolver.base import MergeRecord
+
+    for merged_id, resolved_at in (
+        ("B", datetime(2026, 1, 3, tzinfo=UTC)),
+        ("C", datetime(2027, 1, 1, tzinfo=UTC)),
+    ):
+        await store.record_merge(
+            MergeRecord(
+                canonical_id="A",
+                merged_ids=[merged_id],
+                resolver_id="exact-match",
+                resolver_version="1.0",
+                resolved_at=resolved_at,
+            )
+        )
+
+    historical = await store.scan(as_of=datetime(2026, 6, 1, tzinfo=UTC))
+    current = await store.scan()
+
+    assert [record.merged_ids for record in historical.merges] == [["B"]]
+    assert sorted(mid for record in current.merges for mid in record.merged_ids) == ["B", "C"]
+
+
 async def test_scan_denies_restricted_entities_and_endpoint_facts_by_default(
     store: Neo4jStore,
 ) -> None:

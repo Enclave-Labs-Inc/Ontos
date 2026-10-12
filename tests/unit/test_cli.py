@@ -1341,7 +1341,17 @@ def test_export_neo4j_writes_cypher_file(tmp_path: Path) -> None:
     assert str(fact.id) in cypher
 
 
-def test_export_graphml_as_of_includes_historical_fact(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "as_of",
+    [
+        "2026-03-01T00:00:00+00:00",
+        # #60: offset-less values are interpreted as UTC instead of crashing
+        # the comparison against timezone-aware stored timestamps.
+        "2026-03-01",
+        "2026-03-01T00:00:00",
+    ],
+)
+def test_export_graphml_as_of_includes_historical_fact(tmp_path: Path, as_of: str) -> None:
     import asyncio
     from datetime import UTC, datetime
 
@@ -1387,7 +1397,7 @@ def test_export_graphml_as_of_includes_historical_fact(tmp_path: Path) -> None:
             "--output",
             str(output_path),
             "--as-of",
-            "2026-03-01T00:00:00+00:00",
+            as_of,
         ],
     )
 

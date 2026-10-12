@@ -21,7 +21,6 @@ import asyncio
 import dataclasses
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -713,11 +712,12 @@ def _scan_for_export(
         build_authz,
         build_store,
     )
+    from ontos.runtime.temporal import parse_as_of
 
     started_at = time.perf_counter()
 
     try:
-        as_of_timestamp = datetime.fromisoformat(as_of) if as_of is not None else None
+        as_of_timestamp = parse_as_of(as_of) if as_of is not None else None
     except ValueError as exc:
         raise typer.BadParameter("--as-of must be a valid ISO-8601 timestamp.") from exc
 
@@ -890,7 +890,10 @@ def export_neo4j(
         str | None,
         typer.Option(
             "--as-of",
-            help="Export the graph as it existed at this ISO-8601 timestamp.",
+            help=(
+                "Export the graph as it existed at this ISO-8601 timestamp. "
+                "Timestamps without a UTC offset are interpreted as UTC."
+            ),
         ),
     ] = None,
     include_closed: Annotated[
@@ -1042,7 +1045,10 @@ def export_graphml(
         str | None,
         typer.Option(
             "--as-of",
-            help="Export the graph as it existed at this ISO-8601 timestamp.",
+            help=(
+                "Export the graph as it existed at this ISO-8601 timestamp. "
+                "Timestamps without a UTC offset are interpreted as UTC."
+            ),
         ),
     ] = None,
     include_closed: Annotated[
@@ -1128,7 +1134,10 @@ def export_svg(
         str | None,
         typer.Option(
             "--as-of",
-            help="Export the graph as it existed at this ISO-8601 timestamp.",
+            help=(
+                "Export the graph as it existed at this ISO-8601 timestamp. "
+                "Timestamps without a UTC offset are interpreted as UTC."
+            ),
         ),
     ] = None,
     include_closed: Annotated[
@@ -1214,7 +1223,10 @@ def export_json_ld(
         str | None,
         typer.Option(
             "--as-of",
-            help="Export the graph as it existed at this ISO-8601 timestamp.",
+            help=(
+                "Export the graph as it existed at this ISO-8601 timestamp. "
+                "Timestamps without a UTC offset are interpreted as UTC."
+            ),
         ),
     ] = None,
     include_closed: Annotated[

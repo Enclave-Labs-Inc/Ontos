@@ -581,6 +581,7 @@ class Neo4jStore:
 
         merge_query = """
         MATCH (m:Entity)-[r:MERGED_WITH]->(c:Entity)
+        WHERE $as_of IS NULL OR r.resolved_at <= $as_of
         WITH c,
              r.resolver_id AS resolver_id,
              r.resolver_version AS resolver_version,
@@ -639,6 +640,7 @@ class Neo4jStore:
 
             merge_result = await session.run(
                 merge_query,
+                as_of=as_of,
                 acl_subject=acl_subject,
                 allowed_acls=allowed_acls,
                 include_all_acls=include_all_acls,

@@ -180,7 +180,9 @@ class GraphStore(Protocol):
         """Return a backend-neutral graph snapshot for export.
 
         By default only currently-active facts are returned. ``as_of``
-        returns the graph visible at a historical point in time.
+        returns the graph visible at a historical point in time: facts
+        valid at ``as_of`` and merge records with ``resolved_at <= as_of``.
+        ``as_of`` must be timezone-aware (see ``ontos.runtime.temporal``).
         ``include_closed=True`` returns the full audit history and cannot
         be combined with ``as_of``.
 

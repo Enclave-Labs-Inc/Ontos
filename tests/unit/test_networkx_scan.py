@@ -274,6 +274,35 @@ async def test_scan_filters_merge_records_and_keeps_raw_ids() -> None:
     assert allowed.facts[0].object_id == "company:acme-2"
 
 
+async def test_scan_as_of_excludes_merges_resolved_later() -> None:
+    store = NetworkxStore()
+    for entity_id in ("company:acme-1", "company:acme-2", "company:acme-3"):
+        await store.upsert_entity(_entity(entity_id, entity_type="Company", canonical_name="Acme"))
+
+    for merged_id, resolved_at in (
+        ("company:acme-2", datetime(2026, 1, 3, tzinfo=UTC)),
+        ("company:acme-3", datetime(2027, 1, 1, tzinfo=UTC)),
+    ):
+        await store.record_merge(
+            MergeRecord(
+                canonical_id="company:acme-1",
+                merged_ids=[merged_id],
+                resolver_id="exact-match",
+                resolver_version="1.0",
+                resolved_at=resolved_at,
+            )
+        )
+
+    historical = await store.scan(as_of=datetime(2026, 6, 1, tzinfo=UTC))
+    current = await store.scan()
+
+    assert [record.merged_ids for record in historical.merges] == [["company:acme-2"]]
+    assert sorted(record.merged_ids[0] for record in current.merges) == [
+        "company:acme-2",
+        "company:acme-3",
+    ]
+
+
 async def test_from_scan_preserves_minimal_raw_entity() -> None:
     original = GraphScan(
         entities=[
