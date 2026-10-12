@@ -14,6 +14,105 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-12 - graph export and Bloom visualization
+
+Operators can now see the graph Ontos built: neutral export formats
+(GraphML, Cypher, JSON-LD, SVG), a direct push to a separate Neo4j
+visualization database with a ready-made Bloom perspective, and
+snapshot serving from those text formats. Exports are ACL-filtered by
+default and every export attempt writes an Article-12 record. The CLI
+also gains an invocation-wide `--storage <url>` override.
+
+### Upgrade notes
+- **Custom `GraphStore` implementations must add two methods:**
+  `scan(...)` (backend-neutral export snapshot, ACL-filtered at the
+  store boundary) and `entities_for_source(...)` (write-path lookup used
+  by ingest). The bundled NetworkX and Neo4j stores implement both.
+- The default dev audit DB URL is now
+  `sqlite+aiosqlite:///./audit-logs/audit.sqlite` (was
+  `sqlite+pysqlite://…`, which the async emitter rejected).
+  `aiosqlite` moved from the `dev` extra to a runtime dependency, and
+  `sqlalchemy` is now `sqlalchemy[asyncio]` (see Fixed).
+- Neo4j stores get a new `fact_source_idx` relationship index, created
+  idempotently on startup.
+
+### Added — graph export + Neo4j Bloom (#32, #56)
+- `ontos export {neo4j,graphml,svg,json-ld}`. Entities map to nodes and
+  facts to edges, keeping `t_valid` / `t_invalid` / `superseded_by` /
+  `acl_ref` / confidence / source and extractor provenance plus the
+  ontology id/version. Resolver history is exported as `MERGED_WITH`.
+- `ontos export neo4j` writes idempotent `MERGE`-based Cypher
+  (`cypher.txt` by default). `--push bolt://… --user … --password …
+  --database …` writes straight to a **separate** visualization
+  database, with an index per label and labels / relationship types
+  derived from the ontology and sanitized. The push refuses to target
+  the operational Ontos database.
+- Views: `--as-of`, `--include-closed`, `--entity ID --hops N`.
+- **ACL-aware:** deny-by-default; `--acting-on-behalf-of` resolves the
+  caller's `view` grants before the scan. `--include-acl-mask` exports
+  across ACL boundaries with stamps preserved and requires the new
+  `audit_exporter` relation (`ontos.authz.AUDIT_EXPORTER`;
+  `InMemoryAuthz(audit_roles=…)`).
+- **Article-12 on every export:** ordinary exports, privileged
+  exports (`audit_exporter=allow`) and denied privileged attempts
+  (`deny`, zero facts recorded) each emit an audit record.
+- `ontos serve --snapshot` now loads `.jsonld`, `.graphml` and Cypher
+  (`.cypher` / `.txt`) snapshots in addition to `.pkl`. The text formats
+  are the safe choice for untrusted snapshots, since pickle is not.
+- `scripts/bloom-perspective.json`: Bloom perspective for the starter,
+  fintech and pharma ontologies (27 node categories, 46 relationship
+  types, `canonical_name` → `id` captions, `predicate` edge captions,
+  saved views for public / ACL-scoped / active / closed facts).
+  Setup and the operational vs visualization schema split are in
+  `docs/visualization.md`.
+
+### Added — `--storage <url>` CLI override (#37, #57)
+- Top-level `ontos --storage <url>` sets graph storage for one
+  invocation without touching env vars: `networkx://`,
+  `networkx:///path.pkl`, `neo4j://host:port/db`, `neo4j+ssc://…`,
+  `bolt+s://…`. `--storage-password-env VAR` reads the Neo4j password
+  from an env var. Embedding it in the URL works but is discouraged.
+- Applies to `serve`, `ingest`, `query` and `export` (#62).
+  `--storage` with `--storage-path` is rejected; `serve --snapshot`
+  rejects live-storage options.
+- Neo4j connection settings now live on `RuntimeConfig`, and
+  `build_store()` reads them from there instead of `os.environ`.
+  Passwords are redacted from config reprs, CLI errors, logs and
+  Article-12 payloads.
+
+### Changed — ingest and extraction
+- Re-ingesting the same source reuses its previous raw entity ids when
+  `(type, canonical_name)` matches exactly one prior entity, so
+  repeated ingests don't create duplicate nodes. An unsafe id
+  collision skips the document under `skip_and_log` and raises under
+  `fail_fast`.
+- `LlmExtractor` strips type decoration (`Person:Alice`,
+  `Alice (Person)`) from `canonical_name` and rejects a response that
+  maps one raw id to two different identities.
+- The extraction prompt now includes relation descriptions and stricter
+  direction and naming rules. This can shift extraction output compared
+  with 0.5.0.
+- Supersession: an exact same-source re-assertion of a fact is a no-op
+  for every cardinality (previously only singular relations).
+
+### Fixed
+- **Audit emitter on Apple Silicon (#58, #59):** `sqlalchemy` only
+  installed `greenlet` for some `platform_machine` values, excluding
+  macOS `arm64`, so every async audit write (and therefore every
+  `ontos export`) failed there. Now depends on `sqlalchemy[asyncio]`.
+  CI gains a `macos-14` (arm64) unit + compliance job.
+- **`as_of` without a UTC offset (#60, #61)** (e.g. `2026-06-01`) is
+  now interpreted as UTC across `ontos export --as-of` and the MCP
+  `search` / `traverse` / `explain` tools. Previously it crashed the
+  NetworkX store, matched nothing on Neo4j, and on the MCP tools failed
+  before the audit record was written.
+- **`--as-of` exports (#60, #61)** no longer include merge records
+  resolved after the requested time.
+- **`ontos --storage … export` (#62, #63)** used to silently ignore
+  `--storage` and export the default dev store. The `--push` guard
+  now checks the resolved config (env or `--storage`) and compares
+  `host:port`, so `neo4j://` vs `bolt://` can't get past it.
+
 ## [0.5.0] - 2026-10-07 - sovereignty signals and offline operation
 
 Three deliverables that tighten the sovereign posture (BRIDGE
