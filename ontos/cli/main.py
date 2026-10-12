@@ -23,6 +23,7 @@ import json
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
+from urllib.parse import urlsplit
 
 import typer
 
@@ -702,8 +703,17 @@ def _scan_for_export(
     acting_on_behalf_of: str | None = None,
     include_acl_mask: bool = False,
     export_format: str = "graph",
+    storage_url: str | None = None,
+    storage_password_env: str | None = None,
+    push_target: tuple[str, str] | None = None,
 ) -> GraphScan:
-    """Load the configured store, scan it, audit if required, and close safely."""
+    """Load the configured store, scan it, audit if required, and close safely.
+
+    ``storage_url`` / ``storage_password_env`` carry the invocation-wide
+    ``ontos --storage`` override. ``push_target`` is the ``(uri, database)``
+    an ``export neo4j --push`` will write to; it is refused when it names
+    the operational store being read.
+    """
     import time
 
     from ontos.authz import AUDIT_EXPORTER, VIEW
@@ -730,9 +740,18 @@ def _scan_for_export(
     if entity is None and hops is not None:
         raise typer.BadParameter("--hops requires --entity.")
 
-    resolved_path = _resolve_storage_path(storage_path)
-    cfg = _build_cli_runtime_config(resolved_path)
-    _warn_if_ephemeral(resolved_path, cfg.storage_backend)
+    if storage_url is not None and storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    resolved_path = None if storage_url is not None else _resolve_storage_path(storage_path)
+    cfg = _build_cli_runtime_config(
+        resolved_path,
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
+    )
+    _warn_if_ephemeral(cfg.storage_path, cfg.storage_backend)
+    if push_target is not None:
+        _reject_operational_push_target(cfg, *push_target)
     _default_dev_signing_key_if_missing()
     authz = build_authz(cfg) if acting_on_behalf_of is not None else None
     store = build_store(cfg)
@@ -806,6 +825,37 @@ def _scan_for_export(
     return asyncio.run(_run())
 
 
+def _cli_storage_override(ctx: typer.Context) -> tuple[str | None, str | None]:
+    """Return the invocation-wide ``(--storage, --storage-password-env)`` values."""
+    cli_options = ctx.obj if isinstance(ctx.obj, dict) else {}
+    return cli_options.get("storage_url"), cli_options.get("storage_password_env")
+
+
+def _neo4j_endpoint(uri: str) -> tuple[str, int]:
+    # neo4j://, bolt://, neo4j+s:// … all reach the same server for a given
+    # host:port, so the scheme must not let a push slip past the guard.
+    parsed = urlsplit(uri)
+    return (parsed.hostname or "").lower(), parsed.port or 7687
+
+
+def _reject_operational_push_target(
+    cfg: RuntimeConfig,
+    push_uri: str,
+    push_database: str,
+) -> None:
+    """Refuse an ``export neo4j --push`` aimed at the operational Ontos database."""
+    if cfg.storage_backend != "neo4j" or cfg.neo4j_uri is None:
+        return
+    if (
+        _neo4j_endpoint(push_uri) == _neo4j_endpoint(cfg.neo4j_uri)
+        and push_database == cfg.neo4j_database
+    ):
+        raise typer.BadParameter(
+            "--push must target a separate Neo4j visualization database, "
+            "not the operational Ontos database."
+        )
+
+
 def _filter_export_neighborhood(
     scan: GraphScan,
     *,
@@ -867,6 +917,7 @@ def _filter_export_neighborhood(
 
 @export_app.command("neo4j")
 def export_neo4j(
+    ctx: typer.Context,
     output: Annotated[
         Path,
         typer.Option(
@@ -968,24 +1019,10 @@ def export_neo4j(
     """Export visualization-oriented Neo4j Cypher."""
     from ontos.exporters.cypher import push_neo4j, render_cypher
 
-    if push is not None:
-        if password is None:
-            raise typer.BadParameter("--password is required with --push.")
+    if push is not None and password is None:
+        raise typer.BadParameter("--password is required with --push.")
 
-        if os.environ.get("ONTOS_STORAGE_BACKEND", "").lower() == "neo4j":
-            operational_uri = os.environ.get("NEO4J_URI")
-            operational_database = os.environ.get("NEO4J_DATABASE", "neo4j")
-
-            if (
-                operational_uri is not None
-                and push.rstrip("/") == operational_uri.rstrip("/")
-                and database == operational_database
-            ):
-                raise typer.BadParameter(
-                    "--push must target a separate Neo4j visualization database, "
-                    "not the operational Ontos database."
-                )
-
+    storage_url, storage_password_env = _cli_storage_override(ctx)
     scan = _scan_for_export(
         storage_path,
         as_of=as_of,
@@ -995,6 +1032,9 @@ def export_neo4j(
         acting_on_behalf_of=acting_on_behalf_of,
         include_acl_mask=include_acl_mask,
         export_format="neo4j",
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
+        push_target=(push, database) if push is not None else None,
     )
 
     if push is not None:
@@ -1022,6 +1062,7 @@ def export_neo4j(
 
 @export_app.command("graphml")
 def export_graphml(
+    ctx: typer.Context,
     output: Annotated[
         Path,
         typer.Option(
@@ -1095,6 +1136,8 @@ def export_graphml(
     """Export GraphML for graph visualization tools."""
     from ontos.exporters.graphml import render_graphml
 
+    storage_url, storage_password_env = _cli_storage_override(ctx)
+
     scan = _scan_for_export(
         storage_path,
         as_of=as_of,
@@ -1104,6 +1147,8 @@ def export_graphml(
         acting_on_behalf_of=acting_on_behalf_of,
         include_acl_mask=include_acl_mask,
         export_format="graphml",
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
     )
     output.write_text(render_graphml(scan), encoding="utf-8")
     typer.echo(f"wrote GraphML snapshot to {output}")
@@ -1111,6 +1156,7 @@ def export_graphml(
 
 @export_app.command("svg")
 def export_svg(
+    ctx: typer.Context,
     output: Annotated[
         Path,
         typer.Option(
@@ -1184,6 +1230,8 @@ def export_svg(
     """Export a static SVG graph visualization."""
     from ontos.exporters.svg import render_svg
 
+    storage_url, storage_password_env = _cli_storage_override(ctx)
+
     scan = _scan_for_export(
         storage_path,
         as_of=as_of,
@@ -1193,6 +1241,8 @@ def export_svg(
         acting_on_behalf_of=acting_on_behalf_of,
         include_acl_mask=include_acl_mask,
         export_format="svg",
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
     )
     output.write_text(render_svg(scan), encoding="utf-8")
     typer.echo(f"wrote SVG snapshot to {output}")
@@ -1200,6 +1250,7 @@ def export_svg(
 
 @export_app.command("json-ld")
 def export_json_ld(
+    ctx: typer.Context,
     output: Annotated[
         Path,
         typer.Option(
@@ -1273,6 +1324,8 @@ def export_json_ld(
     """Export JSON-LD graph data."""
     from ontos.exporters.jsonld import render_jsonld
 
+    storage_url, storage_password_env = _cli_storage_override(ctx)
+
     scan = _scan_for_export(
         storage_path,
         as_of=as_of,
@@ -1282,6 +1335,8 @@ def export_json_ld(
         acting_on_behalf_of=acting_on_behalf_of,
         include_acl_mask=include_acl_mask,
         export_format="json-ld",
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
     )
     output.write_text(render_jsonld(scan), encoding="utf-8")
     typer.echo(f"wrote JSON-LD snapshot to {output}")
