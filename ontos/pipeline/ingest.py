@@ -71,16 +71,16 @@ def _reconcile_same_source_entity_ids(
     entity share the same (type, canonical_name) key.
     """
     previous_by_key: dict[tuple[str, str], list[StoredEntity]] = {}
-    for entity in previous:
-        key = _entity_identity_key(entity.type, entity.canonical_name)
+    for stored_entity in previous:
+        key = _entity_identity_key(stored_entity.type, stored_entity.canonical_name)
         if key is not None:
-            previous_by_key.setdefault(key, []).append(entity)
+            previous_by_key.setdefault(key, []).append(stored_entity)
 
     current_by_key: dict[tuple[str, str], list[Entity]] = {}
-    for entity in extraction.entities:
-        key = _entity_identity_key(entity.type, entity.canonical_name)
+    for current_entity in extraction.entities:
+        key = _entity_identity_key(current_entity.type, current_entity.canonical_name)
         if key is not None:
-            current_by_key.setdefault(key, []).append(entity)
+            current_by_key.setdefault(key, []).append(current_entity)
 
     reused_targets: set[str] = set()
     id_map: dict[str, str] = {}

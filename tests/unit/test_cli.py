@@ -19,6 +19,18 @@ STARTER_PATH = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_audit_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "ONTOS_AUDIT_DB_URL",
+        f"sqlite+aiosqlite:///{tmp_path / 'audit.sqlite'}",
+    )
+    monkeypatch.setenv("ONTOS_AUDIT_SIGNING_KEY", "test-signing-key-not-for-prod")
+
+
 def test_help_lists_all_top_level_commands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0

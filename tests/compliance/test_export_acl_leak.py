@@ -18,6 +18,41 @@ from ontos.storage.networkx_store import NetworkxStore
 runner = CliRunner(env={"COLUMNS": "200", "TERM": "dumb", "NO_COLOR": "1"})
 
 
+@pytest.fixture(autouse=True)
+def _isolated_audit_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "ONTOS_AUDIT_DB_URL",
+        f"sqlite+aiosqlite:///{tmp_path / 'audit.sqlite'}",
+    )
+    monkeypatch.setenv("ONTOS_AUDIT_SIGNING_KEY", "test-signing-key-not-for-prod")
+
+
+def _capture_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[dict[str, object]]:
+    audit_calls: list[dict[str, object]] = []
+
+    class FakeAuditEmitter:
+        async def initialize(self) -> None:
+            return None
+
+        async def emit_async(self, **kwargs: object) -> None:
+            audit_calls.append(dict(kwargs))
+
+        async def close(self) -> None:
+            return None
+
+    fake_audit = FakeAuditEmitter()
+    monkeypatch.setattr(
+        "ontos.audit.postgres.PostgresAuditEmitter.from_url",
+        lambda *args, **kwargs: fake_audit,
+    )
+    return audit_calls
+
+
 def _fact(
     subject: str,
     predicate: str,
@@ -67,11 +102,15 @@ def _write_store(path: Path) -> tuple[Fact, Fact]:
     return public, restricted
 
 
-def test_default_export_drops_restricted_fact(tmp_path: Path) -> None:
+def test_default_export_drops_restricted_fact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store_path = tmp_path / "store.pkl"
     output_path = tmp_path / "default.graphml"
 
     public, restricted = _write_store(store_path)
+    audit_calls = _capture_audit(monkeypatch)
 
     result = runner.invoke(
         app,
@@ -91,6 +130,25 @@ def test_default_export_drops_restricted_fact(tmp_path: Path) -> None:
     assert str(public.id) in exported
     assert str(restricted.id) not in exported
 
+    assert len(audit_calls) == 1
+    audit = audit_calls[0]
+    assert audit["agent_identity"] == "ontos-cli"
+    assert audit["acting_on_behalf_of"] is None
+    assert audit["tool_invoked"] == "ontos.export.graphml"
+
+    tool_arguments = audit["tool_arguments"]
+    assert isinstance(tool_arguments, dict)
+    assert tool_arguments["include_acl_mask"] is False
+    assert tool_arguments["fact_count"] == 1
+    assert tool_arguments["fact_count_by_acl"] == {"public": 1}
+
+    assert audit["policy_decisions"] == []
+
+    result_fact_ids = audit["result_fact_ids"]
+    assert isinstance(result_fact_ids, list)
+    assert result_fact_ids == [str(public.id)]
+    assert str(restricted.id) not in result_fact_ids
+
 
 def test_acl_mask_without_audit_role_errors(
     tmp_path: Path,
@@ -106,6 +164,7 @@ def test_acl_mask_without_audit_role_errors(
         "build_authz",
         lambda _cfg: authz,
     )
+    audit_calls = _capture_audit(monkeypatch)
 
     result = runner.invoke(
         app,
@@ -126,6 +185,27 @@ def test_acl_mask_without_audit_role_errors(
     output = (result.stdout + result.stderr).lower()
     assert "audit_exporter" in output
     assert not output_path.exists()
+
+    assert len(audit_calls) == 1
+    audit = audit_calls[0]
+    assert audit["acting_on_behalf_of"] == "user:bob"
+    assert audit["agent_identity"] == "ontos-cli"
+    assert audit["tool_invoked"] == "ontos.export.graphml"
+
+    tool_arguments = audit["tool_arguments"]
+    assert isinstance(tool_arguments, dict)
+    assert tool_arguments["include_acl_mask"] is True
+    assert tool_arguments["fact_count"] == 0
+    assert tool_arguments["fact_count_by_acl"] == {}
+
+    assert audit["policy_decisions"] == [
+        {
+            "relation": "audit_exporter",
+            "object": "export",
+            "decision": "deny",
+        }
+    ]
+    assert audit["result_fact_ids"] == []
 
 
 async def test_inmemory_audit_roles_grant_audit_exporter() -> None:

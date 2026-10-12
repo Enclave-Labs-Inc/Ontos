@@ -86,7 +86,6 @@ def _add_data(parent: ET.Element, key_id: str, value: object | None) -> None:
     data.text = str(value)
 
 
-
 def _data_values(
     element: ET.Element,
     key_names: dict[str, str],
@@ -150,10 +149,7 @@ def load_graphml(path: Path) -> GraphScan:
                 type=values.get("type"),
                 canonical_name=values.get("canonical_name"),
                 aliases=[str(alias) for alias in aliases_raw],
-                properties={
-                    str(key): str(value)
-                    for key, value in properties_raw.items()
-                },
+                properties={str(key): str(value) for key, value in properties_raw.items()},
                 provenance_source_id=values.get("provenance_source_id"),
                 provenance_extractor_id=values.get("provenance_extractor_id"),
                 acl_ref=values.get("acl_ref"),
@@ -211,14 +207,14 @@ def load_graphml(path: Path) -> GraphScan:
             resolver_version = values["resolver_version"]
             reason = values.get("reason", "")
 
-            key = (
+            merge_key = (
                 target,
                 resolver_id,
                 resolver_version,
                 resolved_at,
                 reason,
             )
-            merge_groups.setdefault(key, set()).add(source)
+            merge_groups.setdefault(merge_key, set()).add(source)
             continue
 
         raise ValueError(f"Unsupported GraphML edge kind: {kind!r}")
@@ -254,6 +250,7 @@ def load_graphml(path: Path) -> GraphScan:
             ),
         ),
     )
+
 
 def render_graphml(scan: GraphScan) -> str:
     """Render a deterministic GraphML document from a ``GraphScan``."""

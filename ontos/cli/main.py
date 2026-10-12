@@ -275,7 +275,6 @@ def _serve_snapshot(path: Path) -> None:
     )
 
     _default_dev_signing_key_if_missing()
-
     store, metadata = _load_snapshot(path)
     cfg = RuntimeConfig.from_env()
     server = build_server(cfg, store=store, snapshot_metadata=metadata)  # type: ignore[arg-type]
@@ -573,22 +572,41 @@ export_app = typer.Typer(help="Export graph snapshots for visualization.")
 app.add_typer(export_app, name="export")
 
 
-async def _emit_privileged_export_audit(
+async def _emit_export_audit(
     *,
     db_url: str,
     signing_key_env: str,
-    scan: GraphScan,
-    acting_on_behalf_of: str,
+    scan: GraphScan | None,
+    acting_on_behalf_of: str | None,
     export_format: str,
+    include_acl_mask: bool,
+    decision: str,
     latency_ms: float,
 ) -> None:
-    """Persist the required Article-12 record for an ACL-bypass export."""
+    """Persist an Article-12 record for every graph export attempt."""
     from collections import Counter
 
     from ontos.audit.postgres import PostgresAuditEmitter
 
+    facts = [] if scan is None else scan.facts
     fact_count_by_acl = Counter(
-        fact.acl_ref if fact.acl_ref is not None else "public" for fact in scan.facts
+        fact.acl_ref if fact.acl_ref is not None else "public" for fact in facts
+    )
+
+    query_text = f"ontos export {export_format}"
+    if include_acl_mask:
+        query_text += " --include-acl-mask"
+
+    policy_decisions = (
+        [
+            {
+                "relation": "audit_exporter",
+                "object": "export",
+                "decision": decision,
+            }
+        ]
+        if include_acl_mask
+        else []
     )
 
     emitter = PostgresAuditEmitter.from_url(
@@ -602,24 +620,18 @@ async def _emit_privileged_export_audit(
             query_id=None,
             agent_identity="ontos-cli",
             acting_on_behalf_of=acting_on_behalf_of,
-            query_text=f"ontos export {export_format} --include-acl-mask",
+            query_text=query_text,
             tool_invoked=f"ontos.export.{export_format}",
             tool_arguments={
-                "include_acl_mask": True,
-                "fact_count": len(scan.facts),
+                "include_acl_mask": include_acl_mask,
+                "fact_count": len(facts),
                 "fact_count_by_acl": dict(sorted(fact_count_by_acl.items())),
                 "export_format": export_format,
             },
-            result_fact_ids=[str(fact.id) for fact in scan.facts],
+            result_fact_ids=[str(fact.id) for fact in facts],
             latency_ms=latency_ms,
             model_versions={},
-            policy_decisions=[
-                {
-                    "relation": "audit_exporter",
-                    "object": "export",
-                    "decision": "allow",
-                }
-            ],
+            policy_decisions=policy_decisions,
         )
     finally:
         await emitter.close()
@@ -640,7 +652,11 @@ def _scan_for_export(
     import time
 
     from ontos.authz import AUDIT_EXPORTER, VIEW
-    from ontos.runtime.server import build_authz, build_store
+    from ontos.runtime.server import (
+        _default_dev_signing_key_if_missing,
+        build_authz,
+        build_store,
+    )
 
     started_at = time.perf_counter()
 
@@ -661,6 +677,7 @@ def _scan_for_export(
     resolved_path = _resolve_storage_path(storage_path)
     cfg = _build_cli_runtime_config(resolved_path)
     _warn_if_ephemeral(resolved_path, cfg.storage_backend)
+    _default_dev_signing_key_if_missing()
     authz = build_authz(cfg) if acting_on_behalf_of is not None else None
     store = build_store(cfg)
 
@@ -680,6 +697,16 @@ def _scan_for_export(
                     "export",
                 )
                 if not authorized:
+                    await _emit_export_audit(
+                        db_url=cfg.audit_db_url,
+                        signing_key_env=cfg.audit_signing_key_env,
+                        scan=None,
+                        acting_on_behalf_of=acting_on_behalf_of,
+                        export_format=export_format,
+                        include_acl_mask=True,
+                        decision="deny",
+                        latency_ms=(time.perf_counter() - started_at) * 1000,
+                    )
                     raise typer.BadParameter("--include-acl-mask requires the audit_exporter role.")
 
             allowed_acls: list[str] | None = None
@@ -705,16 +732,16 @@ def _scan_for_export(
                     hops=neighborhood_hops,
                 )
 
-            if include_acl_mask:
-                assert acting_on_behalf_of is not None
-                await _emit_privileged_export_audit(
-                    db_url=cfg.audit_db_url,
-                    signing_key_env=cfg.audit_signing_key_env,
-                    scan=scan,
-                    acting_on_behalf_of=acting_on_behalf_of,
-                    export_format=export_format,
-                    latency_ms=(time.perf_counter() - started_at) * 1000,
-                )
+            await _emit_export_audit(
+                db_url=cfg.audit_db_url,
+                signing_key_env=cfg.audit_signing_key_env,
+                scan=scan,
+                acting_on_behalf_of=acting_on_behalf_of,
+                export_format=export_format,
+                include_acl_mask=include_acl_mask,
+                decision="allow",
+                latency_ms=(time.perf_counter() - started_at) * 1000,
+            )
 
             return scan
         finally:
@@ -914,6 +941,7 @@ def export_neo4j(
     if push is not None:
         from neo4j import AsyncGraphDatabase
 
+        assert password is not None
         driver = AsyncGraphDatabase.driver(
             push,
             auth=(user, password),

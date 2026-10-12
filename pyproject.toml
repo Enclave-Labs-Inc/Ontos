@@ -16,6 +16,7 @@ dependencies = [
     "structlog>=24.1",
     "pyyaml>=6.0",
     "sqlalchemy>=2.0",
+    "aiosqlite>=0.20",
     "cryptography>=43.0",
     "httpx>=0.27",
     "typer>=0.12",
@@ -59,7 +60,6 @@ dev = [
     "pypdf>=4.0",
     "testcontainers[neo4j,postgres]>=4.8",
     "asyncpg>=0.30",
-    "aiosqlite>=0.20",
 ]
 
 [project.scripts]

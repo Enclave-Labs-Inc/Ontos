@@ -93,9 +93,7 @@ def _merge_nodes(scan: GraphScan) -> list[dict[str, object]]:
         for merged_id in record.merged_ids:
             edges.append((record.canonical_id, merged_id, record.resolver_id, record))
 
-    edges.sort(
-        key=lambda item: (item[0], item[1], item[2], item[3].resolved_at.isoformat())
-    )
+    edges.sort(key=lambda item: (item[0], item[1], item[2], item[3].resolved_at.isoformat()))
 
     nodes: list[dict[str, object]] = []
     for index, (canonical_id, merged_id, _resolver_id, record) in enumerate(edges):
@@ -115,11 +113,13 @@ def _merge_nodes(scan: GraphScan) -> list[dict[str, object]]:
     return nodes
 
 
-
 def _ref_id(value: object) -> str:
-    if not isinstance(value, dict) or not isinstance(value.get("@id"), str):
+    if not isinstance(value, dict):
         raise ValueError("JSON-LD reference must contain a string @id")
-    return value["@id"]
+    ref_id = value.get("@id")
+    if not isinstance(ref_id, str):
+        raise ValueError("JSON-LD reference must contain a string @id")
+    return ref_id
 
 
 def load_jsonld(path: Path) -> tuple[GraphScan, dict[str, str]]:
@@ -181,10 +181,7 @@ def load_jsonld(path: Path) -> tuple[GraphScan, dict[str, str]]:
                         else None
                     ),
                     aliases=[str(alias) for alias in aliases_raw],
-                    properties={
-                        str(key): str(value)
-                        for key, value in properties_raw.items()
-                    },
+                    properties={str(key): str(value) for key, value in properties_raw.items()},
                     provenance_source_id=(
                         str(item["provenanceSourceId"])
                         if item.get("provenanceSourceId") is not None
@@ -195,20 +192,14 @@ def load_jsonld(path: Path) -> tuple[GraphScan, dict[str, str]]:
                         if item.get("provenanceExtractorId") is not None
                         else None
                     ),
-                    acl_ref=(
-                        str(item["aclRef"])
-                        if item.get("aclRef") is not None
-                        else None
-                    ),
+                    acl_ref=(str(item["aclRef"]) if item.get("aclRef") is not None else None),
                 )
             )
             continue
 
         if item_type == "Fact":
             fact_id_raw = item.get("@id")
-            if not isinstance(fact_id_raw, str) or not fact_id_raw.startswith(
-                "urn:ontos:fact:"
-            ):
+            if not isinstance(fact_id_raw, str) or not fact_id_raw.startswith("urn:ontos:fact:"):
                 raise ValueError("Fact @id must use urn:ontos:fact:<uuid>")
 
             superseded_by: UUID | None = None
@@ -243,11 +234,7 @@ def load_jsonld(path: Path) -> tuple[GraphScan, dict[str, str]]:
                     ),
                     ingested_at=datetime.fromisoformat(str(item["ingestedAt"])),
                     superseded_by=superseded_by,
-                    acl_ref=(
-                        str(item["aclRef"])
-                        if item.get("aclRef") is not None
-                        else None
-                    ),
+                    acl_ref=(str(item["aclRef"]) if item.get("aclRef") is not None else None),
                 )
             )
             continue
@@ -272,7 +259,6 @@ def load_jsonld(path: Path) -> tuple[GraphScan, dict[str, str]]:
             )
             merge_groups.setdefault(key, set()).add(merged_id)
             continue
-
 
     merges = [
         MergeRecord(
@@ -308,6 +294,7 @@ def load_jsonld(path: Path) -> tuple[GraphScan, dict[str, str]]:
         ),
         manifest,
     )
+
 
 def render_jsonld(scan: GraphScan) -> str:
     """Render a deterministic JSON-LD document from a ``GraphScan``."""

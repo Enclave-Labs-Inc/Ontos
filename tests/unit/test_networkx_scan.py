@@ -274,7 +274,6 @@ async def test_scan_filters_merge_records_and_keeps_raw_ids() -> None:
     assert allowed.facts[0].object_id == "company:acme-2"
 
 
-
 async def test_from_scan_preserves_minimal_raw_entity() -> None:
     original = GraphScan(
         entities=[

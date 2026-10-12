@@ -158,7 +158,6 @@ def test_render_jsonld_manifest_is_empty_when_snapshot_has_no_facts() -> None:
     }
 
 
-
 def test_load_jsonld_round_trips_exported_snapshot(tmp_path) -> None:
     original = _scan()
     snapshot = tmp_path / "snapshot.jsonld"
@@ -171,7 +170,6 @@ def test_load_jsonld_round_trips_exported_snapshot(tmp_path) -> None:
         "ontologyId": "ontos.starter",
         "ontologyVersion": "0.4",
     }
-
 
 
 def test_jsonld_round_trip_preserves_unknown_entity_type(tmp_path) -> None:

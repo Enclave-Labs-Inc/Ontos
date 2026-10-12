@@ -831,9 +831,7 @@ async def test_scan_denies_restricted_entities_and_endpoint_facts_by_default(
 
     # Public fact, restricted endpoint: the fact must still be dropped
     # because returning its raw endpoint id would leak restricted existence.
-    await store.add_fact(
-        _make_fact("person:alice", "works_at", "company:public")
-    )
+    await store.add_fact(_make_fact("person:alice", "works_at", "company:public"))
 
     scan = await store.scan()
 
@@ -951,7 +949,6 @@ async def test_scan_filters_merge_records_and_keeps_raw_ids(
     assert allowed.facts[0].object_id == "company:acme-2"
 
 
-
 async def test_push_neo4j_visualization_is_idempotent(store: Neo4jStore) -> None:
     from ontos.exporters.cypher import push_neo4j
     from ontos.resolver.base import MergeRecord
@@ -1009,9 +1006,7 @@ async def test_push_neo4j_visualization_is_idempotent(store: Neo4jStore) -> None
         )
         fact_record = await fact_result.single()
 
-        merge_result = await session.run(
-            "MATCH ()-[r:MERGED_WITH]->() RETURN count(r) AS count"
-        )
+        merge_result = await session.run("MATCH ()-[r:MERGED_WITH]->() RETURN count(r) AS count")
         merge_record = await merge_result.single()
 
     assert node_record is not None

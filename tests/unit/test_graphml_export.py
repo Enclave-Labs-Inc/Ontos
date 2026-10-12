@@ -82,8 +82,7 @@ def _data_map(element: ET.Element, root: ET.Element, kind: str) -> dict[str, str
         if key.attrib["for"] == kind
     }
     return {
-        keys[data.attrib["key"]]: data.text or ""
-        for data in element.findall("g:data", _GRAPHML_NS)
+        keys[data.attrib["key"]]: data.text or "" for data in element.findall("g:data", _GRAPHML_NS)
     }
 
 
@@ -154,7 +153,6 @@ def test_render_graphml_is_deterministic_for_input_order() -> None:
     )
 
     assert render_graphml(scan) == render_graphml(reversed_scan)
-
 
 
 def test_load_graphml_round_trips_exported_snapshot(tmp_path: Path) -> None:

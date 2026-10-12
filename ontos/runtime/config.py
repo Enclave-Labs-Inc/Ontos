@@ -35,7 +35,7 @@ class RuntimeConfig:
             storage_backend=os.getenv("ONTOS_STORAGE_BACKEND", "networkx"),
             storage_path=storage_path,
             audit_db_url=os.getenv(
-                "ONTOS_AUDIT_DB_URL", "sqlite+pysqlite:///./audit-logs/audit.sqlite"
+                "ONTOS_AUDIT_DB_URL", "sqlite+aiosqlite:///./audit-logs/audit.sqlite"
             ),
             audit_signing_key_env=os.getenv(
                 "ONTOS_AUDIT_SIGNING_KEY_ENV", "ONTOS_AUDIT_SIGNING_KEY"

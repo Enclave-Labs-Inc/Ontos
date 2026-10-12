@@ -509,7 +509,7 @@ class NetworkxStore:
             if allowed_set is not None:
                 return acl in allowed_set
             if acl_subject is not None:
-                return acl == acl_subject
+                return bool(acl == acl_subject)
             return False
 
         visible_entity_ids = {

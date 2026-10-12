@@ -302,11 +302,18 @@ def load_cypher(path: Path) -> GraphScan:
             subject = _parse_literal(fact_match.group("subject"))
             object_id = _parse_literal(fact_match.group("object"))
             fact_id = _parse_literal(fact_merge.group("fact_id"))
-            if not all(isinstance(value, str) for value in (subject, object_id, fact_id)):
+            if (
+                not isinstance(subject, str)
+                or not isinstance(object_id, str)
+                or not isinstance(fact_id, str)
+            ):
                 raise ValueError("Ontos Cypher fact ids must be strings")
 
             props = _parse_props(set_line.removeprefix("SET r += ")[:-1])
             superseded_raw = _optional_str(props, "superseded_by")
+            confidence_score = props.get("confidence_score")
+            if not isinstance(confidence_score, (str, int, float)):
+                raise ValueError("Ontos Cypher property 'confidence_score' must be numeric")
 
             facts.append(
                 Fact(
@@ -321,7 +328,7 @@ def load_cypher(path: Path) -> GraphScan:
                         ontology_id=_required_str(props, "ontology_id"),
                         ontology_version=_required_str(props, "ontology_version"),
                         confidence=Confidence(_required_str(props, "confidence")),
-                        confidence_score=float(props["confidence_score"]),
+                        confidence_score=float(confidence_score),
                     ),
                     t_valid=datetime.fromisoformat(_required_str(props, "t_valid")),
                     t_invalid=(
@@ -352,7 +359,11 @@ def load_cypher(path: Path) -> GraphScan:
             merged_id = _parse_literal(merge_match.group("merged"))
             canonical_id = _parse_literal(merge_match.group("canonical"))
             resolver_id = _parse_literal(merge_edge.group("resolver_id"))
-            if not all(isinstance(value, str) for value in (merged_id, canonical_id, resolver_id)):
+            if (
+                not isinstance(merged_id, str)
+                or not isinstance(canonical_id, str)
+                or not isinstance(resolver_id, str)
+            ):
                 raise ValueError("Ontos Cypher merge ids must be strings")
 
             props = _parse_props(set_line.removeprefix("SET r += ")[:-1])
@@ -457,7 +468,7 @@ async def push_neo4j(
             object_label = labels_by_id.get(fact.object_id, "Entity")
             rel_type = _relationship_type(fact.predicate)
 
-            props: dict[str, object] = {
+            props = {
                 "predicate": fact.predicate,
                 "source_id": fact.provenance.source_id,
                 "extractor_id": fact.provenance.extractor_id,
