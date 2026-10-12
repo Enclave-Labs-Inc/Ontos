@@ -65,3 +65,31 @@ jobs:
         # `--dry-run=client` skips the API server; we just want to
         # prove every template compiles into valid YAML.
         run: helm template ontos deploy/helm/ontos > /dev/null
+
+  test-macos-arm64:
+    # Apple Silicon reports platform_machine == "arm64", which several
+    # wheels' environment markers miss (e.g. greenlet via SQLAlchemy, #58).
+    # Linux-only CI stayed green while every export broke on M-series Macs.
+    # No Docker on macOS runners, so integration + Helm stay on ubuntu.
+    name: test (macOS arm64)
+    runs-on: macos-14
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python (from .python-version)
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Pytest (unit + compliance)
+        run: uv run pytest -q -m "not integration and not benchmark"
