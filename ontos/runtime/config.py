@@ -156,7 +156,7 @@ class RuntimeConfig:
             neo4j_password=os.getenv("NEO4J_PASSWORD"),
             neo4j_database=os.getenv("NEO4J_DATABASE", "neo4j"),
             audit_db_url=os.getenv(
-                "ONTOS_AUDIT_DB_URL", "sqlite+pysqlite:///./audit-logs/audit.sqlite"
+                "ONTOS_AUDIT_DB_URL", "sqlite+aiosqlite:///./audit-logs/audit.sqlite"
             ),
             audit_signing_key_env=os.getenv(
                 "ONTOS_AUDIT_SIGNING_KEY_ENV", "ONTOS_AUDIT_SIGNING_KEY"

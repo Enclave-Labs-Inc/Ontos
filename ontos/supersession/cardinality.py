@@ -53,9 +53,11 @@ class CardinalitySupersessionPolicy:
         relation = ontology.relation_type(new_fact.predicate)
         if relation is None:
             return SupersessionDecision()
-        if relation.cardinality not in _SINGULAR_OBJECT_CARDINALITIES:
-            return SupersessionDecision()
 
+        # Re-affirmation is cardinality-independent: an exact same-source
+        # re-ingest of the same (subject, predicate, object) is a no-op
+        # whether the relation is singular or many-to-many.
+        #
         # `facts_for_entity` returns both in-edges and out-edges;
         # filter in Python to keep same-subject, same-predicate, same-ACL,
         # still-alive candidates. ACL arguments narrow the read at the
@@ -107,6 +109,11 @@ class CardinalitySupersessionPolicy:
                     ),
                 ),
             )
+
+        # Cardinality only governs conflicting-value supersession. For
+        # non-singular relations, distinct facts stack normally.
+        if relation.cardinality not in _SINGULAR_OBJECT_CARDINALITIES:
+            return SupersessionDecision()
 
         # Backfill / out-of-order: new fact's t_valid precedes an existing
         # active candidate's. Write the new fact pre-closed by the earliest

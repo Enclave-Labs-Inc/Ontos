@@ -18,6 +18,10 @@ from typing import Protocol, runtime_checkable
 # alternative spellings.
 VIEW: str = "view"
 
+# Dedicated privileged relation for compliance/audit graph exports.
+# This is intentionally separate from ordinary VIEW authorization.
+AUDIT_EXPORTER: str = "audit_exporter"
+
 
 @runtime_checkable
 class AuthzBackend(Protocol):

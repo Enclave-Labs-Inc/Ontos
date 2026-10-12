@@ -24,12 +24,13 @@ from enum import StrEnum
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
-from ontos.extraction import ExtractionError, ExtractionInput, Extractor
+from ontos.extraction import ExtractionError, ExtractionInput, ExtractionResult, Extractor
 from ontos.ingest import Connector
 from ontos.ontology import Ontology
 from ontos.resolver import Resolver
-from ontos.runtime.models import Fact
+from ontos.runtime.models import Entity, Fact
 from ontos.storage.base import CrossAclUpsertError, GraphStore
+from ontos.storage.models import StoredEntity
 from ontos.supersession import (
     CardinalitySupersessionPolicy,
     SupersessionPolicy,
@@ -37,6 +38,140 @@ from ontos.supersession import (
 )
 
 log = structlog.get_logger()
+
+
+class _SameSourceIdentityConflictError(RuntimeError):
+    """Unsafe raw-ID reuse detected during same-source reconciliation."""
+
+
+def _entity_identity_key(
+    entity_type: str | None,
+    canonical_name: str | None,
+) -> tuple[str, str] | None:
+    """Conservative identity key for same-source re-ingest reconciliation."""
+    if not entity_type or not canonical_name:
+        return None
+
+    entity_type = entity_type.strip()
+    canonical_name = canonical_name.strip()
+    if not entity_type or not canonical_name:
+        return None
+
+    return entity_type.casefold(), canonical_name.casefold()
+
+
+def _reconcile_same_source_entity_ids(
+    extraction: ExtractionResult,
+    previous: list[StoredEntity],
+) -> ExtractionResult:
+    """Reuse prior raw IDs for unambiguous entities from the same source.
+
+    This does not perform cross-source entity resolution. A raw ID is reused
+    only when exactly one previous entity and exactly one newly extracted
+    entity share the same (type, canonical_name) key.
+    """
+    previous_by_key: dict[tuple[str, str], list[StoredEntity]] = {}
+    for stored_entity in previous:
+        key = _entity_identity_key(stored_entity.type, stored_entity.canonical_name)
+        if key is not None:
+            previous_by_key.setdefault(key, []).append(stored_entity)
+
+    current_by_key: dict[tuple[str, str], list[Entity]] = {}
+    for current_entity in extraction.entities:
+        key = _entity_identity_key(current_entity.type, current_entity.canonical_name)
+        if key is not None:
+            current_by_key.setdefault(key, []).append(current_entity)
+
+    reused_targets: set[str] = set()
+    id_map: dict[str, str] = {}
+
+    for key, current_entities in current_by_key.items():
+        previous_entities = previous_by_key.get(key, [])
+
+        # Ambiguous namesakes or duplicate candidates: do nothing.
+        if len(current_entities) != 1 or len(previous_entities) != 1:
+            continue
+
+        current = current_entities[0]
+        previous_entity = previous_entities[0]
+
+        if current.id == previous_entity.id:
+            continue
+
+        if previous_entity.id in reused_targets:
+            continue
+
+        id_map[current.id] = previous_entity.id
+        reused_targets.add(previous_entity.id)
+
+    if not id_map:
+        return extraction
+
+    # Apply the mapping conceptually to the whole extraction before
+    # changing anything. This deliberately allows permutations such as
+    # current 1->previous 2 and current 2->previous 1, while refusing a
+    # mapping that would collapse two current entities onto one raw id.
+    final_ids = [id_map.get(entity.id, entity.id) for entity in extraction.entities]
+
+    # Never fall back to the original extraction when reconciliation would
+    # collapse two current entities onto one raw ID. Doing so could let an
+    # LLM-reused ID overwrite the meaning of an already stored entity.
+    if len(final_ids) != len(set(final_ids)):
+        raise _SameSourceIdentityConflictError(
+            "same-source entity identity conflict; document skipped"
+        )
+
+    # A raw ID that already exists for this source may only retain the same
+    # semantic identity. This also catches the case where the model reuses an
+    # old ID for a completely different entity without creating a duplicate
+    # final ID.
+    previous_by_id = {entity.id: entity for entity in previous}
+
+    for current, final_id in zip(extraction.entities, final_ids, strict=True):
+        prior = previous_by_id.get(final_id)
+        if prior is None:
+            continue
+
+        current_key = _entity_identity_key(
+            current.type,
+            current.canonical_name,
+        )
+        prior_key = _entity_identity_key(
+            prior.type,
+            prior.canonical_name,
+        )
+
+        # Preserve migration compatibility for legacy nodes that have the
+        # same raw ID but are missing typed/canonical entity attributes.
+        if current.id == final_id and prior_key is None:
+            continue
+
+        if current_key != prior_key:
+            raise _SameSourceIdentityConflictError(
+                "same-source entity identity conflict; document skipped"
+            )
+
+    entities = [
+        entity.model_copy(update={"id": id_map.get(entity.id, entity.id)})
+        for entity in extraction.entities
+    ]
+
+    facts = [
+        fact.model_copy(
+            update={
+                "subject_id": id_map.get(fact.subject_id, fact.subject_id),
+                "object_id": id_map.get(fact.object_id, fact.object_id),
+            }
+        )
+        for fact in extraction.facts
+    ]
+
+    return extraction.model_copy(
+        update={
+            "entities": entities,
+            "facts": facts,
+        }
+    )
 
 
 class ErrorPolicy(StrEnum):
@@ -131,6 +266,34 @@ class IngestPipeline:
                 if self._error_policy is ErrorPolicy.FAIL_FAST:
                     raise
                 errors.append(IngestError(source_id=doc.source_id, reason=str(exc)))
+                continue
+
+            # Stabilize LLM-chosen raw IDs across re-ingests of the same
+            # source before ACL checks, entity writes, resolution, or
+            # supersession. Cross-source identity resolution remains the
+            # resolver's responsibility.
+            try:
+                previous_entities = await self._store.entities_for_source(
+                    doc.source_id,
+                    acl_ref=doc.acl_ref,
+                )
+                extraction = _reconcile_same_source_entity_ids(
+                    extraction,
+                    previous_entities,
+                )
+            except _SameSourceIdentityConflictError as exc:
+                if self._error_policy is ErrorPolicy.FAIL_FAST:
+                    raise
+                errors.append(
+                    IngestError(
+                        source_id=doc.source_id,
+                        reason=str(exc),
+                    )
+                )
+                log.warning(
+                    "same-source-entity-identity-conflict",
+                    source_id=doc.source_id,
+                )
                 continue
 
             documents_extracted += 1

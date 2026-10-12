@@ -32,6 +32,7 @@ import hmac
 import json
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -49,6 +50,7 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.schema import SchemaItem
 
@@ -160,6 +162,12 @@ class PostgresAuditEmitter:
                 "(postgresql+asyncpg:// or sqlite+aiosqlite://) — got: "
                 f"{db_url}"
             )
+        parsed_url = make_url(db_url)
+        if parsed_url.drivername == "sqlite+aiosqlite":
+            database = parsed_url.database
+            if database and database != ":memory:":
+                Path(database).expanduser().parent.mkdir(parents=True, exist_ok=True)
+
         engine = create_async_engine(db_url, future=True)
         return cls(engine=engine, signing_key=raw.encode("utf-8"), schema=schema)
 
@@ -232,10 +240,22 @@ class PostgresAuditEmitter:
                     {"key": self._lock_key},
                 )
             prev_hash_result = await conn.execute(
-                select(table.c.hash).order_by(table.c.ordinal.desc()).limit(1)
+                select(table.c.hash, table.c.ordinal).order_by(table.c.ordinal.desc()).limit(1)
             )
             prev_hash_row = prev_hash_result.first()
             prev_hash: str | None = prev_hash_row[0] if prev_hash_row else None
+
+            # PostgreSQL generates ordinal through Identity/BIGSERIAL semantics.
+            # SQLite does not auto-populate Identity on a non-primary-key column,
+            # so assign the next ordinal explicitly for the local/dev backend.
+            next_ordinal: int | None = None
+            if conn.dialect.name == "sqlite":
+                if prev_hash_row is None:
+                    next_ordinal = 1
+                else:
+                    previous_ordinal = prev_hash_row[1]
+                    assert isinstance(previous_ordinal, int)
+                    next_ordinal = previous_ordinal + 1
 
             payload = json.dumps(
                 {
@@ -246,15 +266,17 @@ class PostgresAuditEmitter:
             ).encode("utf-8")
             record_hash = hmac.new(self._key, payload, hashlib.sha256).hexdigest()
 
-            await conn.execute(
-                table.insert().values(
-                    query_id=str(qid),
-                    timestamp=datetime.now(UTC),
-                    article12={k.value: v for k, v in article12.items()},
-                    prev_hash=prev_hash,
-                    hash=record_hash,
-                )
-            )
+            values: dict[str, object] = {
+                "query_id": str(qid),
+                "timestamp": datetime.now(UTC),
+                "article12": {k.value: v for k, v in article12.items()},
+                "prev_hash": prev_hash,
+                "hash": record_hash,
+            }
+            if next_ordinal is not None:
+                values["ordinal"] = next_ordinal
+
+            await conn.execute(table.insert().values(**values))
         return AuditRecord(
             query_id=qid,
             timestamp=datetime.now(UTC),

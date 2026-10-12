@@ -84,6 +84,29 @@ class LLMBackend(Protocol):
     ) -> list[RawTriple]: ...
 
 
+def _normalize_canonical_name(entity_type: str, canonical_name: str) -> str:
+    """Remove LLM-added entity-type decoration from a display name.
+
+    Raw entity ids remain untouched. This only protects canonical_name,
+    whose contract is the human-readable entity name.
+    """
+    name = canonical_name.strip()
+
+    prefix = f"{entity_type}:"
+    if name.casefold().startswith(prefix.casefold()):
+        stripped = name[len(prefix) :].strip()
+        if stripped:
+            name = stripped
+
+    suffix = f"({entity_type})"
+    if name.casefold().endswith(suffix.casefold()):
+        stripped = name[: -len(suffix)].strip()
+        if stripped:
+            name = stripped
+
+    return name
+
+
 def _calibrate(raw: float) -> tuple[Confidence, float]:
     """Map raw LLM confidence to (Confidence label, calibrated score).
 
@@ -177,6 +200,7 @@ class LlmExtractor:
         warnings: list[str] = []
         entities: dict[str, Entity] = {}
         facts: list[Fact] = []
+        raw_identity_by_id: dict[str, tuple[str, str]] = {}
         now = datetime.now(UTC)
 
         for raw in raw_triples:
@@ -211,11 +235,30 @@ class LlmExtractor:
                 (raw.subject_id, raw.subject_type, raw.subject_canonical_name),
                 (raw.object_id, raw.object_type, raw.object_canonical_name),
             ):
+                canonical_name = _normalize_canonical_name(etype, ename)
+                identity_key = (
+                    etype.strip().casefold(),
+                    canonical_name.casefold(),
+                )
+
+                previous_identity = raw_identity_by_id.get(eid)
+                if previous_identity is not None and previous_identity != identity_key:
+                    raise ExtractionError(
+                        source_id=input.source_id,
+                        message=(
+                            f"raw entity id {eid!r} maps to multiple identities "
+                            "within one extraction response"
+                        ),
+                        sample=input.text,
+                    )
+
+                raw_identity_by_id[eid] = identity_key
+
                 if eid not in entities:
                     entities[eid] = Entity(
                         id=eid,
                         type=etype,
-                        canonical_name=ename,
+                        canonical_name=canonical_name,
                         provenance=provenance,
                     )
 

@@ -1,0 +1,6510 @@
+{
+  "name": "Ontos visualization",
+  "id": "00000000-0000-4000-8000-000000000032",
+  "categories": [
+    {
+      "id": 1,
+      "name": "Person",
+      "labels": [
+        "Person"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#FFE081",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Company",
+      "labels": [
+        "Company"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#C990C0",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Auditor",
+      "labels": [
+        "Auditor"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#F79767",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Regulator",
+      "labels": [
+        "Regulator"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#57C7E3",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Filing",
+      "labels": [
+        "Filing"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#F16667",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "FilingSection",
+      "labels": [
+        "FilingSection"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#D9C8AE",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Risk",
+      "labels": [
+        "Risk"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#8DCC93",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Regulation",
+      "labels": [
+        "Regulation"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#ECB5C9",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "BoardCommittee",
+      "labels": [
+        "BoardCommittee"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#4C8EDA",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "BusinessSegment",
+      "labels": [
+        "BusinessSegment"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#FFC454",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Product",
+      "labels": [
+        "Product"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#DA7194",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Jurisdiction",
+      "labels": [
+        "Jurisdiction"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#569480",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "Model",
+      "labels": [
+        "Model"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "ModelControl",
+      "labels": [
+        "ModelControl"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#D9D9D9",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "MaterialEvent",
+      "labels": [
+        "MaterialEvent"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#FFE081",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "CRO",
+      "labels": [
+        "CRO"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#C990C0",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "Drug",
+      "labels": [
+        "Drug"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#F79767",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "MoleculeTarget",
+      "labels": [
+        "MoleculeTarget"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#57C7E3",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 19,
+      "name": "Indication",
+      "labels": [
+        "Indication"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#F16667",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 20,
+      "name": "ClinicalTrial",
+      "labels": [
+        "ClinicalTrial"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#D9C8AE",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 21,
+      "name": "TrialProtocol",
+      "labels": [
+        "TrialProtocol"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#8DCC93",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 22,
+      "name": "TrialSite",
+      "labels": [
+        "TrialSite"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#ECB5C9",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 23,
+      "name": "AdverseEvent",
+      "labels": [
+        "AdverseEvent"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#4C8EDA",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 24,
+      "name": "RegulatorySubmission",
+      "labels": [
+        "RegulatorySubmission"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#FFC454",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 25,
+      "name": "ManufacturingSite",
+      "labels": [
+        "ManufacturingSite"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#DA7194",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 26,
+      "name": "QualityControl",
+      "labels": [
+        "QualityControl"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#569480",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    },
+    {
+      "id": 27,
+      "name": "InspectionObservation",
+      "labels": [
+        "InspectionObservation"
+      ],
+      "properties": [
+        {
+          "name": "id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "entity_type",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "canonical_name",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "aliases",
+          "exclude": false,
+          "dataType": "array"
+        },
+        {
+          "name": "properties",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_source_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "provenance_extractor_id",
+          "exclude": false,
+          "dataType": "string"
+        },
+        {
+          "name": "acl_ref",
+          "exclude": false,
+          "dataType": "string"
+        }
+      ],
+      "createdAt": 0,
+      "lastEditedAt": 0,
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_CATEGORY_NAME_CAPTION_KEY",
+        "canonical_name",
+        "id"
+      ]
+    }
+  ],
+  "labels": {
+    "Person": [
+      {
+        "propertyKey": "id",
+        "type": "Person",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Person",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Person",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Person",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Person",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Person",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Person",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Person",
+        "dataType": "string"
+      }
+    ],
+    "Company": [
+      {
+        "propertyKey": "id",
+        "type": "Company",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Company",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Company",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Company",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Company",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Company",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Company",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Company",
+        "dataType": "string"
+      }
+    ],
+    "Auditor": [
+      {
+        "propertyKey": "id",
+        "type": "Auditor",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Auditor",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Auditor",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Auditor",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Auditor",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Auditor",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Auditor",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Auditor",
+        "dataType": "string"
+      }
+    ],
+    "Regulator": [
+      {
+        "propertyKey": "id",
+        "type": "Regulator",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Regulator",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Regulator",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Regulator",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Regulator",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Regulator",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Regulator",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Regulator",
+        "dataType": "string"
+      }
+    ],
+    "Filing": [
+      {
+        "propertyKey": "id",
+        "type": "Filing",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Filing",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Filing",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Filing",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Filing",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Filing",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Filing",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Filing",
+        "dataType": "string"
+      }
+    ],
+    "FilingSection": [
+      {
+        "propertyKey": "id",
+        "type": "FilingSection",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "FilingSection",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "FilingSection",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "FilingSection",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "FilingSection",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "FilingSection",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "FilingSection",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "FilingSection",
+        "dataType": "string"
+      }
+    ],
+    "Risk": [
+      {
+        "propertyKey": "id",
+        "type": "Risk",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Risk",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Risk",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Risk",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Risk",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Risk",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Risk",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Risk",
+        "dataType": "string"
+      }
+    ],
+    "Regulation": [
+      {
+        "propertyKey": "id",
+        "type": "Regulation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Regulation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Regulation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Regulation",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Regulation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Regulation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Regulation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Regulation",
+        "dataType": "string"
+      }
+    ],
+    "BoardCommittee": [
+      {
+        "propertyKey": "id",
+        "type": "BoardCommittee",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "BoardCommittee",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "BoardCommittee",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "BoardCommittee",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "BoardCommittee",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "BoardCommittee",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "BoardCommittee",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "BoardCommittee",
+        "dataType": "string"
+      }
+    ],
+    "BusinessSegment": [
+      {
+        "propertyKey": "id",
+        "type": "BusinessSegment",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "BusinessSegment",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "BusinessSegment",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "BusinessSegment",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "BusinessSegment",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "BusinessSegment",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "BusinessSegment",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "BusinessSegment",
+        "dataType": "string"
+      }
+    ],
+    "Product": [
+      {
+        "propertyKey": "id",
+        "type": "Product",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Product",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Product",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Product",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Product",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Product",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Product",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Product",
+        "dataType": "string"
+      }
+    ],
+    "Jurisdiction": [
+      {
+        "propertyKey": "id",
+        "type": "Jurisdiction",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Jurisdiction",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Jurisdiction",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Jurisdiction",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Jurisdiction",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Jurisdiction",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Jurisdiction",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Jurisdiction",
+        "dataType": "string"
+      }
+    ],
+    "Model": [
+      {
+        "propertyKey": "id",
+        "type": "Model",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Model",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Model",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Model",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Model",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Model",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Model",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Model",
+        "dataType": "string"
+      }
+    ],
+    "ModelControl": [
+      {
+        "propertyKey": "id",
+        "type": "ModelControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "ModelControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "ModelControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "ModelControl",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "ModelControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "ModelControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "ModelControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "ModelControl",
+        "dataType": "string"
+      }
+    ],
+    "MaterialEvent": [
+      {
+        "propertyKey": "id",
+        "type": "MaterialEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "MaterialEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "MaterialEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "MaterialEvent",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "MaterialEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "MaterialEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "MaterialEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "MaterialEvent",
+        "dataType": "string"
+      }
+    ],
+    "CRO": [
+      {
+        "propertyKey": "id",
+        "type": "CRO",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "CRO",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "CRO",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "CRO",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "CRO",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "CRO",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "CRO",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "CRO",
+        "dataType": "string"
+      }
+    ],
+    "Drug": [
+      {
+        "propertyKey": "id",
+        "type": "Drug",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Drug",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Drug",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Drug",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Drug",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Drug",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Drug",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Drug",
+        "dataType": "string"
+      }
+    ],
+    "MoleculeTarget": [
+      {
+        "propertyKey": "id",
+        "type": "MoleculeTarget",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "MoleculeTarget",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "MoleculeTarget",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "MoleculeTarget",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "MoleculeTarget",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "MoleculeTarget",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "MoleculeTarget",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "MoleculeTarget",
+        "dataType": "string"
+      }
+    ],
+    "Indication": [
+      {
+        "propertyKey": "id",
+        "type": "Indication",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "Indication",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "Indication",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "Indication",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "Indication",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "Indication",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "Indication",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "Indication",
+        "dataType": "string"
+      }
+    ],
+    "ClinicalTrial": [
+      {
+        "propertyKey": "id",
+        "type": "ClinicalTrial",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "ClinicalTrial",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "ClinicalTrial",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "ClinicalTrial",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "ClinicalTrial",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "ClinicalTrial",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "ClinicalTrial",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "ClinicalTrial",
+        "dataType": "string"
+      }
+    ],
+    "TrialProtocol": [
+      {
+        "propertyKey": "id",
+        "type": "TrialProtocol",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "TrialProtocol",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "TrialProtocol",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "TrialProtocol",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "TrialProtocol",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "TrialProtocol",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "TrialProtocol",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "TrialProtocol",
+        "dataType": "string"
+      }
+    ],
+    "TrialSite": [
+      {
+        "propertyKey": "id",
+        "type": "TrialSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "TrialSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "TrialSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "TrialSite",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "TrialSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "TrialSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "TrialSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "TrialSite",
+        "dataType": "string"
+      }
+    ],
+    "AdverseEvent": [
+      {
+        "propertyKey": "id",
+        "type": "AdverseEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "AdverseEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "AdverseEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "AdverseEvent",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "AdverseEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "AdverseEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "AdverseEvent",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "AdverseEvent",
+        "dataType": "string"
+      }
+    ],
+    "RegulatorySubmission": [
+      {
+        "propertyKey": "id",
+        "type": "RegulatorySubmission",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "RegulatorySubmission",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "RegulatorySubmission",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "RegulatorySubmission",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "RegulatorySubmission",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "RegulatorySubmission",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "RegulatorySubmission",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "RegulatorySubmission",
+        "dataType": "string"
+      }
+    ],
+    "ManufacturingSite": [
+      {
+        "propertyKey": "id",
+        "type": "ManufacturingSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "ManufacturingSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "ManufacturingSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "ManufacturingSite",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "ManufacturingSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "ManufacturingSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "ManufacturingSite",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "ManufacturingSite",
+        "dataType": "string"
+      }
+    ],
+    "QualityControl": [
+      {
+        "propertyKey": "id",
+        "type": "QualityControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "QualityControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "QualityControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "QualityControl",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "QualityControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "QualityControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "QualityControl",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "QualityControl",
+        "dataType": "string"
+      }
+    ],
+    "InspectionObservation": [
+      {
+        "propertyKey": "id",
+        "type": "InspectionObservation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "entity_type",
+        "type": "InspectionObservation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "canonical_name",
+        "type": "InspectionObservation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "aliases",
+        "type": "InspectionObservation",
+        "dataType": "array"
+      },
+      {
+        "propertyKey": "properties",
+        "type": "InspectionObservation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_source_id",
+        "type": "InspectionObservation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "provenance_extractor_id",
+        "type": "InspectionObservation",
+        "dataType": "string"
+      },
+      {
+        "propertyKey": "acl_ref",
+        "type": "InspectionObservation",
+        "dataType": "string"
+      }
+    ]
+  },
+  "relationshipTypes": [
+    {
+      "id": "ACQUIRED",
+      "name": "ACQUIRED",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "ACQUIRED",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "ACQUIRED",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "ACQUIRED",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "ACQUIRED",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "ACQUIRED",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "ANNOUNCED_EVENT",
+      "name": "ANNOUNCED_EVENT",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "ANNOUNCED_EVENT",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "APPROVED_FOR",
+      "name": "APPROVED_FOR",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "APPROVED_FOR",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "APPROVED_FOR",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "APPROVED_FOR",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "APPROVED_FOR",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "APPROVED_FOR",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "AUDITED_BY",
+      "name": "AUDITED_BY",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "AUDITED_BY",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "AUDITED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "AUDITED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "AUDITED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "AUDITED_BY",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "CAUSED_BY",
+      "name": "CAUSED_BY",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "CAUSED_BY",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "CAUSED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "CAUSED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "CAUSED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "CAUSED_BY",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "CERTIFIED_FOR",
+      "name": "CERTIFIED_FOR",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "CERTIFIED_FOR",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "CERTIFIED_FOR",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "CERTIFIED_FOR",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "CERTIFIED_FOR",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "CERTIFIED_FOR",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "COMPETES_WITH",
+      "name": "COMPETES_WITH",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "COMPETES_WITH",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "COMPETES_WITH",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "COMPETES_WITH",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "COMPETES_WITH",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "COMPETES_WITH",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "CONDUCTED_BY",
+      "name": "CONDUCTED_BY",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "CONDUCTED_BY",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "CONDUCTED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "CONDUCTED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "CONDUCTED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "CONDUCTED_BY",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "CONTAINS_SECTION",
+      "name": "CONTAINS_SECTION",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "CONTAINS_SECTION",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "CONTAINS_SECTION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "CONTAINS_SECTION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "CONTAINS_SECTION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "CONTAINS_SECTION",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "COVERS_DRUG",
+      "name": "COVERS_DRUG",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "COVERS_DRUG",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "COVERS_DRUG",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "COVERS_DRUG",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "COVERS_DRUG",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "COVERS_DRUG",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "DISCLOSED_IN",
+      "name": "DISCLOSED_IN",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "DISCLOSED_IN",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "DISCLOSED_IN",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "DISCLOSED_IN",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "DISCLOSED_IN",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "DISCLOSED_IN",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "DISCLOSES_RISK",
+      "name": "DISCLOSES_RISK",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "DISCLOSES_RISK",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "DISCLOSES_RISK",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "DISCLOSES_RISK",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "DISCLOSES_RISK",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "DISCLOSES_RISK",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "ENFORCED_BY",
+      "name": "ENFORCED_BY",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "ENFORCED_BY",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "ENFORCED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "ENFORCED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "ENFORCED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "ENFORCED_BY",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "ENROLLS_AT",
+      "name": "ENROLLS_AT",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "ENROLLS_AT",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "ENROLLS_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "ENROLLS_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "ENROLLS_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "ENROLLS_AT",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "EVALUATES",
+      "name": "EVALUATES",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "EVALUATES",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "EVALUATES",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "EVALUATES",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "EVALUATES",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "EVALUATES",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "EVALUATES",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "EVALUATES",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "EVALUATES",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "EVALUATES",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "EVALUATES",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "EVALUATES",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "EVALUATES",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "EVALUATES",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "EVALUATES",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "FILED",
+      "name": "FILED",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "FILED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "FILED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "FILED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "FILED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "FILED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "FILED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "FILED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "FILED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "FILED",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "FILED",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "FILED",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "FILED",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "FILED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "FILED",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "GOVERNED_BY",
+      "name": "GOVERNED_BY",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "GOVERNED_BY",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "GOVERNED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "GOVERNED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "GOVERNED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "GOVERNED_BY",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "HAS_COMMITTEE",
+      "name": "HAS_COMMITTEE",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "HAS_COMMITTEE",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "HAS_COMMITTEE",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "HAS_COMMITTEE",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "HAS_COMMITTEE",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "HAS_COMMITTEE",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "HAS_CONTROL",
+      "name": "HAS_CONTROL",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "HAS_CONTROL",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "HAS_CONTROL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "HAS_CONTROL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "HAS_CONTROL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "HAS_CONTROL",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "HAS_PROTOCOL",
+      "name": "HAS_PROTOCOL",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "HAS_PROTOCOL",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "HAS_PROTOCOL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "HAS_PROTOCOL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "HAS_PROTOCOL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "HAS_PROTOCOL",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "HAS_SEGMENT",
+      "name": "HAS_SEGMENT",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "HAS_SEGMENT",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "HAS_SEGMENT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "HAS_SEGMENT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "HAS_SEGMENT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "HAS_SEGMENT",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "IMPLEMENTS_REGULATION",
+      "name": "IMPLEMENTS_REGULATION",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "IMPLEMENTS_REGULATION",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "INSPECTED_BY",
+      "name": "INSPECTED_BY",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "INSPECTED_BY",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "INSPECTED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "INSPECTED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "INSPECTED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "INSPECTED_BY",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "LEADS_TRIAL",
+      "name": "LEADS_TRIAL",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "LEADS_TRIAL",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "LEADS_TRIAL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "LEADS_TRIAL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "LEADS_TRIAL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "LEADS_TRIAL",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "MANUFACTURED_AT",
+      "name": "MANUFACTURED_AT",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "MANUFACTURED_AT",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "MANUFACTURED_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "MANUFACTURED_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "MANUFACTURED_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "MANUFACTURED_AT",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "MERGED_WITH",
+      "name": "MERGED_WITH",
+      "properties": [
+        {
+          "propertyKey": "resolver_id",
+          "type": "MERGED_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "resolver_version",
+          "type": "MERGED_WITH",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "resolved_at",
+          "type": "MERGED_WITH",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "reason",
+          "type": "MERGED_WITH",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "resolver_id"
+      ]
+    },
+    {
+      "id": "MONITORS_TRIAL",
+      "name": "MONITORS_TRIAL",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "MONITORS_TRIAL",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "MONITORS_TRIAL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "MONITORS_TRIAL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "MONITORS_TRIAL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "MONITORS_TRIAL",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "NOTED_AT",
+      "name": "NOTED_AT",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "NOTED_AT",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "NOTED_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "NOTED_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "NOTED_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "NOTED_AT",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "OFFERS_PRODUCT",
+      "name": "OFFERS_PRODUCT",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "OFFERS_PRODUCT",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "OPERATED_BY",
+      "name": "OPERATED_BY",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "OPERATED_BY",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "OPERATED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "OPERATED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "OPERATED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "OPERATED_BY",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "OPERATES_IN",
+      "name": "OPERATES_IN",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "OPERATES_IN",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "OPERATES_IN",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "OPERATES_IN",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "OPERATES_IN",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "OPERATES_IN",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "OPERATES_MODEL",
+      "name": "OPERATES_MODEL",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "OPERATES_MODEL",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "OPERATES_MODEL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "OPERATES_MODEL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "OPERATES_MODEL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "OPERATES_MODEL",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "REFERENCES_REGULATION",
+      "name": "REFERENCES_REGULATION",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "REFERENCES_REGULATION",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "REGULATED_BY",
+      "name": "REGULATED_BY",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "REGULATED_BY",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "REGULATED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "REGULATED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "REGULATED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "REGULATED_BY",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "REPORTS_EVENT",
+      "name": "REPORTS_EVENT",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "REPORTS_EVENT",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "REPORTS_EVENT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "REPORTS_EVENT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "REPORTS_EVENT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "REPORTS_EVENT",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "REVIEWED_BY",
+      "name": "REVIEWED_BY",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "REVIEWED_BY",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "REVIEWED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "REVIEWED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "REVIEWED_BY",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "REVIEWED_BY",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "SERVES_AS_DIRECTOR_OF",
+      "name": "SERVES_AS_DIRECTOR_OF",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "SERVES_AS_DIRECTOR_OF",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "SERVES_AS_OFFICER_OF",
+      "name": "SERVES_AS_OFFICER_OF",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "SERVES_AS_OFFICER_OF",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "SITS_ON_COMMITTEE",
+      "name": "SITS_ON_COMMITTEE",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "SITS_ON_COMMITTEE",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "SPONSORS_TRIAL",
+      "name": "SPONSORS_TRIAL",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "SPONSORS_TRIAL",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "SUBJECT_TO",
+      "name": "SUBJECT_TO",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "SUBJECT_TO",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "SUBJECT_TO",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "SUBJECT_TO",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "SUBJECT_TO",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "SUBJECT_TO",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "SUBMITTED",
+      "name": "SUBMITTED",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "SUBMITTED",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "SUBMITTED",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "SUBMITTED",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "SUBMITTED",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "SUBMITTED",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "SUBSIDIARY_OF",
+      "name": "SUBSIDIARY_OF",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "SUBSIDIARY_OF",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "TARGETS",
+      "name": "TARGETS",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "TARGETS",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "TARGETS",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "TARGETS",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "TARGETS",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "TARGETS",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "TARGETS",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "TARGETS",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "TARGETS",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "TARGETS",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "TARGETS",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "TARGETS",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "TARGETS",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "TARGETS",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "TARGETS",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "TREATS_INDICATION",
+      "name": "TREATS_INDICATION",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "TREATS_INDICATION",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "TREATS_INDICATION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "TREATS_INDICATION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "TREATS_INDICATION",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "TREATS_INDICATION",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    },
+    {
+      "id": "WORKS_AT",
+      "name": "WORKS_AT",
+      "properties": [
+        {
+          "propertyKey": "fact_id",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "predicate",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "source_id",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_id",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "extractor_version",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_id",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "ontology_version",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "confidence_score",
+          "type": "WORKS_AT",
+          "dataType": "number"
+        },
+        {
+          "propertyKey": "t_valid",
+          "type": "WORKS_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "t_invalid",
+          "type": "WORKS_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "ingested_at",
+          "type": "WORKS_AT",
+          "dataType": "datetime"
+        },
+        {
+          "propertyKey": "superseded_by",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        },
+        {
+          "propertyKey": "acl_ref",
+          "type": "WORKS_AT",
+          "dataType": "string"
+        }
+      ],
+      "color": "#848484",
+      "size": 1.25,
+      "captionKeys": [
+        "0_REL_TYPE_CAPTION_KEY",
+        "predicate"
+      ]
+    }
+  ],
+  "palette": {
+    "colors": [
+      "#FFE081",
+      "#C990C0",
+      "#F79767",
+      "#57C7E3",
+      "#F16667",
+      "#D9C8AE",
+      "#8DCC93",
+      "#ECB5C9",
+      "#4C8EDA",
+      "#FFC454",
+      "#DA7194",
+      "#569480",
+      "#848484",
+      "#D9D9D9"
+    ],
+    "currentIndex": 0
+  },
+  "createdAt": 0,
+  "lastEditedAt": 0,
+  "templates": [
+    {
+      "name": "Public facts",
+      "id": "ontos-public-facts",
+      "text": "Show public facts",
+      "cypher": "MATCH p=(a)-[r]->(b)\nWHERE type(r) <> 'MERGED_WITH'\n  AND r.acl_ref IS NULL\nRETURN p\nLIMIT 100",
+      "isUpdateQuery": false,
+      "params": [],
+      "hasCypherErrors": false,
+      "createdAt": 0
+    },
+    {
+      "name": "ACL-scoped facts",
+      "id": "ontos-acl-facts",
+      "text": "Show ACL-scoped facts",
+      "cypher": "MATCH p=(a)-[r]->(b)\nWHERE type(r) <> 'MERGED_WITH'\n  AND r.acl_ref IS NOT NULL\nRETURN p\nLIMIT 100",
+      "isUpdateQuery": false,
+      "params": [],
+      "hasCypherErrors": false,
+      "createdAt": 0
+    },
+    {
+      "name": "Active facts",
+      "id": "ontos-active-facts",
+      "text": "Show active facts",
+      "cypher": "MATCH p=(a)-[r]->(b)\nWHERE type(r) <> 'MERGED_WITH'\n  AND r.t_invalid IS NULL\nRETURN p\nLIMIT 100",
+      "isUpdateQuery": false,
+      "params": [],
+      "hasCypherErrors": false,
+      "createdAt": 0
+    },
+    {
+      "name": "Closed historical facts",
+      "id": "ontos-closed-facts",
+      "text": "Show historical facts",
+      "cypher": "MATCH p=(a)-[r]->(b)\nWHERE type(r) <> 'MERGED_WITH'\n  AND r.t_invalid IS NOT NULL\nRETURN p\nLIMIT 100",
+      "isUpdateQuery": false,
+      "params": [],
+      "hasCypherErrors": false,
+      "createdAt": 0
+    }
+  ],
+  "sceneActions": [],
+  "hiddenRelationshipTypes": [],
+  "hiddenCategories": [],
+  "hideUncategorisedData": false,
+  "isAuto": false,
+  "parentPerspectiveId": false,
+  "metadata": {
+    "pathSegments": [],
+    "indexes": [],
+    "stats": {
+      "labels": {},
+      "relationshipTypes": {}
+    }
+  },
+  "version": "2.3.0"
+}

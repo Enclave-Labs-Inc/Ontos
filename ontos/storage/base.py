@@ -26,6 +26,7 @@ from uuid import UUID
 
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
+from ontos.storage.models import GraphScan, StoredEntity
 
 
 class GraphStore(Protocol):
@@ -140,6 +141,61 @@ class GraphStore(Protocol):
         the two cases should use ``facts_for_entity`` or inspect the
         store directly; the pre-check doesn't need that distinction
         because an unknown entity cannot have a conflicting ACL.
+        """
+        ...
+
+    async def entities_for_source(
+        self,
+        source_id: str,
+        *,
+        acl_ref: str | None = None,
+    ) -> list[StoredEntity]:
+        """Return entity endpoints previously cited by one source.
+
+        This is an internal ingest lookup used to stabilize raw entity ids
+        across re-ingests of the same source. Membership is derived from fact
+        provenance (`Fact.provenance.source_id`), not from the entity node's
+        last-write-wins provenance pointer.
+
+        Historical/closed facts count: an entity previously used by this
+        source remains part of its identity history. Matching is strict
+        same-ACL: public facts match only public facts, and an ACL-scoped
+        ingest sees only facts carrying that exact acl_ref.
+
+        This lookup is intentionally for the write path, not user-facing
+        graph reads. IngestPipeline performs its normal cross-ACL entity
+        pre-check immediately after reconciliation.
+        """
+        ...
+
+    async def scan(
+        self,
+        *,
+        as_of: datetime | None = None,
+        include_closed: bool = False,
+        acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
+        include_all_acls: bool = False,
+    ) -> GraphScan:
+        """Return a backend-neutral graph snapshot for export.
+
+        By default only currently-active facts are returned. ``as_of``
+        returns the graph visible at a historical point in time.
+        ``include_closed=True`` returns the full audit history and cannot
+        be combined with ``as_of``.
+
+        Raw entity ids and fact endpoints are preserved exactly as stored;
+        resolution never rewrites them to canonical ids. Resolver decisions
+        are returned separately in ``GraphScan.merges``.
+
+        ACL filtering happens at the store boundary. Facts, entity
+        attributes, and merge records that are not visible to the caller
+        must not appear in the returned snapshot.
+
+        ``include_all_acls=True`` is the explicit privileged audit-export
+        escape hatch. Callers MUST authorize the dedicated audit-exporter
+        role before setting it; ordinary user-facing reads must leave it
+        False.
         """
         ...
 

@@ -908,6 +908,7 @@ wheels = [
 name = "enclave-ontos"
 source = { editable = "." }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "cryptography" },
     { name = "fastmcp" },
     { name = "httpx" },
@@ -929,7 +930,6 @@ authz = [
     { name = "openfga-sdk" },
 ]
 dev = [
-    { name = "aiosqlite" },
     { name = "asyncpg" },
     { name = "mypy" },
     { name = "neo4j" },
@@ -961,7 +961,7 @@ pdf = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiosqlite", marker = "extra == 'dev'", specifier = ">=0.20" },
+    { name = "aiosqlite", specifier = ">=0.20" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=1.11" },
     { name = "asyncpg", marker = "extra == 'dev'", specifier = ">=0.30" },
     { name = "cryptography", specifier = ">=43.0" },

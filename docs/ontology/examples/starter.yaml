@@ -48,7 +48,7 @@ relation_types:
         type: DATE
 
   - label: subsidiary_of
-    description: Corporate parent relationship.
+    description: The subject company is a subsidiary of the object company; the object company is the parent.
     cardinality: many_to_one
 
 patterns:

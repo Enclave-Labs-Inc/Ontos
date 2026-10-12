@@ -338,3 +338,35 @@ async def test_null_policy_never_closes_anything(ontology: Ontology) -> None:
     assert decision.facts_to_close == []
     assert decision.skip_add is False
     assert decision.record is None
+
+
+async def test_same_source_reaffirmation_many_to_many_sets_skip_add(
+    ontology: Ontology,
+) -> None:
+    """Exact same-source re-ingest is idempotent regardless of cardinality."""
+    store = NetworkxStore()
+    first = _mk_fact(
+        "Acme Corp",
+        "acquired",
+        "Beta Systems",
+        source_id="acquisitions.txt",
+    )
+    await store.add_fact(first)
+
+    duplicate = _mk_fact(
+        "Acme Corp",
+        "acquired",
+        "Beta Systems",
+        source_id="acquisitions.txt",
+    )
+
+    decision = await CardinalitySupersessionPolicy().decide(
+        duplicate,
+        store,
+        ontology,
+    )
+
+    assert decision.skip_add is True
+    assert decision.facts_to_close == []
+    assert decision.record is not None
+    assert "idempotent re-ingest" in decision.record.reason

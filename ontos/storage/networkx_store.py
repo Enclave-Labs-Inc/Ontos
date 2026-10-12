@@ -44,6 +44,7 @@ import structlog
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
 from ontos.storage.base import CrossAclUpsertError, StorageError
+from ontos.storage.models import GraphScan, StoredEntity
 
 log = structlog.get_logger(__name__)
 
@@ -87,6 +88,61 @@ class NetworkxStore:
         self._dirty: bool = False
         if path is not None and path.exists() and path.stat().st_size > 0:
             self._load_from(path)
+
+    @classmethod
+    def from_scan(cls, scan: GraphScan) -> NetworkxStore:
+        """Build an in-memory store from a backend-neutral graph snapshot.
+
+        This restores stored node attributes directly rather than routing
+        through ``upsert_entity``. ``StoredEntity`` intentionally allows
+        minimal raw nodes whose type/canonical_name are unknown, while the
+        ingestion-time ``Entity`` model requires both fields.
+        """
+        store = cls()
+
+        for entity in scan.entities:
+            store._graph.add_node(
+                entity.id,
+                type=entity.type,
+                canonical_name=entity.canonical_name,
+                aliases=list(entity.aliases),
+                properties=dict(entity.properties),
+                provenance_source_id=entity.provenance_source_id,
+                provenance_extractor_id=entity.provenance_extractor_id,
+                acl_ref=entity.acl_ref,
+            )
+
+        for fact in scan.facts:
+            store._graph.add_node(fact.subject_id)
+            store._graph.add_node(fact.object_id)
+            store._graph.add_edge(
+                fact.subject_id,
+                fact.object_id,
+                key=fact.id,
+                fact=fact,
+            )
+            store._facts[fact.id] = fact
+
+        for record in scan.merges:
+            normalized_merged = [
+                merged_id for merged_id in record.merged_ids if merged_id != record.canonical_id
+            ]
+            if not normalized_merged:
+                continue
+
+            normalized = record.model_copy(update={"merged_ids": normalized_merged})
+            for merged_id in normalized_merged:
+                key = (
+                    record.canonical_id,
+                    merged_id,
+                    record.resolver_id,
+                )
+                store._merges[key] = normalized
+
+        # Snapshot hydration is a load operation, not a mutation that
+        # should trigger persistence.
+        store._dirty = False
+        return store
 
     def _load_from(self, path: Path) -> None:
         """Load state from path. Fail loud on magic mismatch or corrupt payload.
@@ -391,6 +447,152 @@ class NetworkxStore:
         attrs = self._graph.nodes.get(entity_id, {})
         acl = attrs.get("acl_ref")
         return acl if isinstance(acl, str) else None
+
+    async def entities_for_source(
+        self,
+        source_id: str,
+        *,
+        acl_ref: str | None = None,
+    ) -> list[StoredEntity]:
+        """Return raw entity endpoints ever cited by facts from source_id."""
+        entity_ids: set[str] = set()
+
+        for fact in self._facts.values():
+            if fact.provenance.source_id != source_id:
+                continue
+            if fact.acl_ref != acl_ref:
+                continue
+            entity_ids.add(fact.subject_id)
+            entity_ids.add(fact.object_id)
+
+        entities: list[StoredEntity] = []
+        for entity_id in sorted(entity_ids):
+            attrs = self._graph.nodes.get(entity_id, {})
+            entities.append(
+                StoredEntity(
+                    id=entity_id,
+                    type=attrs.get("type"),
+                    canonical_name=attrs.get("canonical_name"),
+                    aliases=list(attrs.get("aliases") or []),
+                    properties=dict(attrs.get("properties") or {}),
+                    provenance_source_id=attrs.get("provenance_source_id"),
+                    provenance_extractor_id=attrs.get("provenance_extractor_id"),
+                    acl_ref=attrs.get("acl_ref"),
+                )
+            )
+
+        return entities
+
+    async def scan(
+        self,
+        *,
+        as_of: datetime | None = None,
+        include_closed: bool = False,
+        acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
+        include_all_acls: bool = False,
+    ) -> GraphScan:
+        """Return an ACL-safe, backend-neutral snapshot for graph export."""
+
+        if include_closed and as_of is not None:
+            raise ValueError("include_closed cannot be combined with as_of")
+
+        allowed_set = set(allowed_acls) if allowed_acls is not None else None
+
+        def _entity_visible(entity_id: str) -> bool:
+            if include_all_acls:
+                return True
+            attrs = self._graph.nodes.get(entity_id, {})
+            acl = attrs.get("acl_ref")
+            if acl is None:
+                return True
+            if allowed_set is not None:
+                return acl in allowed_set
+            if acl_subject is not None:
+                return bool(acl == acl_subject)
+            return False
+
+        visible_entity_ids = {
+            entity_id for entity_id in self._graph.nodes if _entity_visible(entity_id)
+        }
+
+        facts: list[Fact] = []
+        for fact in self._facts.values():
+            if not include_closed and not _fact_alive_at(fact, as_of):
+                continue
+            if not include_all_acls and not _acl_allows(
+                fact,
+                acl_subject,
+                allowed_set,
+            ):
+                continue
+            # A visible fact must never reveal a forbidden raw endpoint id.
+            if (
+                fact.subject_id not in visible_entity_ids
+                or fact.object_id not in visible_entity_ids
+            ):
+                continue
+            facts.append(fact)
+
+        # Merge records are user-visible export data, so unlike the legacy
+        # merges_for_entity(None) path they are always ACL-filtered here.
+        merge_allowed_set = (
+            allowed_set
+            if allowed_set is not None
+            else ({acl_subject} if acl_subject is not None else set())
+        )
+        merges: list[MergeRecord] = []
+        seen_merges: set[tuple[str, str, str]] = set()
+
+        for record in self._merges.values():
+            dedupe_key = (
+                record.canonical_id,
+                record.resolver_id,
+                record.resolved_at.isoformat(),
+            )
+            if dedupe_key in seen_merges:
+                continue
+            seen_merges.add(dedupe_key)
+
+            if not include_all_acls and not self._merge_record_visible(record, merge_allowed_set):
+                continue
+
+            merges.append(record)
+            # Older stores may contain merge audit endpoints that were never
+            # explicitly upserted. Preserve those raw IDs as minimal nodes so
+            # exporters never emit dangling MERGED_WITH relationships.
+            visible_entity_ids.add(record.canonical_id)
+            visible_entity_ids.update(record.merged_ids)
+
+        entities: list[StoredEntity] = []
+        for entity_id in visible_entity_ids:
+            attrs = self._graph.nodes.get(entity_id, {})
+            entities.append(
+                StoredEntity(
+                    id=entity_id,
+                    type=attrs.get("type"),
+                    canonical_name=attrs.get("canonical_name"),
+                    aliases=list(attrs.get("aliases") or []),
+                    properties=dict(attrs.get("properties") or {}),
+                    provenance_source_id=attrs.get("provenance_source_id"),
+                    provenance_extractor_id=attrs.get("provenance_extractor_id"),
+                    acl_ref=attrs.get("acl_ref"),
+                )
+            )
+
+        return GraphScan(
+            entities=sorted(entities, key=lambda entity: entity.id),
+            facts=sorted(facts, key=lambda fact: str(fact.id)),
+            merges=sorted(
+                merges,
+                key=lambda record: (
+                    record.canonical_id,
+                    tuple(record.merged_ids),
+                    record.resolver_id,
+                    record.resolved_at.isoformat(),
+                ),
+            ),
+        )
 
     async def record_merge(self, record: MergeRecord) -> None:
         # Fan out one logical MergeRecord across (canonical, merged_id,

@@ -21,6 +21,7 @@ import asyncio
 import dataclasses
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -29,6 +30,7 @@ import typer
 if TYPE_CHECKING:
     from ontos.ingest import Connector, MultiConnector
     from ontos.runtime.config import RuntimeConfig
+    from ontos.storage.models import GraphScan
 
 
 # When the operator runs the CLI without overriding storage, we want
@@ -100,15 +102,14 @@ def serve(
             "--snapshot",
             help=(
                 "Serve MCP over a frozen graph snapshot (read-only). "
-                "Accepts an ONTOS-NX-STORE-V2 pickle today (.pkl / "
-                ".pickle); JSON-LD / GraphML / Cypher paths arrive "
-                "with issue #32. WARNING: today's snapshot format is "
-                "a Python pickle — loading an untrusted file executes "
-                "arbitrary code. The magic-header check in the loader "
-                "is a FORMAT check (it rejects non-Ontos files), NOT "
-                "a safety mitigation — a crafted pickle with the right "
-                "prefix still runs on load. Only load snapshots from "
-                "trusted sources until #32's text formats land."
+                "Accepts ONTOS-NX-STORE-V2 pickle (.pkl / .pickle) "
+                "JSON-LD (.jsonld), GraphML (.graphml), and Cypher "
+                "(.cypher / .txt) snapshots. WARNING: pickle "
+                "snapshots use Python pickle — loading an untrusted file executes "
+                "arbitrary code. FORMAT check only: the magic header rejects "
+                "non-Ontos files but is NOT a safety mitigation. A crafted "
+                "pickle with the right prefix still runs on load. Only load "
+                "trusted pickle snapshots."
             ),
         ),
     ] = None,
@@ -206,12 +207,71 @@ def _collect_snapshot_metadata(path: Path, store: object) -> object:
     )
 
 
+def _load_snapshot(path: Path) -> tuple[object, object]:
+    """Load a supported frozen snapshot and its load-time metadata."""
+    from datetime import UTC, datetime
+
+    from ontos.runtime.server import SnapshotMetadata
+    from ontos.storage.networkx_store import NetworkxStore
+
+    suffix = path.suffix.lower()
+    if suffix not in (".pkl", ".pickle", ".jsonld", ".graphml", ".cypher", ".txt"):
+        raise typer.BadParameter(
+            f"snapshot format {path.suffix!r} is not supported. "
+            "Supported formats: .pkl, .pickle, .jsonld, .graphml, .cypher, .txt."
+        )
+    if not path.exists():
+        raise typer.BadParameter(f"snapshot file not found: {path}")
+
+    if suffix in (".pkl", ".pickle"):
+        store = NetworkxStore(path=path)
+        # Structural read-only: null the persistence path after load.
+        store._path = None
+        return store, _collect_snapshot_metadata(path, store)
+
+    if suffix == ".jsonld":
+        from ontos.exporters.jsonld import load_jsonld
+
+        scan, manifest = load_jsonld(path)
+        store = NetworkxStore.from_scan(scan)
+        metadata = SnapshotMetadata(
+            id=_compute_snapshot_id(path),
+            mtime=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
+            format="ontos-jsonld-v1",
+            ontology_id=manifest["ontologyId"],
+            ontology_version=manifest["ontologyVersion"],
+        )
+        return store, metadata
+
+    if suffix == ".graphml":
+        from ontos.exporters.graphml import load_graphml
+
+        scan = load_graphml(path)
+        format_name = "ontos-graphml-v1"
+    else:
+        from ontos.exporters.cypher import load_cypher
+
+        scan = load_cypher(path)
+        format_name = "ontos-cypher-v1"
+
+    store = NetworkxStore.from_scan(scan)
+    first_fact = min(scan.facts, key=lambda item: str(item.id), default=None)
+    metadata = SnapshotMetadata(
+        id=_compute_snapshot_id(path),
+        mtime=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
+        format=format_name,
+        ontology_id=(first_fact.provenance.ontology_id if first_fact is not None else ""),
+        ontology_version=(first_fact.provenance.ontology_version if first_fact is not None else ""),
+    )
+    return store, metadata
+
+
 def _serve_snapshot(path: Path) -> None:
     """Boot an MCP server over a frozen NetworkxStore snapshot.
 
-    Dispatches on file extension: `.pkl` / `.pickle` loads today's
-    ONTOS-NX-STORE-V2 pickle. JSON-LD / GraphML / Cypher paths raise
-    with a pointer at #32 until that work ships.
+    Dispatches on file extension: `.pkl` / `.pickle` loads an
+    ONTOS-NX-STORE-V2 pickle; `.jsonld` loads JSON-LD; `.graphml`
+    loads GraphML; `.cypher` and `.txt` load Ontos-generated Cypher snapshots.
 
     The loaded store's `_path` is set to `None` after load so a
     future write tool cannot silently mutate the "frozen" file —
@@ -224,28 +284,19 @@ def _serve_snapshot(path: Path) -> None:
 
     log = structlog.get_logger()
 
-    if path.suffix.lower() not in (".pkl", ".pickle"):
-        raise typer.BadParameter(
-            f"snapshot format {path.suffix!r} is not supported yet. "
-            "Today's snapshot format is an ONTOS-NX-STORE-V2 pickle "
-            "(.pkl / .pickle); JSON-LD / GraphML / Cypher support "
-            "arrives with issue #32."
+    if path.suffix.lower() in (".pkl", ".pickle"):
+        log.warning(
+            "snapshot-pickle-loaded",
+            path=str(path.resolve()),
+            reason=(
+                "ONTOS-NX-STORE-V2 is a Python pickle format; loading a "
+                "crafted file executes arbitrary code. The loader's "
+                "magic-header check is a FORMAT check only (rejects "
+                "non-Ontos files), NOT a safety mitigation — a crafted "
+                "pickle with the right prefix still runs. Only load "
+                "trusted pickle snapshots."
+            ),
         )
-    if not path.exists():
-        raise typer.BadParameter(f"snapshot file not found: {path}")
-
-    log.warning(
-        "snapshot-pickle-loaded",
-        path=str(path.resolve()),
-        reason=(
-            "ONTOS-NX-STORE-V2 is a Python pickle format; loading a "
-            "crafted file executes arbitrary code. The loader's "
-            "magic-header check is a FORMAT check only (rejects "
-            "non-Ontos files), NOT a safety mitigation — a crafted "
-            "pickle with the right prefix still runs. Only load from "
-            "trusted sources until #32's text formats land."
-        ),
-    )
 
     # Deferred imports for help-latency parity with live `serve`.
     from ontos.runtime.config import RuntimeConfig
@@ -254,18 +305,9 @@ def _serve_snapshot(path: Path) -> None:
         build_server,
         run_server,
     )
-    from ontos.storage.networkx_store import NetworkxStore
 
     _default_dev_signing_key_if_missing()
-
-    store = NetworkxStore(path=path)
-    # Structural read-only: null the persistence path AFTER load so
-    # `NetworkxStore.flush()` early-returns if any future write tool
-    # ever lands. The "frozen" guarantee is now enforced, not left
-    # to the convention that today's six tools don't write.
-    store._path = None
-
-    metadata = _collect_snapshot_metadata(path, store)
+    store, metadata = _load_snapshot(path)
     cfg = RuntimeConfig.from_env()
     server = build_server(cfg, store=store, snapshot_metadata=metadata)  # type: ignore[arg-type]
     run_server(
@@ -580,6 +622,657 @@ def query(
             await _close_store_without_masking(store)
 
     asyncio.run(_run())
+
+
+export_app = typer.Typer(help="Export graph snapshots for visualization.")
+app.add_typer(export_app, name="export")
+
+
+async def _emit_export_audit(
+    *,
+    db_url: str,
+    signing_key_env: str,
+    scan: GraphScan | None,
+    acting_on_behalf_of: str | None,
+    export_format: str,
+    include_acl_mask: bool,
+    decision: str,
+    latency_ms: float,
+) -> None:
+    """Persist an Article-12 record for every graph export attempt."""
+    from collections import Counter
+
+    from ontos.audit.postgres import PostgresAuditEmitter
+
+    facts = [] if scan is None else scan.facts
+    fact_count_by_acl = Counter(
+        fact.acl_ref if fact.acl_ref is not None else "public" for fact in facts
+    )
+
+    query_text = f"ontos export {export_format}"
+    if include_acl_mask:
+        query_text += " --include-acl-mask"
+
+    policy_decisions = (
+        [
+            {
+                "relation": "audit_exporter",
+                "object": "export",
+                "decision": decision,
+            }
+        ]
+        if include_acl_mask
+        else []
+    )
+
+    emitter = PostgresAuditEmitter.from_url(
+        db_url,
+        signing_key_env=signing_key_env,
+    )
+
+    try:
+        await emitter.initialize()
+        await emitter.emit_async(
+            query_id=None,
+            agent_identity="ontos-cli",
+            acting_on_behalf_of=acting_on_behalf_of,
+            query_text=query_text,
+            tool_invoked=f"ontos.export.{export_format}",
+            tool_arguments={
+                "include_acl_mask": include_acl_mask,
+                "fact_count": len(facts),
+                "fact_count_by_acl": dict(sorted(fact_count_by_acl.items())),
+                "export_format": export_format,
+            },
+            result_fact_ids=[str(fact.id) for fact in facts],
+            latency_ms=latency_ms,
+            model_versions={},
+            policy_decisions=policy_decisions,
+        )
+    finally:
+        await emitter.close()
+
+
+def _scan_for_export(
+    storage_path: str | None,
+    *,
+    as_of: str | None = None,
+    include_closed: bool = False,
+    entity: str | None = None,
+    hops: int | None = None,
+    acting_on_behalf_of: str | None = None,
+    include_acl_mask: bool = False,
+    export_format: str = "graph",
+) -> GraphScan:
+    """Load the configured store, scan it, audit if required, and close safely."""
+    import time
+
+    from ontos.authz import AUDIT_EXPORTER, VIEW
+    from ontos.runtime.server import (
+        _default_dev_signing_key_if_missing,
+        build_authz,
+        build_store,
+    )
+
+    started_at = time.perf_counter()
+
+    try:
+        as_of_timestamp = datetime.fromisoformat(as_of) if as_of is not None else None
+    except ValueError as exc:
+        raise typer.BadParameter("--as-of must be a valid ISO-8601 timestamp.") from exc
+
+    if as_of_timestamp is not None and include_closed:
+        raise typer.BadParameter("--as-of and --include-closed cannot be used together.")
+
+    if include_acl_mask and acting_on_behalf_of is None:
+        raise typer.BadParameter("--include-acl-mask requires --acting-on-behalf-of.")
+
+    if entity is None and hops is not None:
+        raise typer.BadParameter("--hops requires --entity.")
+
+    resolved_path = _resolve_storage_path(storage_path)
+    cfg = _build_cli_runtime_config(resolved_path)
+    _warn_if_ephemeral(resolved_path, cfg.storage_backend)
+    _default_dev_signing_key_if_missing()
+    authz = build_authz(cfg) if acting_on_behalf_of is not None else None
+    store = build_store(cfg)
+
+    async def _run() -> GraphScan:
+        try:
+            if include_acl_mask:
+                if authz is None:
+                    raise typer.BadParameter(
+                        "--include-acl-mask requires an authz backend granting "
+                        "the audit_exporter role."
+                    )
+
+                assert acting_on_behalf_of is not None
+                authorized = await authz.check(
+                    acting_on_behalf_of,
+                    AUDIT_EXPORTER,
+                    "export",
+                )
+                if not authorized:
+                    await _emit_export_audit(
+                        db_url=cfg.audit_db_url,
+                        signing_key_env=cfg.audit_signing_key_env,
+                        scan=None,
+                        acting_on_behalf_of=acting_on_behalf_of,
+                        export_format=export_format,
+                        include_acl_mask=True,
+                        decision="deny",
+                        latency_ms=(time.perf_counter() - started_at) * 1000,
+                    )
+                    raise typer.BadParameter("--include-acl-mask requires the audit_exporter role.")
+
+            allowed_acls: list[str] | None = None
+            if not include_acl_mask and authz is not None and acting_on_behalf_of is not None:
+                allowed_acls = await authz.list_authorized_objects(
+                    acting_on_behalf_of,
+                    VIEW,
+                )
+
+            scan = await store.scan(
+                as_of=as_of_timestamp,
+                include_closed=include_closed,
+                acl_subject=acting_on_behalf_of,
+                allowed_acls=allowed_acls,
+                include_all_acls=include_acl_mask,
+            )
+
+            if entity is not None:
+                neighborhood_hops = 2 if hops is None else hops
+                scan = _filter_export_neighborhood(
+                    scan,
+                    entity=entity,
+                    hops=neighborhood_hops,
+                )
+
+            await _emit_export_audit(
+                db_url=cfg.audit_db_url,
+                signing_key_env=cfg.audit_signing_key_env,
+                scan=scan,
+                acting_on_behalf_of=acting_on_behalf_of,
+                export_format=export_format,
+                include_acl_mask=include_acl_mask,
+                decision="allow",
+                latency_ms=(time.perf_counter() - started_at) * 1000,
+            )
+
+            return scan
+        finally:
+            await _close_store_without_masking(store)
+
+    return asyncio.run(_run())
+
+
+def _filter_export_neighborhood(
+    scan: GraphScan,
+    *,
+    entity: str,
+    hops: int,
+) -> GraphScan:
+    """Restrict an already permission-filtered scan to an entity neighborhood."""
+    adjacency: dict[str, set[str]] = {}
+
+    def connect(left: str, right: str) -> None:
+        adjacency.setdefault(left, set()).add(right)
+        adjacency.setdefault(right, set()).add(left)
+
+    for fact in scan.facts:
+        connect(fact.subject_id, fact.object_id)
+
+    for record in scan.merges:
+        for merged_id in record.merged_ids:
+            connect(merged_id, record.canonical_id)
+
+    visible_ids = {item.id for item in scan.entities}
+    if entity not in visible_ids:
+        return scan.model_copy(update={"entities": [], "facts": [], "merges": []})
+
+    included = {entity}
+    frontier = {entity}
+
+    for _ in range(hops):
+        next_frontier: set[str] = set()
+        for current in frontier:
+            next_frontier.update(adjacency.get(current, set()))
+        next_frontier -= included
+        included.update(next_frontier)
+        frontier = next_frontier
+        if not frontier:
+            break
+
+    entities = [item for item in scan.entities if item.id in included]
+    facts = [
+        fact for fact in scan.facts if fact.subject_id in included and fact.object_id in included
+    ]
+
+    merges = []
+    for record in scan.merges:
+        if record.canonical_id not in included:
+            continue
+        merged_ids = [merged_id for merged_id in record.merged_ids if merged_id in included]
+        if merged_ids:
+            merges.append(record.model_copy(update={"merged_ids": merged_ids}))
+
+    return scan.model_copy(
+        update={
+            "entities": entities,
+            "facts": facts,
+            "merges": merges,
+        }
+    )
+
+
+@export_app.command("neo4j")
+def export_neo4j(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Destination Cypher file.",
+        ),
+    ] = Path("cypher.txt"),
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of",
+            help="Export the graph as it existed at this ISO-8601 timestamp.",
+        ),
+    ] = None,
+    include_closed: Annotated[
+        bool,
+        typer.Option(
+            "--include-closed",
+            help="Include closed historical facts in the export.",
+        ),
+    ] = False,
+    entity: Annotated[
+        str | None,
+        typer.Option(
+            "--entity",
+            help="Restrict the export to this entity and its neighborhood.",
+        ),
+    ] = None,
+    hops: Annotated[
+        int | None,
+        typer.Option(
+            "--hops",
+            min=0,
+            help="Neighborhood depth for --entity. Default: 2.",
+        ),
+    ] = None,
+    push: Annotated[
+        str | None,
+        typer.Option(
+            "--push",
+            help="Push directly to a separate Neo4j visualization database URI.",
+        ),
+    ] = None,
+    user: Annotated[
+        str,
+        typer.Option(
+            "--user",
+            help="Neo4j username for --push.",
+        ),
+    ] = "neo4j",
+    password: Annotated[
+        str | None,
+        typer.Option(
+            "--password",
+            help="Neo4j password for --push.",
+        ),
+    ] = None,
+    database: Annotated[
+        str,
+        typer.Option(
+            "--database",
+            help="Neo4j visualization database for --push.",
+        ),
+    ] = "neo4j",
+    acting_on_behalf_of: Annotated[
+        str | None,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Caller identity used to resolve ACL permissions for export.",
+        ),
+    ] = None,
+    include_acl_mask: Annotated[
+        bool,
+        typer.Option(
+            "--include-acl-mask",
+            help=(
+                "Privileged audit export: include data across ACL boundaries "
+                "with ACL stamps preserved. Requires the audit_exporter role "
+                "and --acting-on-behalf-of."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Export visualization-oriented Neo4j Cypher."""
+    from ontos.exporters.cypher import push_neo4j, render_cypher
+
+    if push is not None:
+        if password is None:
+            raise typer.BadParameter("--password is required with --push.")
+
+        if os.environ.get("ONTOS_STORAGE_BACKEND", "").lower() == "neo4j":
+            operational_uri = os.environ.get("NEO4J_URI")
+            operational_database = os.environ.get("NEO4J_DATABASE", "neo4j")
+
+            if (
+                operational_uri is not None
+                and push.rstrip("/") == operational_uri.rstrip("/")
+                and database == operational_database
+            ):
+                raise typer.BadParameter(
+                    "--push must target a separate Neo4j visualization database, "
+                    "not the operational Ontos database."
+                )
+
+    scan = _scan_for_export(
+        storage_path,
+        as_of=as_of,
+        include_closed=include_closed,
+        entity=entity,
+        hops=hops,
+        acting_on_behalf_of=acting_on_behalf_of,
+        include_acl_mask=include_acl_mask,
+        export_format="neo4j",
+    )
+
+    if push is not None:
+        from neo4j import AsyncGraphDatabase
+
+        assert password is not None
+        driver = AsyncGraphDatabase.driver(
+            push,
+            auth=(user, password),
+        )
+
+        async def _push() -> None:
+            try:
+                await push_neo4j(scan, driver, database=database)
+            finally:
+                await driver.close()
+
+        asyncio.run(_push())
+        typer.echo(f"pushed Neo4j visualization snapshot to {push} (database={database})")
+        return
+
+    output.write_text(render_cypher(scan), encoding="utf-8")
+    typer.echo(f"wrote Neo4j Cypher snapshot to {output}")
+
+
+@export_app.command("graphml")
+def export_graphml(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Destination GraphML file.",
+        ),
+    ] = Path("graph.graphml"),
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of",
+            help="Export the graph as it existed at this ISO-8601 timestamp.",
+        ),
+    ] = None,
+    include_closed: Annotated[
+        bool,
+        typer.Option(
+            "--include-closed",
+            help="Include closed historical facts in the export.",
+        ),
+    ] = False,
+    entity: Annotated[
+        str | None,
+        typer.Option(
+            "--entity",
+            help="Restrict the export to this entity and its neighborhood.",
+        ),
+    ] = None,
+    hops: Annotated[
+        int | None,
+        typer.Option(
+            "--hops",
+            min=0,
+            help="Neighborhood depth for --entity. Default: 2.",
+        ),
+    ] = None,
+    acting_on_behalf_of: Annotated[
+        str | None,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Caller identity used to resolve ACL permissions for export.",
+        ),
+    ] = None,
+    include_acl_mask: Annotated[
+        bool,
+        typer.Option(
+            "--include-acl-mask",
+            help=(
+                "Privileged audit export: include data across ACL boundaries "
+                "with ACL stamps preserved. Requires the audit_exporter role "
+                "and --acting-on-behalf-of."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Export GraphML for graph visualization tools."""
+    from ontos.exporters.graphml import render_graphml
+
+    scan = _scan_for_export(
+        storage_path,
+        as_of=as_of,
+        include_closed=include_closed,
+        entity=entity,
+        hops=hops,
+        acting_on_behalf_of=acting_on_behalf_of,
+        include_acl_mask=include_acl_mask,
+        export_format="graphml",
+    )
+    output.write_text(render_graphml(scan), encoding="utf-8")
+    typer.echo(f"wrote GraphML snapshot to {output}")
+
+
+@export_app.command("svg")
+def export_svg(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Destination SVG file.",
+        ),
+    ] = Path("graph.svg"),
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of",
+            help="Export the graph as it existed at this ISO-8601 timestamp.",
+        ),
+    ] = None,
+    include_closed: Annotated[
+        bool,
+        typer.Option(
+            "--include-closed",
+            help="Include closed historical facts in the export.",
+        ),
+    ] = False,
+    entity: Annotated[
+        str | None,
+        typer.Option(
+            "--entity",
+            help="Restrict the export to this entity and its neighborhood.",
+        ),
+    ] = None,
+    hops: Annotated[
+        int | None,
+        typer.Option(
+            "--hops",
+            min=0,
+            help="Neighborhood depth for --entity. Default: 2.",
+        ),
+    ] = None,
+    acting_on_behalf_of: Annotated[
+        str | None,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Caller identity used to resolve ACL permissions for export.",
+        ),
+    ] = None,
+    include_acl_mask: Annotated[
+        bool,
+        typer.Option(
+            "--include-acl-mask",
+            help=(
+                "Privileged audit export: include data across ACL boundaries "
+                "with ACL stamps preserved. Requires the audit_exporter role "
+                "and --acting-on-behalf-of."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Export a static SVG graph visualization."""
+    from ontos.exporters.svg import render_svg
+
+    scan = _scan_for_export(
+        storage_path,
+        as_of=as_of,
+        include_closed=include_closed,
+        entity=entity,
+        hops=hops,
+        acting_on_behalf_of=acting_on_behalf_of,
+        include_acl_mask=include_acl_mask,
+        export_format="svg",
+    )
+    output.write_text(render_svg(scan), encoding="utf-8")
+    typer.echo(f"wrote SVG snapshot to {output}")
+
+
+@export_app.command("json-ld")
+def export_json_ld(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Destination JSON-LD file.",
+        ),
+    ] = Path("graph.jsonld"),
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help=(
+                "Local persistence file for the dev NetworkxStore. "
+                "Default: ~/.ontos/dev-store.pkl. Pass '' for ephemeral. "
+                "Ignored for ONTOS_STORAGE_BACKEND=neo4j."
+            ),
+        ),
+    ] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of",
+            help="Export the graph as it existed at this ISO-8601 timestamp.",
+        ),
+    ] = None,
+    include_closed: Annotated[
+        bool,
+        typer.Option(
+            "--include-closed",
+            help="Include closed historical facts in the export.",
+        ),
+    ] = False,
+    entity: Annotated[
+        str | None,
+        typer.Option(
+            "--entity",
+            help="Restrict the export to this entity and its neighborhood.",
+        ),
+    ] = None,
+    hops: Annotated[
+        int | None,
+        typer.Option(
+            "--hops",
+            min=0,
+            help="Neighborhood depth for --entity. Default: 2.",
+        ),
+    ] = None,
+    acting_on_behalf_of: Annotated[
+        str | None,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Caller identity used to resolve ACL permissions for export.",
+        ),
+    ] = None,
+    include_acl_mask: Annotated[
+        bool,
+        typer.Option(
+            "--include-acl-mask",
+            help=(
+                "Privileged audit export: include data across ACL boundaries "
+                "with ACL stamps preserved. Requires the audit_exporter role "
+                "and --acting-on-behalf-of."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Export JSON-LD graph data."""
+    from ontos.exporters.jsonld import render_jsonld
+
+    scan = _scan_for_export(
+        storage_path,
+        as_of=as_of,
+        include_closed=include_closed,
+        entity=entity,
+        hops=hops,
+        acting_on_behalf_of=acting_on_behalf_of,
+        include_acl_mask=include_acl_mask,
+        export_format="json-ld",
+    )
+    output.write_text(render_jsonld(scan), encoding="utf-8")
+    typer.echo(f"wrote JSON-LD snapshot to {output}")
 
 
 audit_app = typer.Typer(help="Audit chain commands.")

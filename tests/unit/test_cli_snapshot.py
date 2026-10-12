@@ -16,10 +16,17 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from ontos.cli import app
-from ontos.cli.main import _collect_snapshot_metadata, _compute_snapshot_id
+from ontos.cli.main import (
+    _collect_snapshot_metadata,
+    _compute_snapshot_id,
+    _load_snapshot,
+)
+from ontos.exporters.cypher import render_cypher
+from ontos.exporters.graphml import render_graphml
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.runtime.server import SnapshotMetadata
 from ontos.storage.base import StorageError
+from ontos.storage.models import GraphScan, StoredEntity
 from ontos.storage.networkx_store import NetworkxStore
 
 runner = CliRunner(env={"COLUMNS": "200", "TERM": "dumb", "NO_COLOR": "1"})
@@ -84,16 +91,33 @@ def test_snapshot_and_storage_path_are_mutually_exclusive(tmp_path: Path) -> Non
     assert "mutually exclusive" in result.stdout.lower() + result.stderr.lower()
 
 
-def test_snapshot_rejects_unsupported_extension_with_pointer_to_issue_32(
-    tmp_path: Path,
-) -> None:
-    bogus = tmp_path / "snap.jsonld"
+def test_snapshot_rejects_unsupported_extension(tmp_path: Path) -> None:
+    bogus = tmp_path / "snap.xyz"
     bogus.write_text("{}")
     result = runner.invoke(app, ["serve", "--snapshot", str(bogus)])
     assert result.exit_code != 0
     combined = (result.stdout + result.stderr).lower()
     assert "not supported" in combined
-    assert "#32" in result.stdout + result.stderr
+
+
+def test_snapshot_loads_jsonld_with_manifest_metadata(tmp_path: Path) -> None:
+    snap = tmp_path / "snap.jsonld"
+    snap.write_text(
+        """{"manifest":{"ontologyId":"ontos.starter","ontologyVersion":"0.4"},"@graph":[]}""",
+        encoding="utf-8",
+    )
+
+    store, metadata = _load_snapshot(snap)
+    scan = asyncio.run(store.scan())
+
+    assert scan.entities == []
+    assert scan.facts == []
+    assert scan.merges == []
+    assert isinstance(metadata, SnapshotMetadata)
+    assert metadata.id == _compute_snapshot_id(snap)
+    assert metadata.format == "ontos-jsonld-v1"
+    assert metadata.ontology_id == "ontos.starter"
+    assert metadata.ontology_version == "0.4"
 
 
 def test_snapshot_rejects_missing_file(tmp_path: Path) -> None:
@@ -163,3 +187,98 @@ def test_snapshot_id_changes_when_file_bytes_change(tmp_path: Path) -> None:
     _write_snapshot_pickle(snap_a, with_fact=True)
     _write_snapshot_pickle(snap_b, with_fact=False)
     assert _compute_snapshot_id(snap_a) != _compute_snapshot_id(snap_b)
+
+
+def test_snapshot_loads_graphml_with_fact_metadata(tmp_path: Path) -> None:
+    when = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="demo",
+            extractor_id="demo",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=when,
+        ingested_at=when,
+    )
+    scan = GraphScan(
+        entities=[
+            StoredEntity(
+                id="person:alice",
+                type="Person",
+                canonical_name="Alice",
+            ),
+            StoredEntity(
+                id="company:acme",
+                type="Company",
+                canonical_name="Acme",
+            ),
+        ],
+        facts=[fact],
+        merges=[],
+    )
+    snap = tmp_path / "snap.graphml"
+    snap.write_text(render_graphml(scan), encoding="utf-8")
+
+    store, metadata = _load_snapshot(snap)
+    loaded = asyncio.run(store.scan())
+
+    assert [item.id for item in loaded.facts] == [fact.id]
+    assert metadata.id == _compute_snapshot_id(snap)
+    assert metadata.format == "ontos-graphml-v1"
+    assert metadata.ontology_id == "ontos.starter"
+    assert metadata.ontology_version == "0.4"
+
+
+def test_snapshot_loads_cypher_with_fact_metadata(tmp_path: Path) -> None:
+    when = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="demo",
+            extractor_id="demo",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=when,
+        ingested_at=when,
+    )
+    scan = GraphScan(
+        entities=[
+            StoredEntity(
+                id="person:alice",
+                type="Person",
+                canonical_name="Alice",
+            ),
+            StoredEntity(
+                id="company:acme",
+                type="Company",
+                canonical_name="Acme",
+            ),
+        ],
+        facts=[fact],
+        merges=[],
+    )
+    for filename in ("snap.cypher", "cypher.txt"):
+        snap = tmp_path / filename
+        snap.write_text(render_cypher(scan), encoding="utf-8")
+
+        store, metadata = _load_snapshot(snap)
+        loaded = asyncio.run(store.scan())
+
+        assert [item.id for item in loaded.facts] == [fact.id]
+        assert metadata.id == _compute_snapshot_id(snap)
+        assert metadata.format == "ontos-cypher-v1"
+        assert metadata.ontology_id == "ontos.starter"
+        assert metadata.ontology_version == "0.4"

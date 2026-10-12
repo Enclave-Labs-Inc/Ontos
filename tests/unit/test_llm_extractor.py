@@ -302,3 +302,101 @@ async def test_bitemporal_defaults_set(ontology: Ontology) -> None:
     assert fact.t_valid is not None
     assert fact.ingested_at is not None
     assert fact.t_invalid is None
+
+
+async def test_type_prefix_is_removed_from_canonical_name_but_raw_id_is_preserved(
+    ontology: Ontology,
+) -> None:
+    llm = FakeLLM(
+        [
+            [
+                _valid_triple(
+                    subject_id="Person:Alice Johnson",
+                    subject_canonical_name="Person:Alice Johnson",
+                    object_id="Company:Acme Corp",
+                    object_canonical_name="Company:Acme Corp",
+                )
+            ]
+        ]
+    )
+
+    extractor = LlmExtractor(llm, ontology)
+    result = await extractor.extract(
+        ExtractionInput(
+            source_id="type-prefix-test",
+            text="Alice Johnson works at Acme Corp.",
+        )
+    )
+
+    entities = {entity.id: entity for entity in result.entities}
+
+    assert entities["Person:Alice Johnson"].canonical_name == "Alice Johnson"
+    assert entities["Company:Acme Corp"].canonical_name == "Acme Corp"
+
+    # Current Ontos pre-resolution semantics intentionally preserve raw IDs.
+    assert result.facts[0].subject_id == "Person:Alice Johnson"
+    assert result.facts[0].object_id == "Company:Acme Corp"
+
+
+async def test_type_suffix_is_removed_from_canonical_name_but_raw_id_is_preserved(
+    ontology: Ontology,
+) -> None:
+    llm = FakeLLM(
+        [
+            [
+                _valid_triple(
+                    subject_id="Alice Johnson (Person)",
+                    subject_canonical_name="Alice Johnson (Person)",
+                    object_id="Acme Corp (Company)",
+                    object_canonical_name="Acme Corp (Company)",
+                )
+            ]
+        ]
+    )
+
+    extractor = LlmExtractor(llm, ontology)
+    result = await extractor.extract(
+        ExtractionInput(
+            source_id="type-suffix-test",
+            text="Alice Johnson works at Acme Corp.",
+        )
+    )
+
+    entities = {entity.id: entity for entity in result.entities}
+
+    assert entities["Alice Johnson (Person)"].canonical_name == "Alice Johnson"
+    assert entities["Acme Corp (Company)"].canonical_name == "Acme Corp"
+
+    # Raw IDs remain untouched under current pre-resolution semantics.
+    assert result.facts[0].subject_id == "Alice Johnson (Person)"
+    assert result.facts[0].object_id == "Acme Corp (Company)"
+
+
+async def test_rejects_raw_id_reused_for_different_entities(
+    ontology: Ontology,
+) -> None:
+    llm = FakeLLM(
+        [
+            [
+                _valid_triple(
+                    subject_id="same-id",
+                    subject_type="Company",
+                    subject_canonical_name="Acme Corp",
+                    predicate="subsidiary_of",
+                    object_id="same-id",
+                    object_type="Company",
+                    object_canonical_name="Beta Systems",
+                )
+            ]
+        ]
+    )
+
+    extractor = LlmExtractor(llm, ontology)
+
+    with pytest.raises(ExtractionError, match="raw entity id"):
+        await extractor.extract(
+            ExtractionInput(
+                source_id="collision-test",
+                text="Beta Systems is a subsidiary of Acme Corp.",
+            )
+        )
