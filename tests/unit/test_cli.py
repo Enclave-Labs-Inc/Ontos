@@ -1715,6 +1715,104 @@ def test_export_neo4j_push_rejects_operational_database(
     assert "separate" in output
 
 
+def test_export_neo4j_push_rejects_operational_database_from_storage_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#62: the guard must see an operational store configured via --storage,
+    and a different scheme / implicit port must not slip past it."""
+    monkeypatch.setenv("ONTOS_TEST_NEO4J_PASSWORD", "operational-secret")
+
+    result = runner.invoke(
+        app,
+        [
+            "--storage",
+            "neo4j://ops@operational.example/knowledge",
+            "--storage-password-env",
+            "ONTOS_TEST_NEO4J_PASSWORD",
+            "export",
+            "neo4j",
+            "--push",
+            "bolt://operational.example:7687",
+            "--password",
+            "viz-secret",
+            "--database",
+            "knowledge",
+        ],
+    )
+
+    assert result.exit_code == 2
+    output = (result.stdout + result.stderr).lower()
+    assert "operational" in output
+    assert "operational-secret" not in output
+
+
+def test_export_honors_global_storage_override(tmp_path: Path) -> None:
+    """#62: `ontos --storage <url> export …` must read the --storage store,
+    not silently fall back to the default dev store."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store_path = tmp_path / "store.pkl"
+    output_path = tmp_path / "override.graphml"
+
+    writer = NetworkxStore(path=store_path)
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="doc:1",
+            extractor_id="extractor:test",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=datetime(2026, 1, 1, tzinfo=UTC),
+        ingested_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    asyncio.run(writer.add_fact(fact))
+    asyncio.run(writer.close())
+
+    result = runner.invoke(
+        app,
+        [
+            "--storage",
+            f"networkx://{store_path}",
+            "export",
+            "graphml",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert str(fact.id) in output_path.read_text(encoding="utf-8")
+
+
+def test_export_rejects_storage_with_storage_path(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--storage",
+            "networkx://",
+            "export",
+            "graphml",
+            "--storage-path",
+            str(tmp_path / "store.pkl"),
+            "--output",
+            str(tmp_path / "out.graphml"),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "cannot be used together" in result.stdout + result.stderr
+
+
 def test_export_neo4j_push_requires_password_before_scanning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
