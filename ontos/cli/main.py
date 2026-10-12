@@ -49,8 +49,40 @@ app = typer.Typer(
 )
 
 
+@app.callback()
+def _main(
+    ctx: typer.Context,
+    storage: Annotated[
+        str | None,
+        typer.Option(
+            "--storage",
+            help=(
+                "Override graph storage for this invocation. "
+                "Examples: networkx://, networkx:///tmp/store.pkl, "
+                "neo4j://host:7687/database."
+            ),
+        ),
+    ] = None,
+    storage_password_env: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-password-env",
+            help=(
+                "Environment variable containing the Neo4j password for "
+                "--storage. Prefer this over embedding credentials in the URL."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Configure invocation-wide CLI options."""
+    ctx.ensure_object(dict)
+    ctx.obj["storage_url"] = storage
+    ctx.obj["storage_password_env"] = storage_password_env
+
+
 @app.command()
 def serve(
+    ctx: typer.Context,
     host: Annotated[str | None, typer.Option(help="Bind host; overrides env.")] = None,
     port: Annotated[int | None, typer.Option(help="Bind port; overrides env.")] = None,
     storage_path: Annotated[
@@ -93,11 +125,14 @@ def serve(
       from `<path>` and serves the same tool surface read-only
       against it. Mutually exclusive with `--storage-path`.
     """
-    if snapshot is not None and storage_path is not None:
+    cli_options = ctx.obj if isinstance(ctx.obj, dict) else {}
+    storage_url = cli_options.get("storage_url")
+    storage_password_env = cli_options.get("storage_password_env")
+
+    if snapshot is not None and (storage_path is not None or storage_url is not None):
         raise typer.BadParameter(
-            "--snapshot and --storage-path are mutually exclusive. "
-            "The snapshot flag serves a frozen file; --storage-path "
-            "binds the live dev NetworkxStore."
+            "--snapshot is mutually exclusive with --storage and --storage-path. "
+            "A snapshot serves a frozen graph; storage options bind the live store."
         )
 
     if host is not None:
@@ -112,21 +147,18 @@ def serve(
     # Deferred import so `ontos --help` doesn't drag in fastmcp.
     from ontos.runtime.server import main as _serve_main
 
-    # Thread the CLI's resolved storage path through the env so the
-    # server picks it up via RuntimeConfig.from_env(). `serve` is
-    # read-only against the dev store today — the MCP tools in
-    # runtime/server.py (search / traverse / facts_for_entity /
-    # get_fact) do not write — so no explicit flush is needed. The
-    # dirty-flag gate on NetworkxStore.flush() makes this safe even
-    # if a future write-capable tool lands: an unmodified store will
-    # not clobber a concurrent writer's snapshot.
-    resolved = _resolve_storage_path(storage_path)
-    if resolved is not None:
-        os.environ["ONTOS_STORAGE_PATH"] = str(resolved)
-    elif storage_path == "":
-        # Explicit opt-out: clear any inherited env.
-        os.environ.pop("ONTOS_STORAGE_PATH", None)
-    _serve_main()
+    if storage_url is not None and storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    resolved_path = None if storage_url is not None else _resolve_storage_path(storage_path)
+    cfg = _build_cli_runtime_config(
+        resolved_path,
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
+    )
+    _warn_if_ephemeral(cfg.storage_path, cfg.storage_backend)
+
+    _serve_main(config=cfg)
 
 
 def _compute_snapshot_id(path: Path) -> str:
@@ -289,6 +321,7 @@ def _serve_snapshot(path: Path) -> None:
 
 @app.command()
 def ingest(
+    ctx: typer.Context,
     source_dir: Annotated[
         Path,
         typer.Option(
@@ -413,9 +446,20 @@ def ingest(
     )
     typer.echo(f"discovered {document_count} document(s) in {source_dir}")
 
-    resolved_path = _resolve_storage_path(storage_path)
-    cfg = _build_cli_runtime_config(resolved_path)
-    _warn_if_ephemeral(resolved_path, cfg.storage_backend)
+    cli_options = ctx.obj if isinstance(ctx.obj, dict) else {}
+    storage_url = cli_options.get("storage_url")
+    storage_password_env = cli_options.get("storage_password_env")
+
+    if storage_url is not None and storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    resolved_path = None if storage_url is not None else _resolve_storage_path(storage_path)
+    cfg = _build_cli_runtime_config(
+        resolved_path,
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
+    )
+    _warn_if_ephemeral(cfg.storage_path, cfg.storage_backend)
 
     ontology = load_ontology(ontology_path)
     llm = _build_llm(
@@ -459,6 +503,7 @@ def ingest(
 
 @app.command()
 def query(
+    ctx: typer.Context,
     question: Annotated[str, typer.Argument(help="The natural-language question.")],
     ontology_path: Annotated[
         Path,
@@ -524,9 +569,20 @@ def query(
     from ontos.planner import LlmPlanner
     from ontos.runtime.server import build_store
 
-    resolved_path = _resolve_storage_path(storage_path)
-    cfg = _build_cli_runtime_config(resolved_path)
-    _warn_if_ephemeral(resolved_path, cfg.storage_backend)
+    cli_options = ctx.obj if isinstance(ctx.obj, dict) else {}
+    storage_url = cli_options.get("storage_url")
+    storage_password_env = cli_options.get("storage_password_env")
+
+    if storage_url is not None and storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    resolved_path = None if storage_url is not None else _resolve_storage_path(storage_path)
+    cfg = _build_cli_runtime_config(
+        resolved_path,
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
+    )
+    _warn_if_ephemeral(cfg.storage_path, cfg.storage_backend)
 
     ontology = load_ontology(ontology_path)
     llm = _build_llm(
@@ -1299,16 +1355,56 @@ def _resolve_storage_path(cli_flag: str | None) -> Path | None:
     return None
 
 
-def _build_cli_runtime_config(storage_path: Path | None) -> RuntimeConfig:
-    """Produce a RuntimeConfig that overrides from_env's storage_path.
+def _build_cli_runtime_config(
+    storage_path: Path | None,
+    *,
+    storage_url: str | None = None,
+    storage_password_env: str | None = None,
+) -> RuntimeConfig:
+    """Build CLI runtime config with storage-specific overrides.
 
-    Keeps from_env() strictly env-driven so tests that call it directly
-    stay in-memory; the "sensible default" layer lives in the CLI only.
+    Precedence for storage settings is:
+
+    ``--storage`` URL > environment-derived RuntimeConfig > defaults.
+
+    The legacy ``--storage-path`` path remains supported when ``--storage``
+    is absent. Supplying both is rejected rather than silently choosing one.
     """
-    from ontos.runtime.config import RuntimeConfig
+    from ontos.runtime.config import RuntimeConfig, StorageConfig
 
     base = RuntimeConfig.from_env()
-    return dataclasses.replace(base, storage_path=storage_path)
+
+    if storage_url is None:
+        if storage_password_env is not None:
+            raise typer.BadParameter("--storage-password-env requires --storage with a Neo4j URL.")
+        return dataclasses.replace(base, storage_path=storage_path)
+
+    if storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    try:
+        storage = StorageConfig.from_url(storage_url)
+    except ValueError as exc:
+        raise typer.BadParameter(f"invalid --storage URL: {exc}") from exc
+
+    if storage_password_env is not None:
+        if storage.backend != "neo4j":
+            raise typer.BadParameter(
+                "--storage-password-env is only valid with a Neo4j --storage URL."
+            )
+
+        password = os.environ.get(storage_password_env)
+        if password is None:
+            raise typer.BadParameter(
+                f"--storage-password-env names unset environment variable {storage_password_env!r}."
+            )
+
+        storage = dataclasses.replace(
+            storage,
+            neo4j_password=password,
+        )
+
+    return base.with_storage_override(storage)
 
 
 async def _close_store_without_masking(store: object) -> None:

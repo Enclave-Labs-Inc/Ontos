@@ -108,9 +108,41 @@ ontos query "Who works at Acme?" --ontology ./starter.yaml --llm-backend anthrop
 
 First-time model loads can take 30–60s. If `ontos ingest` or `ontos query` times out, warm the model via `ollama run <model>` first, or raise the per-request timeout with `--ollama-timeout 180` (or higher for long documents).
 
-### Dev-store persistence (0.3.0+)
+### Storage selection and dev-store persistence (0.3.0+)
 
-By default the CLI persists dev-store facts to `~/.ontos/dev-store.pkl`, so `ontos ingest ...` followed by `ontos query ...` works out of the box without an external database. Override the location with `--storage-path PATH` or `ONTOS_STORAGE_PATH`; pass `--storage-path ""` for ephemeral in-memory (what pre-0.3.0 did silently — operators who opt out see a loud warning). Regulated deploys continue to use `ONTOS_STORAGE_BACKEND=neo4j`; the dev-store pickle is Python-version-specific, single-process, and not a wire format.
+By default the CLI persists dev-store facts to `~/.ontos/dev-store.pkl`, so `ontos ingest ...` followed by `ontos query ...` works out of the box without an external database. The existing `--storage-path PATH` and `ONTOS_STORAGE_PATH` options remain supported; pass `--storage-path ""` for ephemeral in-memory storage.
+
+For an invocation-wide override, pass `--storage` **before** the subcommand:
+
+```bash
+# Ephemeral in-memory NetworkX store
+ontos --storage networkx:// query "Who works at Acme?" --ontology ./starter.yaml
+
+# Persisted NetworkX dev store
+ontos --storage networkx:///tmp/scratch.pkl ingest --source-dir ./corpus --ontology ./starter.yaml
+
+# Neo4j
+ontos --storage neo4j://db.internal:7687/neo4j query "Who works at Acme?" --ontology ./starter.yaml
+```
+
+Supported storage URLs are:
+
+- `networkx://` — ephemeral in-memory dev store.
+- `networkx:///path/to/file.pkl` — persisted NetworkX dev store.
+- `neo4j://host:port/database` — Neo4j.
+- `neo4j+ssc://host:port/database` and `bolt+s://host:port/database` — Neo4j TLS schemes.
+
+CLI storage settings win over storage environment settings; values omitted from a Neo4j URL, such as the username or password, are filled from `NEO4J_USER` / `NEO4J_PASSWORD`. Credentials embedded in the URL are supported for compatibility but discouraged because URLs can leak through shell history or process listings. Prefer a dedicated password environment variable:
+
+```bash
+export ONTOS_NEO4J_PASSWORD='...'
+ontos \
+  --storage neo4j://neo4j@db.internal:7687/neo4j \
+  --storage-password-env ONTOS_NEO4J_PASSWORD \
+  query "Who works at Acme?" --ontology ./starter.yaml
+```
+
+`--storage` and command-level `--storage-path` are mutually exclusive. Production deployments may continue using `ONTOS_STORAGE_BACKEND=neo4j` plus the existing `NEO4J_*` environment variables; the CLI flag is an in-process override and does not mutate those environment settings. The NetworkX pickle remains Python-version-specific, single-process, and is not a wire format.
 
 ### Snapshot MCP (0.5.0+)
 
