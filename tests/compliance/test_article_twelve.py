@@ -175,3 +175,55 @@ async def test_storage_credentials_never_enter_audit_payload_or_output(
 
     assert secret not in combined_output
     assert "db.example:7687" not in combined_output
+
+
+@pytest.mark.parametrize("tool", ["search", "traverse", "explain"])
+async def test_offsetless_as_of_is_answered_and_audited(audit: AuditEmitter, tool: str) -> None:
+    """#60: an `as_of` without a UTC offset used to raise TypeError inside the
+    store, before `_emit`, so the request left no Article-12 record."""
+    import dataclasses
+    from datetime import UTC, datetime
+
+    from fastmcp import Client
+
+    from ontos.runtime.config import RuntimeConfig
+    from ontos.runtime.models import Confidence, Fact, Provenance
+    from ontos.runtime.server import build_server
+    from ontos.storage.networkx_store import NetworkxStore
+
+    store = NetworkxStore()
+    fact = Fact(
+        subject_id="person:alice",
+        predicate="works_at",
+        object_id="company:acme",
+        provenance=Provenance(
+            source_id="doc:1",
+            extractor_id="extractor:test",
+            extractor_version="1",
+            ontology_id="ontos.starter",
+            ontology_version="0.4",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=datetime(2026, 1, 1, tzinfo=UTC),
+        ingested_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    await store.add_fact(fact)
+
+    cfg = dataclasses.replace(RuntimeConfig.from_env(), storage_path=None)
+    server = build_server(cfg, store=store, audit=audit)
+
+    arguments: dict[str, object] = {"agent_identity": "compliance:issue60", "as_of": "2026-03-01"}
+    if tool == "search":
+        arguments["query"] = "alice"
+    elif tool == "traverse":
+        arguments["start"] = "person:alice"
+    else:
+        arguments["entity_id"] = "person:alice"
+
+    async with Client(server) as client:
+        await client.call_tool(tool, arguments)
+
+    assert len(audit) == 1
+    record = audit._chain[-1]
+    assert record.article12[ArticleTwelveField.TOOL_INVOKED] == tool

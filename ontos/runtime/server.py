@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -22,6 +21,7 @@ from ontos.executor import DeterministicExecutor, Executor
 from ontos.planner import Planner, PlannerError
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.models import AuditRecord, Fact
+from ontos.runtime.temporal import parse_as_of
 from ontos.storage.base import GraphStore
 from ontos.storage.networkx_store import NetworkxStore
 
@@ -212,7 +212,7 @@ def build_server(
     ) -> ToolResponse:
         """Semantic + graph retrieval. Returns facts with per-fact provenance."""
         started = time.perf_counter()
-        ts = datetime.fromisoformat(as_of) if as_of else None
+        ts = parse_as_of(as_of) if as_of else None
         allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
         facts = await store.search(
             query,
@@ -249,7 +249,7 @@ def build_server(
     ) -> ToolResponse:
         """Multi-hop traversal from an entity. Permission-aware during traversal."""
         started = time.perf_counter()
-        ts = datetime.fromisoformat(as_of) if as_of else None
+        ts = parse_as_of(as_of) if as_of else None
         allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
         facts = list(
             await store.traverse(
@@ -287,7 +287,7 @@ def build_server(
     ) -> ToolResponse:
         """Entity dossier: definition, sources, related entities, validity ranges."""
         started = time.perf_counter()
-        ts = datetime.fromisoformat(as_of) if as_of else None
+        ts = parse_as_of(as_of) if as_of else None
         allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
         facts = await store.facts_for_entity(
             entity_id,
