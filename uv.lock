@@ -917,7 +917,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "scipy" },
-    { name = "sqlalchemy" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "structlog" },
     { name = "typer" },
 ]
@@ -986,7 +986,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "scipy", specifier = ">=1.13" },
-    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "testcontainers", extras = ["neo4j", "postgres"], marker = "extra == 'dev'", specifier = ">=4.8" },
     { name = "typer", specifier = ">=0.12" },
