@@ -1,4 +1,14 @@
-"""Cypher exporter for backend-neutral graph snapshots."""
+"""Cypher exporter for backend-neutral graph snapshots.
+
+Operational and visualization Neo4j schemas are intentionally different.
+
+The Ontos operational store uses ``(:Entity)-[:RELATES]->(:Entity)`` with
+the predicate, ACL, provenance, and bitemporal fields stored as properties.
+This exporter produces a separate visualization schema with ontology-derived
+node labels and predicate-derived relationship types for Bloom and graph
+interchange. ``push_neo4j`` must therefore target a separate visualization
+database, never the operational Ontos database.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +20,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+import structlog
+
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.models import GraphScan, StoredEntity
@@ -18,6 +30,7 @@ if TYPE_CHECKING:
     from neo4j import AsyncDriver
 
 _IDENTIFIER_RE = re.compile(r"[^A-Za-z0-9_]+")
+log = structlog.get_logger(__name__)
 
 
 def sanitize_identifier(
@@ -36,10 +49,7 @@ def sanitize_identifier(
 
 def _quote(value: str) -> str:
     escaped = (
-        value.replace("\\", "\\\\")
-        .replace("'", "\\'")
-        .replace("\r", "\\r")
-        .replace("\n", "\\n")
+        value.replace("\\", "\\\\").replace("'", "\\'").replace("\r", "\\r").replace("\n", "\\n")
     )
     return f"'{escaped}'"
 
@@ -64,7 +74,16 @@ def _props(items: list[tuple[str, object | None]]) -> str:
 
 
 def _entity_label(entity: StoredEntity) -> str:
-    return sanitize_identifier(entity.type, fallback="Entity")
+    cleaned = _IDENTIFIER_RE.sub("", entity.type or "")
+    if not cleaned:
+        log.warning(
+            "export-entity-type-fallback",
+            entity_id=entity.id,
+            entity_type=entity.type,
+            fallback="Entity",
+        )
+        return "Entity"
+    return cleaned
 
 
 def _relationship_type(predicate: str) -> str:
@@ -97,7 +116,6 @@ def _merge_edges(scan: GraphScan) -> list[tuple[str, str, str, MergeRecord]]:
         edges,
         key=lambda item: (item[0], item[1], item[2], item[3].resolved_at.isoformat()),
     )
-
 
 
 _QUOTED = r"'(?:\\.|[^'\\])*'"
@@ -260,16 +278,9 @@ def load_cypher(path: Path) -> GraphScan:
                     type=_optional_str(props, "entity_type"),
                     canonical_name=_optional_str(props, "canonical_name"),
                     aliases=[str(alias) for alias in aliases_raw],
-                    properties={
-                        str(key): str(value)
-                        for key, value in properties.items()
-                    },
-                    provenance_source_id=_optional_str(
-                        props, "provenance_source_id"
-                    ),
-                    provenance_extractor_id=_optional_str(
-                        props, "provenance_extractor_id"
-                    ),
+                    properties={str(key): str(value) for key, value in properties.items()},
+                    provenance_source_id=_optional_str(props, "provenance_source_id"),
+                    provenance_extractor_id=_optional_str(props, "provenance_extractor_id"),
                     acl_ref=_optional_str(props, "acl_ref"),
                 )
             )
@@ -312,24 +323,14 @@ def load_cypher(path: Path) -> GraphScan:
                         confidence=Confidence(_required_str(props, "confidence")),
                         confidence_score=float(props["confidence_score"]),
                     ),
-                    t_valid=datetime.fromisoformat(
-                        _required_str(props, "t_valid")
-                    ),
+                    t_valid=datetime.fromisoformat(_required_str(props, "t_valid")),
                     t_invalid=(
-                        datetime.fromisoformat(
-                            _required_str(props, "t_invalid")
-                        )
+                        datetime.fromisoformat(_required_str(props, "t_invalid"))
                         if props.get("t_invalid") is not None
                         else None
                     ),
-                    ingested_at=datetime.fromisoformat(
-                        _required_str(props, "ingested_at")
-                    ),
-                    superseded_by=(
-                        UUID(superseded_raw)
-                        if superseded_raw is not None
-                        else None
-                    ),
+                    ingested_at=datetime.fromisoformat(_required_str(props, "ingested_at")),
+                    superseded_by=(UUID(superseded_raw) if superseded_raw is not None else None),
                     acl_ref=_optional_str(props, "acl_ref"),
                 )
             )
@@ -351,17 +352,12 @@ def load_cypher(path: Path) -> GraphScan:
             merged_id = _parse_literal(merge_match.group("merged"))
             canonical_id = _parse_literal(merge_match.group("canonical"))
             resolver_id = _parse_literal(merge_edge.group("resolver_id"))
-            if not all(
-                isinstance(value, str)
-                for value in (merged_id, canonical_id, resolver_id)
-            ):
+            if not all(isinstance(value, str) for value in (merged_id, canonical_id, resolver_id)):
                 raise ValueError("Ontos Cypher merge ids must be strings")
 
             props = _parse_props(set_line.removeprefix("SET r += ")[:-1])
             resolver_version = _required_str(props, "resolver_version")
-            resolved_at = datetime.fromisoformat(
-                _required_str(props, "resolved_at")
-            )
+            resolved_at = datetime.fromisoformat(_required_str(props, "resolved_at"))
             reason = _required_str(props, "reason")
 
             key = (
@@ -412,6 +408,7 @@ def load_cypher(path: Path) -> GraphScan:
         ),
     )
 
+
 async def push_neo4j(
     scan: GraphScan,
     driver: AsyncDriver,
@@ -426,9 +423,7 @@ async def push_neo4j(
 
     async with driver.session(database=database) as session:
         for label in labels:
-            await session.run(
-                f"CREATE INDEX IF NOT EXISTS FOR (n:`{label}`) ON (n.id)"
-            )
+            await session.run(f"CREATE INDEX IF NOT EXISTS FOR (n:`{label}`) ON (n.id)")
 
         for entity in entities:
             label = labels_by_id[entity.id]
@@ -537,8 +532,7 @@ def render_cypher(scan: GraphScan) -> str:
     for entity in entities:
         label = labels_by_id[entity.id]
         lines.append(
-            f"MERGE (n:`{label}` {{id: {_quote(entity.id)}}}) "
-            f"SET n += {_node_properties(entity)};"
+            f"MERGE (n:`{label}` {{id: {_quote(entity.id)}}}) SET n += {_node_properties(entity)};"
         )
 
     if entities and (scan.facts or scan.merges):
@@ -552,9 +546,7 @@ def render_cypher(scan: GraphScan) -> str:
             f"MATCH (s:`{subject_label}` {{id: {_quote(fact.subject_id)}}}), "
             f"(o:`{object_label}` {{id: {_quote(fact.object_id)}}})"
         )
-        lines.append(
-            f"MERGE (s)-[r:`{rel_type}` {{fact_id: {_quote(str(fact.id))}}}]->(o)"
-        )
+        lines.append(f"MERGE (s)-[r:`{rel_type}` {{fact_id: {_quote(str(fact.id))}}}]->(o)")
         lines.append(
             "SET r += "
             + _props(
@@ -591,8 +583,7 @@ def render_cypher(scan: GraphScan) -> str:
             f"(c:`{canonical_label}` {{id: {_quote(canonical_id)}}})"
         )
         lines.append(
-            "MERGE (m)-[r:MERGED_WITH "
-            f"{{resolver_id: {_quote(record.resolver_id)}}}]->(c)"
+            f"MERGE (m)-[r:MERGED_WITH {{resolver_id: {_quote(record.resolver_id)}}}]->(c)"
         )
         lines.append(
             "SET r += "

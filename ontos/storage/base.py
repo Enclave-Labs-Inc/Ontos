@@ -175,6 +175,7 @@ class GraphStore(Protocol):
         include_closed: bool = False,
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
+        include_all_acls: bool = False,
     ) -> GraphScan:
         """Return a backend-neutral graph snapshot for export.
 
@@ -190,6 +191,11 @@ class GraphStore(Protocol):
         ACL filtering happens at the store boundary. Facts, entity
         attributes, and merge records that are not visible to the caller
         must not appear in the returned snapshot.
+
+        ``include_all_acls=True`` is the explicit privileged audit-export
+        escape hatch. Callers MUST authorize the dedicated audit-exporter
+        role before setting it; ordinary user-facing reads must leave it
+        False.
         """
         ...
 

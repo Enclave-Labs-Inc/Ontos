@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from ontos.authz.base import AUDIT_EXPORTER
+
 
 class InMemoryAuthz:
     """Dict-of-tuples authz store. Zero infra.
@@ -18,8 +20,9 @@ class InMemoryAuthz:
 
     id: str = "inmemory-authz"
 
-    def __init__(self) -> None:
+    def __init__(self, *, audit_roles: set[str] | None = None) -> None:
         self._grants: dict[tuple[str, str], set[str]] = defaultdict(set)
+        self._audit_roles = set(audit_roles or ())
 
     def grant(self, subject: str, relation: str, object_: str) -> None:
         """Non-async — grants are static setup, not runtime traffic."""
@@ -29,6 +32,8 @@ class InMemoryAuthz:
         self._grants[(subject, relation)].discard(object_)
 
     async def check(self, subject: str, relation: str, object_: str) -> bool:
+        if relation == AUDIT_EXPORTER:
+            return subject in self._audit_roles
         return object_ in self._grants.get((subject, relation), set())
 
     async def list_authorized_objects(self, subject: str, relation: str) -> list[str]:

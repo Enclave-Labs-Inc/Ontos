@@ -6,6 +6,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+import pytest
+
+import ontos.exporters.cypher as cypher_exporter
 from ontos.exporters.cypher import load_cypher, push_neo4j, render_cypher, sanitize_identifier
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Fact, Provenance
@@ -69,11 +72,46 @@ def _scan() -> GraphScan:
 
 def test_sanitize_identifier_strips_unsafe_characters_and_uses_fallback() -> None:
     assert sanitize_identifier("Company-Type!", fallback="Entity") == "CompanyType"
-    assert (
-        sanitize_identifier("works-at!", fallback="RELATED_TO", uppercase=True)
-        == "WORKSAT"
-    )
+    assert sanitize_identifier("works-at!", fallback="RELATED_TO", uppercase=True) == "WORKSAT"
     assert sanitize_identifier("!!!", fallback="Entity") == "Entity"
+
+
+def test_render_cypher_warns_when_entity_type_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    class FakeLogger:
+        def warning(self, event: str, **kwargs: object) -> None:
+            warnings.append((event, kwargs))
+
+    monkeypatch.setattr(cypher_exporter, "log", FakeLogger())
+
+    scan = GraphScan(
+        entities=[
+            StoredEntity(
+                id="legacy:unknown",
+                type=None,
+                canonical_name="Legacy entity",
+            )
+        ],
+        facts=[],
+        merges=[],
+    )
+
+    rendered = render_cypher(scan)
+
+    assert "MERGE (n:`Entity` {id: 'legacy:unknown'})" in rendered
+    assert warnings == [
+        (
+            "export-entity-type-fallback",
+            {
+                "entity_id": "legacy:unknown",
+                "entity_type": None,
+                "fallback": "Entity",
+            },
+        )
+    ]
 
 
 def test_render_cypher_uses_typed_nodes_and_idempotent_merge() -> None:
@@ -90,10 +128,7 @@ def test_render_cypher_uses_typed_nodes_and_idempotent_merge() -> None:
 def test_render_cypher_exports_fact_and_merge_edges() -> None:
     cypher = render_cypher(_scan())
 
-    expected_fact = (
-        "[r:`WORKS_AT` "
-        "{fact_id: '00000000-0000-0000-0000-000000000123'}]"
-    )
+    expected_fact = "[r:`WORKS_AT` {fact_id: '00000000-0000-0000-0000-000000000123'}]"
     assert expected_fact in cypher
     assert "predicate: 'works_at'" in cypher
     assert "source_id: 'doc:1'" in cypher
@@ -102,10 +137,7 @@ def test_render_cypher_exports_fact_and_merge_edges() -> None:
     assert "confidence: 'EXTRACTED'" in cypher
     assert "acl_ref: 'acl:finance'" in cypher
 
-    expected_merge = (
-        "MERGE (m)-[r:MERGED_WITH "
-        "{resolver_id: 'exact-match'}]->(c)"
-    )
+    expected_merge = "MERGE (m)-[r:MERGED_WITH {resolver_id: 'exact-match'}]->(c)"
     assert expected_merge in cypher
     assert "resolver_version: '1.0'" in cypher
     assert "reason: 'same registration number'" in cypher
@@ -124,7 +156,6 @@ def test_render_cypher_is_deterministic() -> None:
     assert render_cypher(scan) == render_cypher(reversed_scan)
 
 
-
 def test_load_cypher_round_trips_exported_snapshot(tmp_path: Path) -> None:
     original = _scan()
     snapshot = tmp_path / "snapshot.cypher"
@@ -133,7 +164,6 @@ def test_load_cypher_round_trips_exported_snapshot(tmp_path: Path) -> None:
     loaded = load_cypher(snapshot)
 
     assert render_cypher(loaded) == render_cypher(original)
-
 
 
 def test_push_neo4j_writes_visualization_schema_with_parameters() -> None:
@@ -177,15 +207,10 @@ def test_push_neo4j_writes_visualization_schema_with_parameters() -> None:
     assert any("MERGE (n:`Person` {id: $id})" in query for query in queries)
     assert any("MERGE (s)-[r:`WORKS_AT` {fact_id: $fact_id}]->(o)" in query for query in queries)
     assert any(
-        "MERGE (m)-[r:MERGED_WITH {resolver_id: $resolver_id}]->(c)" in query
-        for query in queries
+        "MERGE (m)-[r:MERGED_WITH {resolver_id: $resolver_id}]->(c)" in query for query in queries
     )
 
+    assert any(params.get("id") == "person:alice" for _query, params in calls)
     assert any(
-        params.get("id") == "person:alice"
-        for _query, params in calls
-    )
-    assert any(
-        params.get("fact_id") == "00000000-0000-0000-0000-000000000123"
-        for _query, params in calls
+        params.get("fact_id") == "00000000-0000-0000-0000-000000000123" for _query, params in calls
     )

@@ -189,7 +189,6 @@ def test_snapshot_id_changes_when_file_bytes_change(tmp_path: Path) -> None:
     assert _compute_snapshot_id(snap_a) != _compute_snapshot_id(snap_b)
 
 
-
 def test_snapshot_loads_graphml_with_fact_metadata(tmp_path: Path) -> None:
     when = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
     fact = Fact(
@@ -237,7 +236,6 @@ def test_snapshot_loads_graphml_with_fact_metadata(tmp_path: Path) -> None:
     assert metadata.ontology_version == "0.4"
 
 
-
 def test_snapshot_loads_cypher_with_fact_metadata(tmp_path: Path) -> None:
     when = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
     fact = Fact(
@@ -272,14 +270,15 @@ def test_snapshot_loads_cypher_with_fact_metadata(tmp_path: Path) -> None:
         facts=[fact],
         merges=[],
     )
-    snap = tmp_path / "snap.cypher"
-    snap.write_text(render_cypher(scan), encoding="utf-8")
+    for filename in ("snap.cypher", "cypher.txt"):
+        snap = tmp_path / filename
+        snap.write_text(render_cypher(scan), encoding="utf-8")
 
-    store, metadata = _load_snapshot(snap)
-    loaded = asyncio.run(store.scan())
+        store, metadata = _load_snapshot(snap)
+        loaded = asyncio.run(store.scan())
 
-    assert [item.id for item in loaded.facts] == [fact.id]
-    assert metadata.id == _compute_snapshot_id(snap)
-    assert metadata.format == "ontos-cypher-v1"
-    assert metadata.ontology_id == "ontos.starter"
-    assert metadata.ontology_version == "0.4"
+        assert [item.id for item in loaded.facts] == [fact.id]
+        assert metadata.id == _compute_snapshot_id(snap)
+        assert metadata.format == "ontos-cypher-v1"
+        assert metadata.ontology_id == "ontos.starter"
+        assert metadata.ontology_version == "0.4"

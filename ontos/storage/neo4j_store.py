@@ -503,6 +503,7 @@ class Neo4jStore:
         include_closed: bool = False,
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
+        include_all_acls: bool = False,
     ) -> GraphScan:
         """Return an ACL-safe, backend-neutral snapshot for graph export."""
 
@@ -511,7 +512,8 @@ class Neo4jStore:
 
         entity_visibility = """
             (
-                n.acl_ref IS NULL
+                $include_all_acls
+                OR n.acl_ref IS NULL
                 OR ($allowed_acls IS NOT NULL AND n.acl_ref IN $allowed_acls)
                 OR (
                     $allowed_acls IS NULL
@@ -543,7 +545,8 @@ class Neo4jStore:
                 )
             )
             AND (
-                r.acl_ref IS NULL
+                $include_all_acls
+                OR r.acl_ref IS NULL
                 OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
                 OR (
                     $allowed_acls IS NULL
@@ -552,7 +555,8 @@ class Neo4jStore:
                 )
             )
             AND (
-                s.acl_ref IS NULL
+                $include_all_acls
+                OR s.acl_ref IS NULL
                 OR ($allowed_acls IS NOT NULL AND s.acl_ref IN $allowed_acls)
                 OR (
                     $allowed_acls IS NULL
@@ -561,7 +565,8 @@ class Neo4jStore:
                 )
             )
             AND (
-                o.acl_ref IS NULL
+                $include_all_acls
+                OR o.acl_ref IS NULL
                 OR ($allowed_acls IS NOT NULL AND o.acl_ref IN $allowed_acls)
                 OR (
                     $allowed_acls IS NULL
@@ -584,7 +589,8 @@ class Neo4jStore:
              collect(m) AS merged_nodes
         WHERE
             (
-                c.acl_ref IS NULL
+                $include_all_acls
+                OR c.acl_ref IS NULL
                 OR ($allowed_acls IS NOT NULL AND c.acl_ref IN $allowed_acls)
                 OR (
                     $allowed_acls IS NULL
@@ -595,7 +601,8 @@ class Neo4jStore:
             AND ALL(
                 mn IN merged_nodes
                 WHERE
-                    mn.acl_ref IS NULL
+                    $include_all_acls
+                    OR mn.acl_ref IS NULL
                     OR ($allowed_acls IS NOT NULL AND mn.acl_ref IN $allowed_acls)
                     OR (
                         $allowed_acls IS NULL
@@ -616,6 +623,7 @@ class Neo4jStore:
                 entity_query,
                 acl_subject=acl_subject,
                 allowed_acls=allowed_acls,
+                include_all_acls=include_all_acls,
             )
             entity_rows = await entity_result.data()
 
@@ -625,6 +633,7 @@ class Neo4jStore:
                 include_closed=include_closed,
                 acl_subject=acl_subject,
                 allowed_acls=allowed_acls,
+                include_all_acls=include_all_acls,
             )
             fact_rows = await fact_result.data()
 
@@ -632,6 +641,7 @@ class Neo4jStore:
                 merge_query,
                 acl_subject=acl_subject,
                 allowed_acls=allowed_acls,
+                include_all_acls=include_all_acls,
             )
             merge_rows = await merge_result.data()
 

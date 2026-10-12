@@ -490,6 +490,7 @@ class NetworkxStore:
         include_closed: bool = False,
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
+        include_all_acls: bool = False,
     ) -> GraphScan:
         """Return an ACL-safe, backend-neutral snapshot for graph export."""
 
@@ -499,6 +500,8 @@ class NetworkxStore:
         allowed_set = set(allowed_acls) if allowed_acls is not None else None
 
         def _entity_visible(entity_id: str) -> bool:
+            if include_all_acls:
+                return True
             attrs = self._graph.nodes.get(entity_id, {})
             acl = attrs.get("acl_ref")
             if acl is None:
@@ -517,7 +520,11 @@ class NetworkxStore:
         for fact in self._facts.values():
             if not include_closed and not _fact_alive_at(fact, as_of):
                 continue
-            if not _acl_allows(fact, acl_subject, allowed_set):
+            if not include_all_acls and not _acl_allows(
+                fact,
+                acl_subject,
+                allowed_set,
+            ):
                 continue
             # A visible fact must never reveal a forbidden raw endpoint id.
             if (
@@ -547,7 +554,7 @@ class NetworkxStore:
                 continue
             seen_merges.add(dedupe_key)
 
-            if not self._merge_record_visible(record, merge_allowed_set):
+            if not include_all_acls and not self._merge_record_visible(record, merge_allowed_set):
                 continue
 
             merges.append(record)
