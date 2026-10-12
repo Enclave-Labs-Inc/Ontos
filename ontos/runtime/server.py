@@ -90,13 +90,16 @@ def build_store(config: RuntimeConfig) -> GraphStore:
         # doesn't drag it in for dev/CI runs that use the in-memory backend.
         from ontos.storage.neo4j_store import Neo4jStore
 
-        uri = os.environ.get("NEO4J_URI")
-        user = os.environ.get("NEO4J_USER", "neo4j")
-        password = os.environ.get("NEO4J_PASSWORD")
+        uri = config.neo4j_uri
+        user = config.neo4j_user
+        password = config.neo4j_password
         if not uri or not password:
             raise RuntimeError("ONTOS_STORAGE_BACKEND=neo4j requires NEO4J_URI + NEO4J_PASSWORD")
-        database = os.environ.get("NEO4J_DATABASE", "neo4j")
-        return Neo4jStore.from_uri(uri, auth=(user, password), database=database)
+        return Neo4jStore.from_uri(
+            uri,
+            auth=(user, password),
+            database=config.neo4j_database,
+        )
     raise NotImplementedError(
         f"backend {config.storage_backend!r} is not wired — "
         "supported: 'networkx' (dev), 'neo4j'. Neptune/LadybugDB land in M2."
@@ -544,10 +547,10 @@ def run_server(
     server.run(transport="http", host=host, port=port)
 
 
-def main() -> None:
+def main(config: RuntimeConfig | None = None) -> None:
     """CLI entry — boots the live server with streamable-HTTP transport."""
     _default_dev_signing_key_if_missing()
-    cfg = RuntimeConfig.from_env()
+    cfg = config or RuntimeConfig.from_env()
     server = build_server(cfg)
     run_server(
         server,

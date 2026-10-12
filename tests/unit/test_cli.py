@@ -842,3 +842,274 @@ def test_query_threads_anthropic_model_and_key_into_backend(
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     assert captured_kwargs == {"model": "claude-sonnet-5", "api_key": "sk-test"}
+
+
+# --- #37: top-level storage URL resolution ---
+
+
+def test_build_cli_runtime_config_storage_url_overrides_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ontos.cli.main import _build_cli_runtime_config
+
+    monkeypatch.setenv("ONTOS_STORAGE_BACKEND", "networkx")
+    monkeypatch.setenv("NEO4J_USER", "env-user")
+    monkeypatch.setenv("NEO4J_PASSWORD", "env-password")
+
+    cfg = _build_cli_runtime_config(
+        storage_path=None,
+        storage_url="neo4j://cli-host:7687/cli-db",
+        storage_password_env=None,
+    )
+
+    assert cfg.storage_backend == "neo4j"
+    assert cfg.storage_path is None
+    assert cfg.neo4j_uri == "neo4j://cli-host:7687"
+    assert cfg.neo4j_user == "env-user"
+    assert cfg.neo4j_password == "env-password"
+    assert cfg.neo4j_database == "cli-db"
+
+
+def test_build_cli_runtime_config_password_env_overrides_env_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ontos.cli.main import _build_cli_runtime_config
+
+    monkeypatch.setenv("NEO4J_PASSWORD", "ordinary-env-password")
+    monkeypatch.setenv("MY_STORAGE_PASSWORD", "dedicated-secret")
+
+    cfg = _build_cli_runtime_config(
+        storage_path=None,
+        storage_url="neo4j://alice@cli-host:7687/cli-db",
+        storage_password_env="MY_STORAGE_PASSWORD",
+    )
+
+    assert cfg.neo4j_user == "alice"
+    assert cfg.neo4j_password == "dedicated-secret"
+
+
+def test_build_cli_runtime_config_password_env_must_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import typer as _typer
+
+    from ontos.cli.main import _build_cli_runtime_config
+
+    monkeypatch.delenv("MISSING_STORAGE_PASSWORD", raising=False)
+
+    with pytest.raises(_typer.BadParameter, match="MISSING_STORAGE_PASSWORD"):
+        _build_cli_runtime_config(
+            storage_path=None,
+            storage_url="neo4j://cli-host:7687/cli-db",
+            storage_password_env="MISSING_STORAGE_PASSWORD",
+        )
+
+
+def test_build_cli_runtime_config_rejects_storage_and_storage_path_together(
+    tmp_path: Path,
+) -> None:
+    import typer as _typer
+
+    from ontos.cli.main import _build_cli_runtime_config
+
+    with pytest.raises(_typer.BadParameter, match="--storage-path"):
+        _build_cli_runtime_config(
+            storage_path=tmp_path / "store.pkl",
+            storage_url="networkx://",
+            storage_password_env=None,
+        )
+
+
+def test_top_level_help_documents_storage_url_options() -> None:
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "--storage" in result.stdout
+    assert "--storage-password-env" in result.stdout
+
+
+def test_top_level_storage_option_is_accepted_before_subcommand() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--storage",
+            "networkx://",
+            "query",
+            "--help",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "--ontology" in result.stdout
+
+
+def test_query_threads_top_level_storage_options_into_runtime_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ontos.cli.main as cli_main
+
+    seen: dict[str, object] = {}
+
+    def fake_build_cli_runtime_config(
+        storage_path: Path | None,
+        *,
+        storage_url: str | None = None,
+        storage_password_env: str | None = None,
+    ) -> object:
+        seen["storage_path"] = storage_path
+        seen["storage_url"] = storage_url
+        seen["storage_password_env"] = storage_password_env
+        raise RuntimeError("storage-wiring-stop")
+
+    monkeypatch.setattr(
+        cli_main,
+        "_build_cli_runtime_config",
+        fake_build_cli_runtime_config,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--storage",
+            "neo4j://db.example:7687/knowledge",
+            "--storage-password-env",
+            "ONTOS_TEST_STORAGE_PASSWORD",
+            "query",
+            "anything",
+            "--ontology",
+            str(STARTER_PATH),
+        ],
+    )
+
+    assert isinstance(result.exception, RuntimeError)
+    assert str(result.exception) == "storage-wiring-stop"
+    assert seen == {
+        "storage_path": None,
+        "storage_url": "neo4j://db.example:7687/knowledge",
+        "storage_password_env": "ONTOS_TEST_STORAGE_PASSWORD",
+    }
+
+
+def test_ingest_threads_top_level_storage_options_into_runtime_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ontos.cli.main as cli_main
+
+    source_dir = tmp_path / "corpus"
+    source_dir.mkdir()
+    (source_dir / "doc.md").write_text("placeholder")
+
+    seen: dict[str, object] = {}
+
+    def fake_build_cli_runtime_config(
+        storage_path: Path | None,
+        *,
+        storage_url: str | None = None,
+        storage_password_env: str | None = None,
+    ) -> object:
+        seen["storage_path"] = storage_path
+        seen["storage_url"] = storage_url
+        seen["storage_password_env"] = storage_password_env
+        raise RuntimeError("storage-wiring-stop")
+
+    monkeypatch.setattr(
+        cli_main,
+        "_build_cli_runtime_config",
+        fake_build_cli_runtime_config,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--storage",
+            "neo4j://db.example:7687/knowledge",
+            "--storage-password-env",
+            "ONTOS_TEST_STORAGE_PASSWORD",
+            "ingest",
+            "--source-dir",
+            str(source_dir),
+            "--ontology",
+            str(STARTER_PATH),
+        ],
+    )
+
+    assert isinstance(result.exception, RuntimeError)
+    assert str(result.exception) == "storage-wiring-stop"
+    assert seen == {
+        "storage_path": None,
+        "storage_url": "neo4j://db.example:7687/knowledge",
+        "storage_password_env": "ONTOS_TEST_STORAGE_PASSWORD",
+    }
+
+
+def test_serve_threads_top_level_storage_into_runtime_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ontos.runtime.server as runtime_server
+    from ontos.runtime.config import RuntimeConfig
+
+    seen: dict[str, object] = {}
+
+    def fake_server_main(config: RuntimeConfig | None = None) -> None:
+        seen["config"] = config
+
+    monkeypatch.setattr(runtime_server, "main", fake_server_main)
+
+    result = runner.invoke(
+        app,
+        [
+            "--storage",
+            "networkx://",
+            "serve",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    cfg = seen["config"]
+    assert isinstance(cfg, RuntimeConfig)
+    assert cfg.storage_backend == "networkx"
+    assert cfg.storage_path is None
+
+
+def test_storage_url_password_is_not_exposed_in_cli_error() -> None:
+    secret = "issue37-super-secret-password"
+
+    result = runner.invoke(
+        app,
+        [
+            "--storage",
+            f"neo4j://alice:{secret}@db.example:not-a-port/knowledge",
+            "serve",
+        ],
+    )
+
+    assert result.exit_code != 0
+    combined = result.stdout + result.stderr
+    assert secret not in combined
+    assert "invalid port" in combined.lower()
+
+
+def test_serve_snapshot_rejects_top_level_storage(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / "snapshot.pkl"
+    snapshot.write_bytes(b"not-loaded-because-conflict-is-checked-first")
+
+    result = runner.invoke(
+        app,
+        [
+            "--storage",
+            "networkx://",
+            "serve",
+            "--snapshot",
+            str(snapshot),
+        ],
+    )
+
+    assert result.exit_code != 0
+    combined = result.stdout + result.stderr
+    assert "--snapshot" in combined
+    assert "--storage" in combined
+    assert "mutually exclusive" in combined.lower()

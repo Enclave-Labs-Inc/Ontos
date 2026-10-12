@@ -112,3 +112,66 @@ def test_by_query_id_retrieves_specific_record(audit: AuditEmitter) -> None:
     got = audit.by_query_id(target.query_id)
     assert got is not None
     assert got.hash == target.hash
+
+
+async def test_storage_credentials_never_enter_audit_payload_or_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#37: graph-storage credentials must never leak into audit/log output."""
+    import dataclasses
+    import json
+
+    from fastmcp import Client
+
+    from ontos.runtime.config import RuntimeConfig
+    from ontos.runtime.server import build_server
+    from ontos.storage.networkx_store import NetworkxStore
+
+    secret = "issue37-audit-super-secret"
+
+    cfg = dataclasses.replace(
+        RuntimeConfig.from_env(),
+        storage_backend="neo4j",
+        storage_path=None,
+        neo4j_uri="neo4j://db.example:7687",
+        neo4j_user="alice",
+        neo4j_password=secret,
+        neo4j_database="knowledge",
+    )
+
+    audit = AuditEmitter(signing_key=b"issue37-test-key")
+
+    # Explicit store avoids needing a live Neo4j instance; the purpose of
+    # this compliance test is the runtime audit/log path, not connectivity.
+    server = build_server(
+        cfg,
+        store=NetworkxStore(),
+        audit=audit,
+    )
+
+    async with Client(server) as client:
+        await client.call_tool(
+            "search",
+            {
+                "query": "anything",
+                "agent_identity": "compliance:issue37",
+            },
+        )
+
+    assert len(audit) == 1
+    record = audit._chain[-1]
+
+    audit_payload = json.dumps(
+        {field.value: value for field, value in record.article12.items()},
+        sort_keys=True,
+    )
+
+    assert secret not in audit_payload
+    assert "db.example:7687" not in audit_payload
+    assert "alice" not in audit_payload
+
+    captured = capsys.readouterr()
+    combined_output = captured.out + captured.err
+
+    assert secret not in combined_output
+    assert "db.example:7687" not in combined_output
