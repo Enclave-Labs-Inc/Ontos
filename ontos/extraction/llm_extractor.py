@@ -31,9 +31,12 @@ from typing import Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field
 
 from ontos.extraction.base import (
+    CandidateProvenance,
+    CandidateTriple,
     ExtractionError,
     ExtractionInput,
     ExtractionResult,
+    RejectedCandidate,
 )
 from ontos.ontology import Ontology
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
@@ -186,9 +189,9 @@ class LlmExtractor:
                 ) from exc
             raise ExtractionError(
                 source_id=input.source_id,
-                message=f"LLM backend failed: {exc!r}",
+                message="LLM backend failed",
                 sample=input.text,
-            ) from exc
+            ) from None
 
         if not raw_triples and input.text.strip():
             raise ExtractionError(
@@ -198,27 +201,44 @@ class LlmExtractor:
             )
 
         warnings: list[str] = []
+        rejected: list[RejectedCandidate] = []
         entities: dict[str, Entity] = {}
         facts: list[Fact] = []
         raw_identity_by_id: dict[str, tuple[str, str]] = {}
         now = datetime.now(UTC)
 
         for raw in raw_triples:
+            label, score = _calibrate(raw.llm_confidence)
+
             if not self._ontology.is_valid_pattern(
                 raw.subject_type, raw.predicate, raw.object_type
             ):
-                warnings.append(
-                    f"pattern ({raw.subject_type}, {raw.predicate}, "
-                    f"{raw.object_type}) is not in the ontology — triple dropped"
-                )
-                continue
+                reason = "pattern_not_in_ontology"
+                warning = "Triple rejected: pattern not in the ontology."
+            elif score < self._min_confidence:
+                reason = "below_min_confidence"
+                warning = "Triple rejected: below min_confidence."
+            else:
+                reason = None
 
-            label, score = _calibrate(raw.llm_confidence)
-            if score < self._min_confidence:
-                warnings.append(
-                    f"triple ({raw.subject_id} -{raw.predicate}-> {raw.object_id}) "
-                    f"below min_confidence ({score:.2f} < {self._min_confidence:.2f})"
+            if reason is not None:
+                rejected.append(
+                    RejectedCandidate(
+                        raw_triple=CandidateTriple.model_validate(
+                            raw.model_dump()
+                        ),
+                        reason=reason,
+                        provenance=CandidateProvenance(
+                            source_id=input.source_id,
+                            extractor_id=self.id,
+                            extractor_version=self.version,
+                            ontology_id=self._ontology.id,
+                            ontology_version=self._ontology.version,
+                            confidence_score=score,
+                        ),
+                    )
                 )
+                warnings.append(warning)
                 continue
 
             provenance = Provenance(
@@ -276,5 +296,6 @@ class LlmExtractor:
         return ExtractionResult(
             entities=list(entities.values()),
             facts=facts,
+            rejected=rejected,
             warnings=warnings,
         )

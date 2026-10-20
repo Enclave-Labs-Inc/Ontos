@@ -24,9 +24,43 @@ from datetime import datetime
 from typing import Literal, Protocol
 from uuid import UUID
 
+from ontos.extraction.base import RejectedCandidate
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
 from ontos.storage.models import GraphScan, StoredEntity
+
+
+class CandidateStore(Protocol):
+    """Separate storage for rejected, untrusted extraction candidates.
+
+    Candidates must never be inserted into the trusted graph or exposed
+    through GraphStore search, traversal, scan, or export methods.
+
+    User-facing callers must additionally enforce ontology_reviewer
+    authorization and emit the required audit record.
+    """
+
+    async def add_candidates(
+        self,
+        candidates: list[RejectedCandidate],
+    ) -> None:
+        """Persist candidates that have already been ACL-stamped by ingestion."""
+        ...
+
+    async def list_candidates(
+        self,
+        *,
+        allowed_acls: list[str],
+        include_public: bool = False,
+        limit: int = 100,
+    ) -> list[RejectedCandidate]:
+        """Return only candidates whose ACL the caller may VIEW.
+
+        The caller's reviewer role must be verified before calling this.
+        Public candidates (acl_ref=None) require an explicit representation
+        of public VIEW permission; they must not bypass reviewer checks.
+        """
+        ...
 
 
 class GraphStore(Protocol):

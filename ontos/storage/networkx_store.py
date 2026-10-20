@@ -41,6 +41,7 @@ from uuid import UUID
 import networkx as nx
 import structlog
 
+from ontos.extraction.base import RejectedCandidate
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
 from ontos.storage.base import CrossAclUpsertError, StorageError
@@ -71,8 +72,11 @@ class NetworkxStore:
     # V1 files load with an empty `_merges` default and get upgraded on
     # next flush — operators see a one-line structlog info and no action
     # is required.
-    _MAGIC_HEADER = b"ONTOS-NX-STORE-V2\n"
-    _LEGACY_MAGIC_HEADERS: tuple[bytes, ...] = (b"ONTOS-NX-STORE-V1\n",)
+    _MAGIC_HEADER = b"ONTOS-NX-STORE-V3\n"
+    _LEGACY_MAGIC_HEADERS: tuple[bytes, ...] = (
+        b"ONTOS-NX-STORE-V1\n",
+        b"ONTOS-NX-STORE-V2\n",
+    )
 
     def __init__(self, path: Path | None = None) -> None:
         self._graph: nx.MultiDiGraph[str] = nx.MultiDiGraph()
@@ -81,6 +85,7 @@ class NetworkxStore:
         # re-record; last-write-wins on resolved_at. See #46 and the
         # GraphStore.record_merge Protocol docstring for semantics.
         self._merges: dict[tuple[str, str, str], MergeRecord] = {}
+        self._candidates: list[RejectedCandidate] = []
         self._path: Path | None = path
         # Set by any state-mutating method; checked by `flush()` so that
         # read-only callers (e.g. `ontos query`) never rewrite the file —
@@ -203,6 +208,7 @@ class NetworkxStore:
             # migration path — on next flush the file gets rewritten
             # under the current magic header with the new key).
             self._merges = payload.get("merges", {})
+            self._candidates = payload.get("candidates", [])
         except (KeyError, TypeError) as exc:
             raise StorageError(
                 f"{path} payload shape is not recognised: {exc!r}. "
@@ -227,7 +233,12 @@ class NetworkxStore:
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_bytes(
             self._MAGIC_HEADER
-            + pickle.dumps({"graph": self._graph, "facts": self._facts, "merges": self._merges})
+            + pickle.dumps({
+                    "graph": self._graph,
+                    "facts": self._facts,
+                    "merges": self._merges,
+                    "candidates": self._candidates,
+                })
         )
         # Dev-store file: single-user, same-process-writer. Lock down
         # mode so a shared machine doesn't let other users plant a
@@ -676,6 +687,47 @@ class NetworkxStore:
             return False
         return all(_endpoint_visible(mid) for mid in record.merged_ids)
 
+    async def add_candidates(
+        self,
+        candidates: list[RejectedCandidate],
+    ) -> None:
+        """Store untrusted candidates outside the trusted graph."""
+        if not candidates:
+            return
+
+        # Revalidate at the storage boundary.
+        validated = [
+            RejectedCandidate.model_validate(candidate)
+            for candidate in candidates
+        ]
+        self._candidates.extend(validated)
+        self._dirty = True
+
+    async def list_candidates(
+        self,
+        *,
+        allowed_acls: list[str],
+        include_public: bool = False,
+        limit: int = 100,
+    ) -> list[RejectedCandidate]:
+        """ACL-filtered storage read; caller must separately verify reviewer role."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+
+        allowed = set(allowed_acls)
+
+        return [
+            candidate
+            for candidate in self._candidates
+            if (
+                (candidate.acl_ref is None and include_public)
+                or (
+                    candidate.acl_ref is not None
+                    and candidate.acl_ref in allowed
+                )
+            )
+        ][:limit]
+
     async def close(self) -> None:
         self.flush()
         # Keep the clear so existing in-memory callers see close() as a
@@ -684,6 +736,7 @@ class NetworkxStore:
         self._graph.clear()
         self._facts.clear()
         self._merges.clear()
+        self._candidates.clear()
 
 
 def _acl_allows(

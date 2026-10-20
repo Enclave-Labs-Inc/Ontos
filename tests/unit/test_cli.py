@@ -2015,3 +2015,171 @@ def test_export_unauthorized_subject_gets_public_only(
     exported = output_path.read_text(encoding="utf-8")
     assert str(public_fact.id) in exported
     assert str(finance_fact.id) not in exported
+
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected_enabled"),
+    [
+        ([], False),
+        (["--retain-rejected-candidates"], True),
+    ],
+)
+def test_ingest_candidate_retention_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extra_args: list[str],
+    expected_enabled: bool,
+) -> None:
+    """Retention must be opt-in and use the same configured store."""
+    import ontos.extraction
+    import ontos.llm
+    import ontos.pipeline
+
+    captured: dict[str, object] = {}
+
+    class StubLLM:
+        id = "stub-llm"
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    class StubExtractor:
+        def __init__(self, llm: object, ontology: object) -> None:
+            pass
+
+    class CapturingPipeline:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        async def run(self):
+            from ontos.pipeline.ingest import IngestReport
+            return IngestReport(
+                documents_processed=0,
+                facts_written=0,
+                entities_written=0,
+            )
+
+    monkeypatch.setattr(ontos.llm, "OllamaBackend", StubLLM)
+    monkeypatch.setattr(ontos.extraction, "LlmExtractor", StubExtractor)
+    monkeypatch.setattr(ontos.pipeline, "IngestPipeline", CapturingPipeline)
+
+    source_dir = tmp_path / "corpus"
+    source_dir.mkdir()
+    (source_dir / "doc.txt").write_text("test document")
+
+    args = [
+        "ingest",
+        "--source-dir", str(source_dir),
+        "--ontology", str(STARTER_PATH),
+        "--storage-path", str(tmp_path / "graph.pkl"),
+        *extra_args,
+    ]
+
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "candidate_store" in captured
+    if expected_enabled:
+        assert captured["candidate_store"] is captured["store"]
+    else:
+        assert captured["candidate_store"] is None
+
+
+def test_ingest_help_documents_candidate_retention() -> None:
+    result = runner.invoke(app, ["ingest", "--help"])
+    assert result.exit_code == 0
+    assert "--retain-rejected-candidates" in result.stdout
+
+
+
+@pytest.mark.parametrize("retention_enabled", [False, True])
+def test_cli_candidate_retention_persists_to_disk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retention_enabled: bool,
+) -> None:
+    """Real CLI -> extractor -> pipeline -> persisted NetworkX V3."""
+    import asyncio
+
+    import ontos.extraction
+    from ontos.extraction import RawTriple
+    from ontos.storage.networkx_store import NetworkxStore
+
+    class FakeExtractorLLM:
+        id = "retention-cli-test"
+        version = "1"
+
+        async def structured_extract(self, text, ontology):
+            return [
+                RawTriple(
+                    subject_id="person:alice",
+                    subject_type="Person",
+                    subject_canonical_name="Alice",
+                    predicate="works_at",
+                    object_id="company:acme",
+                    object_type="Company",
+                    object_canonical_name="Acme",
+                    llm_confidence=0.95,
+                ),
+                RawTriple(
+                    subject_id="person:private",
+                    subject_type="Person",
+                    subject_canonical_name="Private Person",
+                    predicate="unapproved_relationship",
+                    object_id="company:private",
+                    object_type="Company",
+                    object_canonical_name="Private Company",
+                    llm_confidence=0.95,
+                ),
+            ]
+
+    monkeypatch.setattr(
+        "ontos.cli.main._build_llm",
+        lambda *args, **kwargs: FakeExtractorLLM(),
+    )
+
+    source_dir = tmp_path / "corpus"
+    source_dir.mkdir()
+    (source_dir / "doc.txt").write_text("Alice works at Acme.")
+
+    storage_path = tmp_path / "graph.pkl"
+
+    args = [
+        "ingest",
+        "--source-dir", str(source_dir),
+        "--ontology", str(STARTER_PATH),
+        "--storage-path", str(storage_path),
+    ]
+    if retention_enabled:
+        args.append("--retain-rejected-candidates")
+
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    async def verify():
+        store = NetworkxStore(path=storage_path)
+        try:
+            candidates = await store.list_candidates(
+                allowed_acls=[],
+                include_public=True,
+            )
+            facts = await store.search("works_at")
+            rejected_facts = await store.search(
+                "unapproved_relationship"
+            )
+            return candidates, facts, rejected_facts
+        finally:
+            await store.close()
+
+    candidates, facts, rejected_facts = asyncio.run(verify())
+
+    assert len(facts) == 1
+    assert rejected_facts == []
+
+    if retention_enabled:
+        assert len(candidates) == 1
+        assert candidates[0].reason == "pattern_not_in_ontology"
+        assert candidates[0].raw_triple.predicate == "unapproved_relationship"
+        assert candidates[0].provenance.source_id
+    else:
+        assert candidates == []

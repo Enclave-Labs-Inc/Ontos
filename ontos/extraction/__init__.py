@@ -6,6 +6,9 @@ on the names re-exported here.
 """
 
 from ontos.extraction.base import (
+    CandidateProvenance,
+    CandidateTriple,
+    RejectedCandidate,
     ExtractionError,
     ExtractionInput,
     ExtractionResult,
@@ -18,6 +21,9 @@ from ontos.extraction.llm_extractor import (
 )
 
 __all__ = [
+    "CandidateProvenance",
+    "CandidateTriple",
+    "RejectedCandidate",
     "Extractor",
     "ExtractionError",
     "ExtractionInput",

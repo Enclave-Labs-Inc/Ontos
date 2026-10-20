@@ -1039,3 +1039,155 @@ async def test_push_neo4j_visualization_is_idempotent(store: Neo4jStore) -> None
     assert node_record["count"] == 3
     assert fact_record["count"] == 1
     assert merge_record["count"] == 1
+
+
+
+def _rejected_candidate(acl_ref: str | None):
+    from ontos.extraction import (
+        CandidateProvenance,
+        CandidateTriple,
+        RejectedCandidate,
+    )
+
+    return RejectedCandidate(
+        raw_triple=CandidateTriple(
+            subject_id="private-subject",
+            subject_type="Person",
+            subject_canonical_name="Private Subject",
+            predicate="unapproved_relation",
+            object_id="private-object",
+            object_type="Company",
+            object_canonical_name="Private Object",
+            llm_confidence=0.9,
+        ),
+        reason="pattern_not_in_ontology",
+        provenance=CandidateProvenance(
+            source_id="restricted-source",
+            extractor_id="test",
+            extractor_version="1",
+            ontology_id="starter",
+            ontology_version="1",
+            confidence_score=0.9,
+        ),
+        acl_ref=acl_ref,
+    )
+
+
+async def test_rejected_candidates_acl_and_graph_isolation(
+    store: Neo4jStore,
+) -> None:
+    await store.add_candidates([
+        _rejected_candidate("acl:finance"),
+        _rejected_candidate("acl:hr"),
+        _rejected_candidate(None),
+    ])
+
+    assert await store.list_candidates(allowed_acls=[]) == []
+
+    finance = await store.list_candidates(
+        allowed_acls=["acl:finance"],
+    )
+    assert len(finance) == 1
+    assert finance[0].acl_ref == "acl:finance"
+
+    public = await store.list_candidates(
+        allowed_acls=[],
+        include_public=True,
+    )
+    assert len(public) == 1
+    assert public[0].acl_ref is None
+
+    assert len(await store.list_candidates(
+        allowed_acls=["acl:finance"],
+        include_public=True,
+    )) == 2
+
+    assert await store.search(
+        "unapproved_relation",
+        allowed_acls=["acl:finance"],
+    ) == []
+
+    assert list(await store.traverse(
+        "private-subject",
+        allowed_acls=["acl:finance"],
+    )) == []
+
+    snapshot = await store.scan(include_all_acls=True)
+    assert snapshot.entities == []
+    assert snapshot.facts == []
+    assert snapshot.merges == []
+
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            MATCH (n:RejectedCandidate)
+            RETURN count(n) AS total,
+                   sum(CASE WHEN n:Entity THEN 1 ELSE 0 END) AS entities
+            """
+        )
+        row = await result.single()
+        assert row["total"] == 3
+        assert row["entities"] == 0
+
+
+async def test_rejected_candidates_survive_new_store_session(
+    store: Neo4jStore,
+) -> None:
+    await store.add_candidates([_rejected_candidate("acl:finance")])
+
+    # Open a new store wrapper against the same driver/database.
+    reader = Neo4jStore(store._driver, database=store._database)
+
+    candidates = await reader.list_candidates(
+        allowed_acls=["acl:finance"],
+    )
+    assert len(candidates) == 1
+    assert candidates[0].provenance.source_id == "restricted-source"
+
+
+async def test_rejected_candidate_batch_rolls_back_on_constraint_failure(
+    store: Neo4jStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ontos.storage.neo4j_store as neo4j_module
+
+    fixed_id = uuid4()
+    monkeypatch.setattr(neo4j_module, "uuid4", lambda: fixed_id)
+
+    # Two CREATEs with the same candidate id violate the unique
+    # constraint. Neither candidate should survive the transaction.
+    with pytest.raises(Exception):
+        await store.add_candidates([
+            _rejected_candidate("acl:finance"),
+            _rejected_candidate("acl:hr"),
+        ])
+
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            "MATCH (n:RejectedCandidate) RETURN count(n) AS total"
+        )
+        row = await result.single()
+        assert row["total"] == 0
+
+
+async def test_rejected_candidate_limit_applied_after_acl_filter(
+    store: Neo4jStore,
+) -> None:
+    await store.add_candidates([
+        _rejected_candidate("acl:hr"),
+        _rejected_candidate("acl:finance"),
+        _rejected_candidate("acl:finance"),
+    ])
+
+    candidates = await store.list_candidates(
+        allowed_acls=["acl:finance"],
+        limit=1,
+    )
+    assert len(candidates) == 1
+    assert candidates[0].acl_ref == "acl:finance"
+
+    with pytest.raises(ValueError, match="limit"):
+        await store.list_candidates(
+            allowed_acls=["acl:finance"],
+            limit=0,
+        )

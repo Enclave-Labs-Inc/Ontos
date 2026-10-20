@@ -26,12 +26,13 @@ import json
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from neo4j.time import DateTime as Neo4jDateTime
 
+from ontos.extraction.base import RejectedCandidate
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
 from ontos.storage.base import CrossAclUpsertError
@@ -128,6 +129,10 @@ class Neo4jStore:
         """Create indexes idempotently. Safe to call on every boot."""
         statements = [
             "CREATE INDEX entity_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.id)",
+            "CREATE CONSTRAINT rejected_candidate_id IF NOT EXISTS "
+            "FOR (n:RejectedCandidate) REQUIRE n.id IS UNIQUE",
+            "CREATE INDEX rejected_candidate_acl IF NOT EXISTS "
+            "FOR (n:RejectedCandidate) ON (n.acl_ref)",
             # #38: type-filtered reads (e.g. #32's export "all Person nodes")
             # stay O(matching-nodes) on 10k+ node graphs with this index.
             "CREATE INDEX entity_type_idx IF NOT EXISTS FOR (n:Entity) ON (n.type)",
@@ -147,6 +152,79 @@ class Neo4jStore:
         async with self._driver.session(database=self._database) as session:
             for stmt in statements:
                 await session.run(stmt)
+
+    async def add_candidates(
+        self,
+        candidates: list[RejectedCandidate],
+    ) -> None:
+        """Persist untrusted candidates without linking them to the graph."""
+        if not candidates:
+            return
+
+        rows = [
+            {
+                "id": str(uuid4()),
+                "acl_ref": candidate.acl_ref,
+                "payload": candidate.model_dump_json(),
+            }
+            for candidate in candidates
+        ]
+
+        async def _write_batch(tx: Any) -> None:
+            result = await tx.run(
+                """
+                UNWIND $rows AS row
+                CREATE (c:RejectedCandidate {
+                    id: row.id,
+                    acl_ref: row.acl_ref,
+                    payload: row.payload
+                })
+                """,
+                rows=rows,
+            )
+            await result.consume()
+
+        async with self._driver.session(database=self._database) as session:
+            await session.execute_write(_write_batch)
+
+    async def list_candidates(
+        self,
+        *,
+        allowed_acls: list[str],
+        include_public: bool = False,
+        limit: int = 100,
+    ) -> list[RejectedCandidate]:
+        """Filter by document ACL before limiting returned candidates.
+
+        Caller must separately enforce ontology_reviewer authorization
+        and record an Article-12 audit event.
+        """
+        if limit < 1:
+            raise ValueError("limit must be positive")
+
+        query = """
+        MATCH (c:RejectedCandidate)
+        WHERE
+            (c.acl_ref IS NOT NULL AND c.acl_ref IN $allowed_acls)
+            OR (c.acl_ref IS NULL AND $include_public)
+        RETURN c.payload AS payload
+        ORDER BY c.id
+        LIMIT $limit
+        """
+
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                query,
+                allowed_acls=list(allowed_acls),
+                include_public=include_public,
+                limit=limit,
+            )
+            rows = await result.data()
+
+        return [
+            RejectedCandidate.model_validate_json(row["payload"])
+            for row in rows
+        ]
 
     async def add_fact(self, fact: Fact) -> None:
         query = """

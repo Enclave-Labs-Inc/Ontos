@@ -1107,3 +1107,225 @@ async def test_same_source_reconciliation_refuses_unresolvable_raw_id_collision(
     assert len(snapshot.facts) == 1
     assert snapshot.facts[0].subject_id == "1"
     assert snapshot.facts[0].object_id == "2"
+
+
+
+async def test_pipeline_retains_rejected_candidates_with_document_acl(
+    ontology: Ontology,
+) -> None:
+    script = {
+        "Private document": [
+            _triple(
+                "person:secret",
+                "Person",
+                "Secret",
+                "unapproved_relation",
+                "company:secret",
+                "Company",
+                "Secret Company",
+            )
+        ]
+    }
+
+    store = NetworkxStore()
+    pipeline = IngestPipeline(
+        connector=TextConnector(
+            {"private-doc": "Private document"},
+            acl_ref_by_source={"private-doc": "acl:private"},
+        ),
+        extractor=LlmExtractor(ScriptedLLM(script), ontology),
+        resolver=None,
+        store=store,
+        ontology=ontology,
+        candidate_store=store,
+    )
+
+    report = await pipeline.run()
+
+    assert report.candidates_retained == 1
+    assert report.facts_written == 0
+    assert "unapproved_relation" not in str(report.warnings)
+
+    assert await store.list_candidates(allowed_acls=[]) == []
+
+    candidates = await store.list_candidates(
+        allowed_acls=["acl:private"]
+    )
+    assert len(candidates) == 1
+    assert candidates[0].acl_ref == "acl:private"
+    assert candidates[0].raw_triple.predicate == "unapproved_relation"
+
+    scan = await store.scan(include_all_acls=True)
+    assert scan.facts == []
+    assert scan.entities == []
+
+
+async def test_pipeline_candidate_retention_disabled_by_default(
+    ontology: Ontology,
+) -> None:
+    script = {
+        "Invalid document": [
+            _triple(
+                "person:alice",
+                "Person",
+                "Alice",
+                "unapproved_relation",
+                "company:acme",
+                "Company",
+                "Acme",
+            )
+        ]
+    }
+
+    store = NetworkxStore()
+    pipeline = IngestPipeline(
+        connector=TextConnector({"doc-1": "Invalid document"}),
+        extractor=LlmExtractor(ScriptedLLM(script), ontology),
+        resolver=None,
+        store=store,
+        ontology=ontology,
+    )
+
+    report = await pipeline.run()
+
+    assert report.candidates_retained == 0
+    assert await store.list_candidates(
+        allowed_acls=[],
+        include_public=True,
+    ) == []
+
+
+async def test_pipeline_candidate_storage_failure_is_not_silent(
+    ontology: Ontology,
+) -> None:
+    script = {
+        "Invalid document": [
+            _triple(
+                "person:alice",
+                "Person",
+                "Alice",
+                "unapproved_relation",
+                "company:acme",
+                "Company",
+                "Acme",
+            )
+        ]
+    }
+
+    class FailingCandidateStore:
+        async def add_candidates(self, candidates):
+            raise RuntimeError("candidate storage unavailable")
+
+    pipeline = IngestPipeline(
+        connector=TextConnector({"doc-1": "Invalid document"}),
+        extractor=LlmExtractor(ScriptedLLM(script), ontology),
+        resolver=None,
+        store=NetworkxStore(),
+        ontology=ontology,
+        candidate_store=FailingCandidateStore(),
+    )
+
+    with pytest.raises(RuntimeError, match="candidate storage unavailable"):
+        await pipeline.run()
+
+
+
+async def test_rejected_document_does_not_retain_candidates(
+    ontology: Ontology,
+) -> None:
+    """A cross-ACL entity conflict must not retain rejected candidates."""
+    valid = _triple(
+        "person:alice",
+        "Person",
+        "Alice",
+        "works_at",
+        "company:acme",
+        "Company",
+        "Acme",
+    )
+    invalid = _triple(
+        "person:secret",
+        "Person",
+        "Secret",
+        "unapproved_relationship",
+        "company:secret",
+        "Company",
+        "Secret Company",
+    )
+
+    script = {
+        "Finance document": [valid],
+        "HR document": [valid, invalid],
+    }
+
+    connector = TextConnector(
+        {
+            "finance-doc": "Finance document",
+            "hr-doc": "HR document",
+        },
+        acl_ref_by_source={
+            "finance-doc": "acl:finance",
+            "hr-doc": "acl:hr",
+        },
+    )
+
+    store = NetworkxStore()
+    pipeline = IngestPipeline(
+        connector=connector,
+        extractor=LlmExtractor(ScriptedLLM(script), ontology),
+        resolver=None,
+        store=store,
+        ontology=ontology,
+        candidate_store=store,
+        error_policy=ErrorPolicy.SKIP_AND_LOG,
+    )
+
+    report = await pipeline.run()
+
+    assert report.candidates_retained == 0
+    assert len(report.errors) == 1
+    assert report.errors[0].source_id == "hr-doc"
+
+    assert await store.list_candidates(
+        allowed_acls=["acl:hr"]
+    ) == []
+
+    assert len(await store.search(
+        "works_at",
+        allowed_acls=["acl:finance"],
+    )) == 1
+
+    assert await store.search(
+        "works_at",
+        allowed_acls=["acl:hr"],
+    ) == []
+
+
+
+async def test_backend_exception_does_not_leak_into_ingest_report(
+    ontology: Ontology,
+) -> None:
+    secret = "SECRET_DOCUMENT_CONTENT_DO_NOT_EXPOSE"
+
+    class FailingLLM:
+        id = "failing-llm"
+        version = "1"
+
+        async def structured_extract(self, text, ontology):
+            raise RuntimeError(f"backend returned sensitive data: {secret}")
+
+    pipeline = IngestPipeline(
+        connector=TextConnector({"private-doc": "Confidential source document"}),
+        extractor=LlmExtractor(FailingLLM(), ontology),
+        resolver=None,
+        store=NetworkxStore(),
+        ontology=ontology,
+        error_policy=ErrorPolicy.SKIP_AND_LOG,
+    )
+
+    report = await pipeline.run()
+
+    assert len(report.errors) == 1
+    assert report.errors[0].source_id == "private-doc"
+    assert report.errors[0].reason == "extraction failed; document skipped"
+    assert secret not in report.model_dump_json()

@@ -430,6 +430,17 @@ def ingest(
             ),
         ),
     ] = None,
+    retain_rejected_candidates: Annotated[
+        bool,
+        typer.Option(
+            "--retain-rejected-candidates",
+            help=(
+                "Opt in to retaining rejected ontology triples in separate "
+                "candidate storage. Disabled by default. Sensitive data "
+                "remains retained until explicitly removed."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Ingest a directory of .txt / .md / .pdf files via an LLM extractor + the resolver cascade."""
     # Deferred imports keep --help fast.
@@ -480,6 +491,7 @@ def ingest(
         resolver=resolver,
         store=store,
         ontology=ontology,
+        candidate_store=store if retain_rejected_candidates else None,
         error_policy=ErrorPolicy(error_policy),
     )
 

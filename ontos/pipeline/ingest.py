@@ -29,7 +29,7 @@ from ontos.ingest import Connector
 from ontos.ontology import Ontology
 from ontos.resolver import Resolver
 from ontos.runtime.models import Entity, Fact
-from ontos.storage.base import CrossAclUpsertError, GraphStore
+from ontos.storage.base import CandidateStore, CrossAclUpsertError, GraphStore
 from ontos.storage.models import StoredEntity
 from ontos.supersession import (
     CardinalitySupersessionPolicy,
@@ -192,6 +192,7 @@ class IngestReport(BaseModel):
     documents_seen: int = 0
     documents_extracted: int = 0
     facts_written: int = 0
+    candidates_retained: int = 0
     entities_merged: int = 0
     merges_recorded: int = 0
     facts_superseded: int = 0
@@ -228,6 +229,7 @@ class IngestPipeline:
         ontology: Ontology,
         supersession: SupersessionPolicy | None = None,
         error_policy: ErrorPolicy = ErrorPolicy.FAIL_FAST,
+        candidate_store: CandidateStore | None = None,
     ) -> None:
         self._connector = connector
         self._extractor = extractor
@@ -238,11 +240,13 @@ class IngestPipeline:
             supersession if supersession is not None else CardinalitySupersessionPolicy()
         )
         self._error_policy = error_policy
+        self._candidate_store = candidate_store
 
     async def run(self) -> IngestReport:
         documents_seen = 0
         documents_extracted = 0
         facts_written = 0
+        candidates_retained = 0
         facts_superseded = 0
         facts_reaffirmed = 0
         facts_historical = 0
@@ -265,7 +269,15 @@ class IngestPipeline:
             except ExtractionError as exc:
                 if self._error_policy is ErrorPolicy.FAIL_FAST:
                     raise
-                errors.append(IngestError(source_id=doc.source_id, reason=str(exc)))
+                # Backend exceptions can contain document text, model
+                # responses, or raw entity identifiers. Do not copy their
+                # string representation into the public ingestion report.
+                reason = (
+                    "LLM returned zero triples for non-empty input"
+                    if "LLM returned zero triples for non-empty input" in str(exc)
+                    else "extraction failed; document skipped"
+                )
+                errors.append(IngestError(source_id=doc.source_id, reason=reason))
                 continue
 
             # Stabilize LLM-chosen raw IDs across re-ingests of the same
@@ -375,6 +387,19 @@ class IngestPipeline:
                 )
                 continue
 
+            # Retain rejected candidates only after the existing
+            # cross-ACL checks and entity writes have succeeded.
+            # Extractor-supplied ACL values are never trusted.
+            if self._candidate_store is not None and extraction.rejected:
+                stamped_candidates = [
+                    candidate.model_copy(update={"acl_ref": doc.acl_ref})
+                    for candidate in extraction.rejected
+                ]
+                # Storage failures deliberately propagate. Retention
+                # must never silently lose rejected candidates.
+                await self._candidate_store.add_candidates(stamped_candidates)
+                candidates_retained += len(stamped_candidates)
+
             if self._resolver is not None and extraction.entities:
                 resolution = await self._resolver.resolve(list(extraction.entities))
                 entities_merged += sum(max(len(m.merged_ids) - 1, 0) for m in resolution.merges)
@@ -472,6 +497,7 @@ class IngestPipeline:
             documents_seen=documents_seen,
             documents_extracted=documents_extracted,
             facts_written=facts_written,
+            candidates_retained=candidates_retained,
             entities_merged=entities_merged,
             merges_recorded=merges_recorded,
             facts_superseded=facts_superseded,

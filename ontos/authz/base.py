@@ -22,6 +22,9 @@ VIEW: str = "view"
 # This is intentionally separate from ordinary VIEW authorization.
 AUDIT_EXPORTER: str = "audit_exporter"
 
+# Dedicated role for inspecting rejected ontology candidates.
+ONTOLOGY_REVIEWER: str = "ontology_reviewer"
+
 
 @runtime_checkable
 class AuthzBackend(Protocol):

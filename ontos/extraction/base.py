@@ -23,7 +23,7 @@ Every implementation MUST uphold these invariants (checked by
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -47,6 +47,45 @@ class ExtractionInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+class CandidateTriple(BaseModel):
+    """Provider-independent representation of a rejected raw triple."""
+
+    subject_id: str
+    subject_type: str
+    subject_canonical_name: str
+    predicate: str
+    object_id: str
+    object_type: str
+    object_canonical_name: str
+    llm_confidence: float = Field(ge=0.0, le=1.0)
+
+    model_config = ConfigDict(frozen=True)
+
+
+class CandidateProvenance(BaseModel):
+    """Partial provenance before the pipeline stamps document ACLs."""
+
+    source_id: str
+    extractor_id: str
+    extractor_version: str
+    ontology_id: str
+    ontology_version: str
+    confidence_score: float = Field(ge=0.0, le=1.0)
+
+    model_config = ConfigDict(frozen=True)
+
+
+class RejectedCandidate(BaseModel):
+    """A raw relationship rejected by strict ontology validation."""
+
+    raw_triple: CandidateTriple
+    reason: Literal["pattern_not_in_ontology", "below_min_confidence"]
+    provenance: CandidateProvenance
+    acl_ref: str | None = None
+
+    model_config = ConfigDict(frozen=True)
+
+
 class ExtractionResult(BaseModel):
     """What an Extractor returns for one `ExtractionInput`.
 
@@ -61,6 +100,7 @@ class ExtractionResult(BaseModel):
 
     entities: list[Entity] = Field(default_factory=list)
     facts: list[Fact] = Field(default_factory=list)
+    rejected: list[RejectedCandidate] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(frozen=True)

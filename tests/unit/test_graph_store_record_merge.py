@@ -244,7 +244,7 @@ async def test_merges_for_entity_filters_by_allowed_acls() -> None:
 async def test_v1_pickle_loads_cleanly_with_empty_merges(
     tmp_path: Path,
 ) -> None:
-    """V1→V2 migration: a legacy pickle (no 'merges' key) loads cleanly;
+    """V1→V3 migration: a legacy pickle (no 'merges' key) loads cleanly;
     _merges defaults to empty; a structlog info line names the migration."""
     pkl = tmp_path / "legacy.pkl"
     import networkx as nx
@@ -261,12 +261,12 @@ async def test_v1_pickle_loads_cleanly_with_empty_merges(
     ]
     assert len(migration_events) == 1
     assert migration_events[0]["from_version"] == "ONTOS-NX-STORE-V1"
-    assert migration_events[0]["to_version"] == "ONTOS-NX-STORE-V2"
+    assert migration_events[0]["to_version"] == "ONTOS-NX-STORE-V3"
 
 
-async def test_v1_pickle_upgrades_to_v2_on_flush(tmp_path: Path) -> None:
+async def test_v1_pickle_upgrades_to_v3_on_flush(tmp_path: Path) -> None:
     """After loading a V1 file and recording a new merge, the next flush
-    writes the current (V2) magic header + the full payload with merges."""
+    writes the current (V3) magic header + the full payload with merges."""
     pkl = tmp_path / "upgrade.pkl"
     import networkx as nx
 
@@ -278,7 +278,7 @@ async def test_v1_pickle_upgrades_to_v2_on_flush(tmp_path: Path) -> None:
     await store.close()
 
     raw = pkl.read_bytes()
-    assert raw.startswith(b"ONTOS-NX-STORE-V2\n")
+    assert raw.startswith(b"ONTOS-NX-STORE-V3\n")
 
     # Re-read confirms the merge survived under the new format.
     reader = NetworkxStore(path=pkl)

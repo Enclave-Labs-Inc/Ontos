@@ -209,3 +209,45 @@ def test_stub_extractor_id_and_version_are_readable() -> None:
 def test_uuid_import_available_in_this_test_context() -> None:
     # Belt-and-braces — used elsewhere, keeping the module boundary loud.
     assert uuid4()
+
+
+
+def test_rejected_candidate_supports_acl_stamping() -> None:
+    from ontos.extraction import (
+        CandidateProvenance,
+        CandidateTriple,
+        RejectedCandidate,
+    )
+
+    candidate = RejectedCandidate(
+        raw_triple=CandidateTriple(
+            subject_id="person:alice",
+            subject_type="Person",
+            subject_canonical_name="Alice",
+            predicate="works_at",
+            object_id="company:acme",
+            object_type="Company",
+            object_canonical_name="Acme",
+            llm_confidence=0.2,
+        ),
+        reason="below_min_confidence",
+        provenance=CandidateProvenance(
+            source_id="doc-1",
+            extractor_id="test-extractor",
+            extractor_version="1",
+            ontology_id="test-ontology",
+            ontology_version="1",
+            confidence_score=0.2,
+        ),
+    )
+
+    assert candidate.acl_ref is None
+
+    stamped = candidate.model_copy(
+        update={"acl_ref": "restricted-department"}
+    )
+
+    assert stamped.acl_ref == "restricted-department"
+    assert candidate.acl_ref is None
+    assert stamped.raw_triple == candidate.raw_triple
+    assert stamped.provenance == candidate.provenance
