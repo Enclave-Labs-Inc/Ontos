@@ -106,12 +106,14 @@ def test_server_main_uses_supplied_runtime_config(
     monkeypatch.setenv("ONTOS_STORAGE_BACKEND", "networkx")
     monkeypatch.setenv("ONTOS_LISTEN_HOST", "0.0.0.0")
     monkeypatch.setenv("ONTOS_LISTEN_PORT", "1234")
+    monkeypatch.setenv("ONTOS_AUDIT_SIGNING_KEY", "test-signing-key-not-for-prod")
 
     fake_server = object()
     seen: dict[str, object] = {}
 
-    def fake_build_server(config: RuntimeConfig) -> object:
+    def fake_build_server(config: RuntimeConfig, *, audit: object) -> object:
         seen["config"] = config
+        seen["build_audit"] = audit
         return fake_server
 
     def fake_run_server(
@@ -121,12 +123,18 @@ def test_server_main_uses_supplied_runtime_config(
         port: int,
         mode: str,
         backend: str,
+        auth_mode: str,
+        allow_unauthenticated_bind: bool,
+        audit: object,
     ) -> None:
         seen["server"] = server
         seen["host"] = host
         seen["port"] = port
         seen["mode"] = mode
         seen["backend"] = backend
+        seen["auth_mode"] = auth_mode
+        seen["allow_unauthenticated_bind"] = allow_unauthenticated_bind
+        seen["run_audit"] = audit
 
     monkeypatch.setattr(runtime_server, "_default_dev_signing_key_if_missing", lambda: None)
     monkeypatch.setattr(runtime_server, "build_server", fake_build_server)
@@ -134,6 +142,9 @@ def test_server_main_uses_supplied_runtime_config(
 
     runtime_server.main(config=cfg)
 
+    # The transport-rejection middleware must write to the same audit
+    # chain as the tools, so both sides receive one emitter.
+    assert seen.pop("build_audit") is seen.pop("run_audit")
     assert seen == {
         "config": cfg,
         "server": fake_server,
@@ -141,4 +152,6 @@ def test_server_main_uses_supplied_runtime_config(
         "port": 9999,
         "mode": "live",
         "backend": "neo4j",
+        "auth_mode": "none",
+        "allow_unauthenticated_bind": False,
     }

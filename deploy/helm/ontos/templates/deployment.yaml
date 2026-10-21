@@ -74,6 +74,41 @@ spec:
                   name: {{ .Values.runtime.openfga.apiTokenSecretRef.name }}
                   key: {{ .Values.runtime.openfga.apiTokenSecretRef.key }}
             {{- end }}
+            {{- if eq .Values.auth.mode "jwt" }}
+            - name: ONTOS_AUTH_MODE
+              value: "jwt"
+            - name: ONTOS_AUTH_ISSUER
+              value: {{ required "auth.issuer is required when auth.mode=jwt" .Values.auth.issuer | quote }}
+            - name: ONTOS_AUTH_AUDIENCE
+              value: {{ required "auth.audience is required when auth.mode=jwt" .Values.auth.audience | quote }}
+            - name: ONTOS_AUTH_ALGORITHM
+              value: {{ .Values.auth.algorithm | quote }}
+            {{- if and .Values.auth.jwksUri .Values.auth.publicKeySecretRef.name }}
+            {{- fail "set exactly one of auth.jwksUri or auth.publicKeySecretRef.name" }}
+            {{- else if .Values.auth.jwksUri }}
+            - name: ONTOS_AUTH_JWKS_URI
+              value: {{ .Values.auth.jwksUri | quote }}
+            {{- else if .Values.auth.publicKeySecretRef.name }}
+            - name: ONTOS_AUTH_PUBLIC_KEY_FILE
+              value: {{ printf "/etc/ontos/auth/%s" .Values.auth.publicKeySecretRef.key | quote }}
+            {{- else }}
+            {{- fail "auth.mode=jwt requires auth.jwksUri or auth.publicKeySecretRef.name" }}
+            {{- end }}
+            {{- with .Values.auth.requiredScopes }}
+            - name: ONTOS_AUTH_REQUIRED_SCOPES
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- else if eq .Values.auth.mode "none" }}
+            {{- if not .Values.auth.allowUnauthenticatedBind }}
+            {{- fail "auth.mode=none exposes MCP without caller authentication; set auth.allowUnauthenticatedBind=true to accept that (test clusters only)" }}
+            {{- end }}
+            - name: ONTOS_AUTH_MODE
+              value: "none"
+            - name: ONTOS_ALLOW_UNAUTHENTICATED_BIND
+              value: "1"
+            {{- else }}
+            {{- fail (printf "unsupported auth.mode %q; use jwt or none" .Values.auth.mode) }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
@@ -84,6 +119,11 @@ spec:
             {{- if .Values.ontology.configMap.create }}
             - name: ontology
               mountPath: /etc/ontos/ontology
+              readOnly: true
+            {{- end }}
+            {{- if and (eq .Values.auth.mode "jwt") .Values.auth.publicKeySecretRef.name }}
+            - name: auth-public-key
+              mountPath: /etc/ontos/auth
               readOnly: true
             {{- end }}
           readinessProbe:
@@ -105,4 +145,12 @@ spec:
         - name: ontology
           configMap:
             name: {{ include "ontos.fullname" . }}-ontology
+        {{- end }}
+        {{- if and (eq .Values.auth.mode "jwt") .Values.auth.publicKeySecretRef.name }}
+        - name: auth-public-key
+          secret:
+            secretName: {{ .Values.auth.publicKeySecretRef.name }}
+            items:
+              - key: {{ .Values.auth.publicKeySecretRef.key }}
+                path: {{ .Values.auth.publicKeySecretRef.key }}
         {{- end }}

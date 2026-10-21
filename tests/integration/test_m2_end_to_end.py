@@ -247,11 +247,13 @@ async def test_policy_decisions_recorded_in_audit_when_authz_is_wired(
     assert record is not None
     policy_decisions_json = record.article12[ArticleTwelveField.POLICY_DECISIONS]
     decisions = json.loads(policy_decisions_json)
-    assert len(decisions) == 1
-    assert decisions[0]["policy"] == "inmemory-authz"
-    assert decisions[0]["subject"] == "user:alice"
-    assert decisions[0]["relation"] == VIEW
-    assert "acl:hr" in decisions[0]["result"]
+    # #69: every record first states how the caller was identified.
+    assert decisions[0] == {"policy": "authn", "method": "none", "result": "asserted"}
+    assert len(decisions) == 2
+    assert decisions[1]["policy"] == "inmemory-authz"
+    assert decisions[1]["subject"] == "user:alice"
+    assert decisions[1]["relation"] == VIEW
+    assert "acl:hr" in decisions[1]["result"]
 
 
 async def test_no_authz_backend_preserves_m1_shim(

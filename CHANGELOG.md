@@ -14,6 +14,42 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Upgrade notes
+- **Breaking: an unauthenticated server no longer binds beyond
+  loopback.** With `ONTOS_AUTH_MODE=none` (the default), `ontos serve`
+  and `python -m ontos.runtime.server` refuse a non-loopback
+  `ONTOS_LISTEN_HOST` such as `0.0.0.0`. To fix:
+  - configure `ONTOS_AUTH_MODE=jwt`, or
+  - set `ONTOS_ALLOW_UNAUTHENTICATED_BIND=1` (dev only).
+  
+  The bundled `docker-compose.yml` sets the opt-in. The Docker image does
+  not, so a bare `docker run` needs one of the two.
+- **Helm:** the chart now defaults to `auth.mode: jwt` and fails to
+  render until `auth.issuer`, `auth.audience` and one key source
+  (`auth.jwksUri` or `auth.publicKeySecretRef.name`) are set. To keep an
+  unauthenticated deployment, set `auth.mode: none` and
+  `auth.allowUnauthenticatedBind: true`.
+- Every MCP Article-12 record now starts with an `authn` entry in
+  `policy_decisions`. Consumers that read `policy_decisions[0]` as the
+  authz decision should match on `policy` instead.
+
+### Added — MCP caller authentication (#69)
+- `ONTOS_AUTH_MODE=jwt` verifies a bearer JWT on every MCP request
+  against a customer-configured issuer and audience. The key source is
+  either a pinned public key (`ONTOS_AUTH_PUBLIC_KEY_FILE`, no network
+  access) or the IdP's JWKS over https (`ONTOS_AUTH_JWKS_URI`).
+  Optional `ONTOS_AUTH_REQUIRED_SCOPES` and `ONTOS_AUTH_ALGORITHM`.
+- The authorization principal is the token's `sub`; the agent is the
+  RFC 8693 `act.sub` claim, or the client id. A caller can no longer
+  read as another user by passing a different `acting_on_behalf_of`:
+  a value that disagrees with the token is rejected.
+- Rejections are audited, both at the transport (401/403, token never
+  recorded) and per tool for calls that arrive without a verified token.
+  Clients get a generic `authentication failed`.
+- Gate-blocking compliance tests run a real HTTP server with JWT auth.
+  They read the tool list from the server, so every newly registered
+  tool is covered automatically.
+
 ## [0.6.0] - 2026-10-12 - graph export and Bloom visualization
 
 Operators can now see the graph Ontos built: neutral export formats
