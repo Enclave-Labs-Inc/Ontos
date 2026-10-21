@@ -9,6 +9,10 @@ services:
     environment:
       ONTOS_LISTEN_HOST: 0.0.0.0
       ONTOS_LISTEN_PORT: "8765"
+      # Local dev stack: MCP callers are not authenticated, so binding
+      # 0.0.0.0 needs this explicit opt-in (#69). Use ONTOS_AUTH_MODE=jwt
+      # for anything beyond a developer machine.
+      ONTOS_ALLOW_UNAUTHENTICATED_BIND: "1"
       ONTOS_STORAGE_BACKEND: networkx
       ONTOS_AUDIT_SIGNING_KEY: ${ONTOS_AUDIT_SIGNING_KEY:?set ONTOS_AUDIT_SIGNING_KEY in .env}
       ONTOS_ENV: dev

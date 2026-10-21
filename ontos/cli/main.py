@@ -299,6 +299,7 @@ def _serve_snapshot(path: Path) -> None:
         )
 
     # Deferred imports for help-latency parity with live `serve`.
+    from ontos.audit.emitter import AuditEmitter
     from ontos.runtime.config import RuntimeConfig
     from ontos.runtime.server import (
         _default_dev_signing_key_if_missing,
@@ -309,13 +310,17 @@ def _serve_snapshot(path: Path) -> None:
     _default_dev_signing_key_if_missing()
     store, metadata = _load_snapshot(path)
     cfg = RuntimeConfig.from_env()
-    server = build_server(cfg, store=store, snapshot_metadata=metadata)  # type: ignore[arg-type]
+    audit = AuditEmitter.from_env(cfg.audit_signing_key_env)
+    server = build_server(cfg, store=store, audit=audit, snapshot_metadata=metadata)  # type: ignore[arg-type]
     run_server(
         server,
         host=cfg.listen_host,
         port=cfg.listen_port,
         mode="snapshot",
         backend="networkx-snapshot",
+        auth_mode=cfg.auth_mode,
+        allow_unauthenticated_bind=cfg.allow_unauthenticated_bind,
+        audit=audit,
     )
 
 

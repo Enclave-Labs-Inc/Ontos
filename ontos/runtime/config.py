@@ -106,6 +106,16 @@ class RuntimeConfig:
     listen_host: str
     listen_port: int
     ontology_path: Path | None
+    # #69: MCP caller authentication. Defaults keep programmatic
+    # constructions (tests, embedders) on the asserted-identity path.
+    auth_mode: str = "none"
+    auth_issuer: str | None = None
+    auth_audience: str | None = None
+    auth_jwks_uri: str | None = None
+    auth_public_key_file: Path | None = None
+    auth_algorithm: str = "RS256"
+    auth_required_scopes: tuple[str, ...] = ()
+    allow_unauthenticated_bind: bool = False
 
     def with_storage_override(self, storage: StorageConfig) -> RuntimeConfig:
         """Return this runtime config with only storage settings overridden.
@@ -164,4 +174,18 @@ class RuntimeConfig:
             listen_host=os.getenv("ONTOS_LISTEN_HOST", "127.0.0.1"),
             listen_port=int(os.getenv("ONTOS_LISTEN_PORT", "8765")),
             ontology_path=(Path(p) if (p := os.getenv("ONTOS_ONTOLOGY_PATH")) else None),
+            auth_mode=os.getenv("ONTOS_AUTH_MODE", "none"),
+            auth_issuer=os.getenv("ONTOS_AUTH_ISSUER") or None,
+            auth_audience=os.getenv("ONTOS_AUTH_AUDIENCE") or None,
+            auth_jwks_uri=os.getenv("ONTOS_AUTH_JWKS_URI") or None,
+            auth_public_key_file=(
+                Path(k).expanduser() if (k := os.getenv("ONTOS_AUTH_PUBLIC_KEY_FILE")) else None
+            ),
+            auth_algorithm=os.getenv("ONTOS_AUTH_ALGORITHM", "RS256"),
+            auth_required_scopes=tuple(
+                s.strip()
+                for s in os.getenv("ONTOS_AUTH_REQUIRED_SCOPES", "").split(",")
+                if s.strip()
+            ),
+            allow_unauthenticated_bind=os.getenv("ONTOS_ALLOW_UNAUTHENTICATED_BIND") == "1",
         )
