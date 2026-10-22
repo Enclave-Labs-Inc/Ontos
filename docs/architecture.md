@@ -51,6 +51,20 @@ Correcting a fact does *not* mutate the original. The correction is a new `Fact`
 
 M2 replaces the inline check with a call into OpenFGA (`Check(user, relation, object)`).
 
+## Caller authentication
+
+Permission checks are only as good as the identity they are asked about. `ONTOS_AUTH_MODE` (`ontos/runtime/auth.py`, #69) decides where that identity comes from:
+
+- **`none`** (default): `agent_identity` and `acting_on_behalf_of` are tool arguments, so they are *asserted*, not verified. The server refuses to bind a non-loopback address in this mode unless `ONTOS_ALLOW_UNAUTHENTICATED_BIND=1` is set. That opt-in is meant for the local docker-compose stack only.
+- **`jwt`**: every HTTP request must carry a bearer JWT signed by the customer's IdP. The token is verified against `ONTOS_AUTH_ISSUER` and `ONTOS_AUTH_AUDIENCE`, using either a pinned `ONTOS_AUTH_PUBLIC_KEY_FILE` (no network access) or `ONTOS_AUTH_JWKS_URI` (https, the customer-configured IdP only). The **principal** is the token's `sub`. The **agent** is the RFC 8693 `act.sub` claim, falling back to the token's client id. A caller-supplied `acting_on_behalf_of` that disagrees with `sub` is rejected; to act for a user, an agent obtains a delegated token from the IdP (token exchange).
+
+Every Article-12 record starts with an `authn` policy decision stating the method, and in `jwt` mode also the verified subject, agent and issuer. Rejections are audited at two layers:
+
+- `AuthRejectionAuditMiddleware` records requests the transport turns away with 401/403. The token value is never recorded.
+- Each tool records calls that reach it without a verified token, for example over an in-process transport.
+
+The CLI is a trusted local operator: commands such as `ontos export --acting-on-behalf-of` still take an asserted identity.
+
 ## Ontology evolution and lazy migration
 
 Every `Provenance` carries `ontology_id` and `ontology_version`, stamped by `LlmExtractor` from the active `Ontology` at ingest. Readers plug an `ontos.migration.MigrationRegistry` into the executor to translate historical facts forward when the schema evolves (predicate rename, deprecation, cardinality tighten). The seam mirrors `SupersessionPolicy`: a Protocol-shaped `OntologyMigration` with `id`, `from_version`, `to_version`, and an async per-fact `migrate_fact` method.

@@ -32,7 +32,11 @@ git -C "$repo_root" worktree add --quiet --detach "$wt" "pr-review/$pr"
 cd "$wt"
 head_sha="$(git rev-parse HEAD)"
 merge_base="$(git merge-base HEAD "origin/$base")"
-mapfile -t changed_py < <(git diff --name-only --diff-filter=ACMR "$merge_base" HEAD -- '*.py')
+# Portable to macOS's bash 3.2, which has no `mapfile`.
+changed_py=()
+while IFS= read -r f; do
+  changed_py+=("$f")
+done < <(git diff --name-only --diff-filter=ACMR "$merge_base" HEAD -- '*.py')
 
 status=0
 {
@@ -62,7 +66,8 @@ run() {
 run "uv sync" uv sync --extra dev --frozen --quiet
 run "ruff check" uv run ruff check ontos tests
 run "ruff format --check (changed files)" \
-  bash -c '[[ $# -eq 0 ]] && echo "no python changes" || uv run ruff format --check "$@"' _ "${changed_py[@]}"
+  bash -c '[[ $# -eq 0 ]] && echo "no python changes" || uv run ruff format --check "$@"' _ ${changed_py[@]+"${changed_py[@]}"}
+# ^ bash < 4.4 treats "${arr[@]}" on an empty array as unbound under `set -u`.
 run "mypy --strict" uv run mypy ontos
 run "pytest compliance (gate-blocking)" uv run pytest -q tests/compliance
 run "pytest unit" uv run pytest -q -m "not integration and not benchmark" --ignore=tests/compliance

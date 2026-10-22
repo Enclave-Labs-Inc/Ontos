@@ -13,12 +13,25 @@ from uuid import UUID
 
 import structlog
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from fastmcp.server.dependencies import get_access_token
 from pydantic import BaseModel
+from starlette.middleware import Middleware
 
+from ontos.audit.base import AuditSink
 from ontos.audit.emitter import AuditEmitter
 from ontos.authz import VIEW, AuthzBackend, InMemoryAuthz
 from ontos.executor import DeterministicExecutor, Executor
 from ontos.planner import Planner, PlannerError
+from ontos.runtime.auth import (
+    AuthRejectionAuditMiddleware,
+    CallerIdentity,
+    CallerRejectedError,
+    build_token_verifier,
+    enforce_bind_policy,
+    parse_auth_mode,
+    resolve_caller,
+)
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.models import AuditRecord, Fact
 from ontos.runtime.temporal import parse_as_of
@@ -176,13 +189,13 @@ def build_server(
             }
         ]
 
-    mcp = FastMCP("ontos")
+    auth_mode = parse_auth_mode(cfg.auth_mode)
+    mcp = FastMCP("ontos", auth=build_token_verifier(cfg))
 
     def _emit(
         *,
         tool: str,
-        agent_identity: str,
-        acting_on_behalf_of: str | None,
+        caller: CallerIdentity,
         query_text: str,
         tool_arguments: dict[str, object],
         result_fact_ids: list[str],
@@ -191,16 +204,59 @@ def build_server(
     ) -> AuditRecord:
         return audit.emit(
             query_id=None,
-            agent_identity=agent_identity,
-            acting_on_behalf_of=acting_on_behalf_of,
+            agent_identity=caller.agent_identity,
+            acting_on_behalf_of=caller.principal,
             query_text=query_text,
             tool_invoked=tool,
             tool_arguments=tool_arguments,
             result_fact_ids=result_fact_ids,
             latency_ms=latency_ms,
-            model_versions={"runtime": "0.0.1", "backend": cfg.storage_backend},
-            policy_decisions=policy_decisions,
+            model_versions=_model_versions(cfg),
+            policy_decisions=[caller.policy_decision(), *policy_decisions],
         )
+
+    def _authenticate(
+        *,
+        tool: str,
+        agent_identity: str,
+        acting_on_behalf_of: str | None,
+        query_text: str,
+    ) -> CallerIdentity:
+        """Bind this call to an identity before any store access.
+
+        A rejection is audited first, then surfaced as a generic
+        ToolError; the specific reason lives only in the audit record.
+        """
+        started = time.perf_counter()
+        try:
+            return resolve_caller(
+                mode=auth_mode,
+                claimed_agent_identity=agent_identity,
+                claimed_principal=acting_on_behalf_of,
+                token=get_access_token(),
+            )
+        except CallerRejectedError as exc:
+            decision = {
+                "policy": "authn",
+                "method": auth_mode,
+                "result": "deny",
+                "reason": exc.reason,
+            }
+            if acting_on_behalf_of is not None:
+                decision["claimed_principal"] = acting_on_behalf_of
+            audit.emit(
+                query_id=None,
+                agent_identity=agent_identity,
+                acting_on_behalf_of=None,
+                query_text=query_text,
+                tool_invoked=tool,
+                tool_arguments={},
+                result_fact_ids=[],
+                latency_ms=(time.perf_counter() - started) * 1000,
+                model_versions=_model_versions(cfg),
+                policy_decisions=[decision],
+            )
+            raise ToolError("authentication failed") from None
 
     @mcp.tool()
     async def search(
@@ -212,20 +268,25 @@ def build_server(
     ) -> ToolResponse:
         """Semantic + graph retrieval. Returns facts with per-fact provenance."""
         started = time.perf_counter()
+        caller = _authenticate(
+            tool="search",
+            agent_identity=agent_identity,
+            acting_on_behalf_of=acting_on_behalf_of,
+            query_text=query,
+        )
         ts = parse_as_of(as_of) if as_of else None
-        allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
+        allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
         facts = await store.search(
             query,
             as_of=ts,
             k=k,
-            acl_subject=acting_on_behalf_of,
+            acl_subject=caller.principal,
             allowed_acls=allowed_acls,
         )
         latency_ms = (time.perf_counter() - started) * 1000
         record = _emit(
             tool="search",
-            agent_identity=agent_identity,
-            acting_on_behalf_of=acting_on_behalf_of,
+            caller=caller,
             query_text=query,
             tool_arguments={"as_of": as_of, "k": k},
             result_fact_ids=[str(f.id) for f in facts],
@@ -249,23 +310,28 @@ def build_server(
     ) -> ToolResponse:
         """Multi-hop traversal from an entity. Permission-aware during traversal."""
         started = time.perf_counter()
+        caller = _authenticate(
+            tool="traverse",
+            agent_identity=agent_identity,
+            acting_on_behalf_of=acting_on_behalf_of,
+            query_text=start,
+        )
         ts = parse_as_of(as_of) if as_of else None
-        allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
+        allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
         facts = list(
             await store.traverse(
                 start,
                 relation=relation,
                 depth=depth,
                 as_of=ts,
-                acl_subject=acting_on_behalf_of,
+                acl_subject=caller.principal,
                 allowed_acls=allowed_acls,
             )
         )
         latency_ms = (time.perf_counter() - started) * 1000
         record = _emit(
             tool="traverse",
-            agent_identity=agent_identity,
-            acting_on_behalf_of=acting_on_behalf_of,
+            caller=caller,
             query_text=start,
             tool_arguments={"relation": relation, "depth": depth, "as_of": as_of},
             result_fact_ids=[str(f.id) for f in facts],
@@ -287,19 +353,24 @@ def build_server(
     ) -> ToolResponse:
         """Entity dossier: definition, sources, related entities, validity ranges."""
         started = time.perf_counter()
+        caller = _authenticate(
+            tool="explain",
+            agent_identity=agent_identity,
+            acting_on_behalf_of=acting_on_behalf_of,
+            query_text=entity_id,
+        )
         ts = parse_as_of(as_of) if as_of else None
-        allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
+        allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
         facts = await store.facts_for_entity(
             entity_id,
             as_of=ts,
-            acl_subject=acting_on_behalf_of,
+            acl_subject=caller.principal,
             allowed_acls=allowed_acls,
         )
         latency_ms = (time.perf_counter() - started) * 1000
         record = _emit(
             tool="explain",
-            agent_identity=agent_identity,
-            acting_on_behalf_of=acting_on_behalf_of,
+            caller=caller,
             query_text=entity_id,
             tool_arguments={"as_of": as_of},
             result_fact_ids=[str(f.id) for f in facts],
@@ -316,13 +387,18 @@ def build_server(
     async def provenance(fact_id: str, agent_identity: str) -> ToolResponse:
         """Return the full provenance chain for one fact."""
         started = time.perf_counter()
+        caller = _authenticate(
+            tool="provenance",
+            agent_identity=agent_identity,
+            acting_on_behalf_of=None,
+            query_text=fact_id,
+        )
         fact = await store.get_fact(UUID(fact_id))
         latency_ms = (time.perf_counter() - started) * 1000
         payload: Fact | None = fact
         record = _emit(
             tool="provenance",
-            agent_identity=agent_identity,
-            acting_on_behalf_of=None,
+            caller=caller,
             query_text=fact_id,
             tool_arguments={},
             result_fact_ids=[fact_id] if fact else [],
@@ -338,11 +414,16 @@ def build_server(
     @mcp.tool()
     async def audit_lookup(query_id: str, agent_identity: str) -> ToolResponse:
         """Return the Article-12 audit record for a prior query."""
-        record = audit.by_query_id(UUID(query_id))
-        emitted = _emit(
+        caller = _authenticate(
             tool="audit",
             agent_identity=agent_identity,
             acting_on_behalf_of=None,
+            query_text=query_id,
+        )
+        record = audit.by_query_id(UUID(query_id))
+        emitted = _emit(
+            tool="audit",
+            caller=caller,
             query_text=query_id,
             tool_arguments={},
             result_fact_ids=[],
@@ -370,11 +451,16 @@ def build_server(
         schema-constrained contract.
         """
         started = time.perf_counter()
+        caller = _authenticate(
+            tool="ask",
+            agent_identity=agent_identity,
+            acting_on_behalf_of=acting_on_behalf_of,
+            query_text=question,
+        )
         if resolved_planner is None:
             record = _emit(
                 tool="ask",
-                agent_identity=agent_identity,
-                acting_on_behalf_of=acting_on_behalf_of,
+                caller=caller,
                 query_text=question,
                 tool_arguments={},
                 result_fact_ids=[],
@@ -392,8 +478,7 @@ def build_server(
         if cfg.ontology_path is None:
             record = _emit(
                 tool="ask",
-                agent_identity=agent_identity,
-                acting_on_behalf_of=acting_on_behalf_of,
+                caller=caller,
                 query_text=question,
                 tool_arguments={},
                 result_fact_ids=[],
@@ -411,7 +496,7 @@ def build_server(
         from ontos.ontology import load_ontology
 
         ontology = load_ontology(cfg.ontology_path)
-        allowed_acls, policy_decisions = await _resolve_allowed_acls(acting_on_behalf_of)
+        allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
 
         try:
             plan = await resolved_planner.plan(question, ontology)
@@ -419,8 +504,7 @@ def build_server(
             latency_ms = (time.perf_counter() - started) * 1000
             record = _emit(
                 tool="ask",
-                agent_identity=agent_identity,
-                acting_on_behalf_of=acting_on_behalf_of,
+                caller=caller,
                 query_text=question,
                 tool_arguments={"planner_id": resolved_planner.id},
                 result_fact_ids=[],
@@ -439,14 +523,13 @@ def build_server(
         execution = await resolved_executor.execute(
             plan,
             store,
-            acl_subject=acting_on_behalf_of,
+            acl_subject=caller.principal,
             allowed_acls=allowed_acls,
         )
         latency_ms = (time.perf_counter() - started) * 1000
         record = _emit(
             tool="ask",
-            agent_identity=agent_identity,
-            acting_on_behalf_of=acting_on_behalf_of,
+            caller=caller,
             query_text=question,
             tool_arguments={
                 "planner_id": resolved_planner.id,
@@ -494,11 +577,16 @@ def build_server(
             no absolute path (would leak server filesystem layout).
             """
             started = time.perf_counter()
-            latency_ms = (time.perf_counter() - started) * 1000
-            record = _emit(
+            caller = _authenticate(
                 tool="snapshot_info",
                 agent_identity=agent_identity,
                 acting_on_behalf_of=None,
+                query_text="",
+            )
+            latency_ms = (time.perf_counter() - started) * 1000
+            record = _emit(
+                tool="snapshot_info",
+                caller=caller,
                 query_text="",
                 tool_arguments={},
                 result_fact_ids=[],
@@ -525,6 +613,10 @@ def _default_dev_signing_key_if_missing() -> None:
         log.warning("using dev signing key — never do this in prod")
 
 
+def _model_versions(config: RuntimeConfig) -> dict[str, str]:
+    return {"runtime": "0.0.1", "backend": config.storage_backend}
+
+
 def run_server(
     server: FastMCP,
     *,
@@ -532,6 +624,9 @@ def run_server(
     port: int,
     mode: str = "live",
     backend: str = "networkx",
+    auth_mode: str = "none",
+    allow_unauthenticated_bind: bool = False,
+    audit: AuditSink | None = None,
 ) -> None:
     """Boot a built MCP server with streamable-HTTP transport.
 
@@ -542,22 +637,44 @@ def run_server(
     name on the same startup line — kept as a kwarg so dashboards that
     previously parsed `backend=…` out of the live-serve startup record
     continue to work.
+
+    Refuses a non-loopback bind without authentication (#69). With
+    `auth_mode="jwt"` and an `audit` sink, requests the transport
+    rejects (401/403) are audited too.
     """
-    log.info("ontos starting", host=host, port=port, mode=mode, backend=backend)
-    server.run(transport="http", host=host, port=port)
+    enforce_bind_policy(
+        auth_mode=auth_mode,
+        host=host,
+        allow_unauthenticated_bind=allow_unauthenticated_bind,
+    )
+    middleware: list[Middleware] = []
+    if audit is not None and parse_auth_mode(auth_mode) != "none":
+        middleware.append(
+            Middleware(
+                AuthRejectionAuditMiddleware,
+                audit=audit,
+                model_versions={"runtime": "0.0.1", "backend": backend},
+            )
+        )
+    log.info("ontos starting", host=host, port=port, mode=mode, backend=backend, auth=auth_mode)
+    server.run(transport="http", host=host, port=port, middleware=middleware or None)
 
 
 def main(config: RuntimeConfig | None = None) -> None:
     """CLI entry — boots the live server with streamable-HTTP transport."""
     _default_dev_signing_key_if_missing()
     cfg = config or RuntimeConfig.from_env()
-    server = build_server(cfg)
+    audit = AuditEmitter.from_env(cfg.audit_signing_key_env)
+    server = build_server(cfg, audit=audit)
     run_server(
         server,
         host=cfg.listen_host,
         port=cfg.listen_port,
         mode="live",
         backend=cfg.storage_backend,
+        auth_mode=cfg.auth_mode,
+        allow_unauthenticated_bind=cfg.allow_unauthenticated_bind,
+        audit=audit,
     )
 
 

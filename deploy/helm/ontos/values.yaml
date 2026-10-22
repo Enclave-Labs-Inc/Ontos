@@ -60,6 +60,27 @@ runtime:
       name: ontos-openfga
       key: token
 
+# MCP caller authentication (#69). The pod binds 0.0.0.0, so the chart
+# refuses to render unless callers are authenticated (mode: jwt) or the
+# operator explicitly accepts unauthenticated access.
+auth:
+  mode: jwt
+  # Expected `iss` and `aud` claims. Both required in jwt mode.
+  issuer: ""
+  audience: ""
+  # Exactly one key source. A JWKS URI must be https and reachable from
+  # the pod; add the IdP to networkPolicy.allowedEgress below. A pinned
+  # public key (PEM in a Secret) needs no egress at all.
+  jwksUri: ""
+  publicKeySecretRef:
+    name: ""
+    key: public-key.pem
+  algorithm: RS256
+  requiredScopes: []
+  # mode: none only. Anyone who can reach the Service can assert any
+  # identity. Isolated test clusters only.
+  allowUnauthenticatedBind: false
+
 service:
   type: ClusterIP
   port: 8765
