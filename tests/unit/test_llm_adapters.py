@@ -458,5 +458,5 @@ async def test_anthropic_refusal_surfaces_as_extraction_error(ontology: Ontology
         {"_ExtractionResponse": _MockAnthropicResponse(None, stop_reason="refusal")}
     )
     extractor = LlmExtractor(AnthropicBackend(client=client), ontology)
-    with pytest.raises(ExtractionError, match="declined"):
+    with pytest.raises(ExtractionError, match="LLM backend failed"):
         await extractor.extract(ExtractionInput(source_id="doc-1", text="x"))

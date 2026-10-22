@@ -172,7 +172,16 @@ async def test_out_of_ontology_predicate_drops_triple(ontology: Ontology) -> Non
     extractor = LlmExtractor(llm, ontology)
     result = await extractor.extract(ExtractionInput(source_id="doc-5", text="Alice haunts Bob."))
     assert result.facts == []
-    assert any("haunts" in w for w in result.warnings)
+    assert len(result.rejected) == 1
+    candidate = result.rejected[0]
+    assert candidate.reason == "pattern_not_in_ontology"
+    assert candidate.raw_triple.predicate == "haunts"
+    assert candidate.provenance.source_id == "doc-5"
+    assert candidate.provenance.ontology_id == ontology.id
+    assert candidate.provenance.ontology_version == ontology.version
+    assert "haunts" not in str(result.warnings)
+    assert "person:alice" not in str(result.warnings)
+    assert "person:bob" not in str(result.warnings)
 
 
 async def test_below_min_confidence_dropped_with_warning(ontology: Ontology) -> None:
@@ -247,8 +256,11 @@ async def test_upstream_exception_wraps_as_extraction_error(ontology: Ontology) 
     extractor = LlmExtractor(llm, ontology)
     with pytest.raises(ExtractionError, match="LLM backend failed") as exc:
         await extractor.extract(ExtractionInput(source_id="d", text="t"))
-    # Original exception preserved as __cause__ for debugging.
-    assert isinstance(exc.value.__cause__, BoomError)
+    # Original exception remains accessible without appearing
+    # in ordinary traceback formatting.
+    assert exc.value.__cause__ is None
+    assert isinstance(exc.value.__context__, BoomError)
+    assert exc.value.__suppress_context__ is True
 
 
 async def test_ollama_timeout_wraps_as_extraction_error_naming_knob(
@@ -400,3 +412,147 @@ async def test_rejects_raw_id_reused_for_different_entities(
                 text="Beta Systems is a subsidiary of Acme Corp.",
             )
         )
+
+
+async def test_rejected_candidate_captures_low_confidence(
+    ontology: Ontology,
+) -> None:
+    raw = _valid_triple(llm_confidence=0.2)
+    extractor = LlmExtractor(FakeLLM([[raw]]), ontology, min_confidence=0.5)
+
+    result = await extractor.extract(
+        ExtractionInput(source_id="restricted-doc", text="Sensitive text")
+    )
+
+    assert result.facts == []
+    assert result.entities == []
+    assert len(result.rejected) == 1
+
+    candidate = result.rejected[0]
+    assert candidate.reason == "below_min_confidence"
+    assert candidate.raw_triple.subject_id == raw.subject_id
+    assert candidate.raw_triple.predicate == raw.predicate
+    assert candidate.raw_triple.object_id == raw.object_id
+    assert candidate.provenance.source_id == "restricted-doc"
+    assert candidate.provenance.extractor_id == extractor.id
+    assert candidate.provenance.extractor_version == extractor.version
+    assert candidate.provenance.ontology_id == ontology.id
+    assert candidate.provenance.ontology_version == ontology.version
+    assert candidate.provenance.confidence_score == 0.2
+
+    warnings = " ".join(result.warnings)
+    assert "person:alice" not in warnings
+    assert "company:acme" not in warnings
+    assert "works_at" not in warnings
+    assert "restricted-doc" not in warnings
+
+
+async def test_mixed_valid_and_rejected_triples(
+    ontology: Ontology,
+) -> None:
+    valid = _valid_triple()
+    invalid = _valid_triple(predicate="secret_relationship")
+    low_confidence = _valid_triple(
+        object_id="company:other",
+        object_canonical_name="Other Company",
+        llm_confidence=0.1,
+    )
+
+    extractor = LlmExtractor(
+        FakeLLM([[valid, invalid, low_confidence]]),
+        ontology,
+        min_confidence=0.5,
+    )
+
+    result = await extractor.extract(ExtractionInput(source_id="doc-mixed", text="Test"))
+
+    assert len(result.facts) == 1
+    assert result.facts[0].predicate == "works_at"
+    assert len(result.entities) == 2
+    assert len(result.rejected) == 2
+
+    assert [c.reason for c in result.rejected] == [
+        "pattern_not_in_ontology",
+        "below_min_confidence",
+    ]
+
+    warnings = " ".join(result.warnings)
+    assert "secret_relationship" not in warnings
+    assert "company:other" not in warnings
+    assert "person:alice" not in warnings
+
+
+async def test_valid_extraction_has_no_rejected_candidates(
+    ontology: Ontology,
+) -> None:
+    extractor = LlmExtractor(FakeLLM([[_valid_triple()]]), ontology)
+
+    result = await extractor.extract(
+        ExtractionInput(source_id="doc-valid", text="Alice works at Acme")
+    )
+
+    assert len(result.facts) == 1
+    assert result.rejected == []
+    assert result.warnings == []
+
+
+async def test_generic_backend_exception_does_not_expose_sensitive_details(
+    ontology: Ontology,
+) -> None:
+    secret = "SECRET_PRIVATE_DOCUMENT_CONTENT"
+    backend_error = RuntimeError(f"provider returned: {secret}")
+    extractor = LlmExtractor(FakeLLM([backend_error]), ontology)
+
+    with pytest.raises(ExtractionError, match="LLM backend failed") as caught:
+        await extractor.extract(ExtractionInput(source_id="doc-1", text="Private document."))
+
+    import traceback
+
+    assert secret not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
+    # What an operator sees on FAIL_FAST: the full printed traceback.
+    assert secret not in "".join(traceback.format_exception(caught.value))
+    assert caught.value.__context__ is backend_error
+
+
+async def test_backend_failure_logging_excludes_sensitive_content(
+    ontology: Ontology,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    logger = Mock()
+    monkeypatch.setattr(
+        "ontos.extraction.llm_extractor.log",
+        logger,
+    )
+
+    secret = "SECRET_BACKEND_RESPONSE"
+    document = "PRIVATE_DOCUMENT_CONTENT"
+
+    backend_error = RuntimeError(f"provider returned {secret}")
+    extractor = LlmExtractor(FakeLLM([backend_error]), ontology)
+
+    with pytest.raises(ExtractionError) as caught:
+        await extractor.extract(
+            ExtractionInput(
+                source_id="document-123",
+                text=document,
+            )
+        )
+
+    assert caught.value.kind == "backend"
+    assert caught.value.__context__ is backend_error
+    assert caught.value.__suppress_context__ is True
+    assert secret not in str(caught.value)
+
+    logger.warning.assert_called_once_with(
+        "llm-backend-failed",
+        source_id="document-123",
+        error_type="RuntimeError",
+    )
+
+    logged = repr(logger.warning.call_args)
+    assert secret not in logged
+    assert document not in logged

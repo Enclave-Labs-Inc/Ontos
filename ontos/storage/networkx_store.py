@@ -41,9 +41,10 @@ from uuid import UUID
 import networkx as nx
 import structlog
 
+from ontos.extraction.base import RejectedCandidate
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
-from ontos.storage.base import CrossAclUpsertError, StorageError
+from ontos.storage.base import CrossAclUpsertError, StorageError, StoredCandidate
 from ontos.storage.models import GraphScan, StoredEntity
 
 log = structlog.get_logger(__name__)
@@ -71,8 +72,11 @@ class NetworkxStore:
     # V1 files load with an empty `_merges` default and get upgraded on
     # next flush — operators see a one-line structlog info and no action
     # is required.
-    _MAGIC_HEADER = b"ONTOS-NX-STORE-V2\n"
-    _LEGACY_MAGIC_HEADERS: tuple[bytes, ...] = (b"ONTOS-NX-STORE-V1\n",)
+    _MAGIC_HEADER = b"ONTOS-NX-STORE-V3\n"
+    _LEGACY_MAGIC_HEADERS: tuple[bytes, ...] = (
+        b"ONTOS-NX-STORE-V1\n",
+        b"ONTOS-NX-STORE-V2\n",
+    )
 
     def __init__(self, path: Path | None = None) -> None:
         self._graph: nx.MultiDiGraph[str] = nx.MultiDiGraph()
@@ -81,6 +85,7 @@ class NetworkxStore:
         # re-record; last-write-wins on resolved_at. See #46 and the
         # GraphStore.record_merge Protocol docstring for semantics.
         self._merges: dict[tuple[str, str, str], MergeRecord] = {}
+        self._candidates: list[RejectedCandidate] = []
         self._path: Path | None = path
         # Set by any state-mutating method; checked by `flush()` so that
         # read-only callers (e.g. `ontos query`) never rewrite the file —
@@ -203,6 +208,7 @@ class NetworkxStore:
             # migration path — on next flush the file gets rewritten
             # under the current magic header with the new key).
             self._merges = payload.get("merges", {})
+            self._candidates = payload.get("candidates", [])
         except (KeyError, TypeError) as exc:
             raise StorageError(
                 f"{path} payload shape is not recognised: {exc!r}. "
@@ -227,7 +233,14 @@ class NetworkxStore:
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_bytes(
             self._MAGIC_HEADER
-            + pickle.dumps({"graph": self._graph, "facts": self._facts, "merges": self._merges})
+            + pickle.dumps(
+                {
+                    "graph": self._graph,
+                    "facts": self._facts,
+                    "merges": self._merges,
+                    "candidates": self._candidates,
+                }
+            )
         )
         # Dev-store file: single-user, same-process-writer. Lock down
         # mode so a shared machine doesn't let other users plant a
@@ -676,6 +689,88 @@ class NetworkxStore:
             return False
         return all(_endpoint_visible(mid) for mid in record.merged_ids)
 
+    async def add_candidates(
+        self,
+        candidates: list[RejectedCandidate],
+    ) -> None:
+        """Store untrusted candidates outside the trusted graph."""
+        if not candidates:
+            return
+
+        # Revalidate at the storage boundary.
+        validated = [RejectedCandidate.model_validate(candidate) for candidate in candidates]
+        from ontos.storage.base import candidate_storage_id
+
+        existing_ids = {candidate_storage_id(candidate) for candidate in self._candidates}
+
+        for candidate in validated:
+            candidate_id = candidate_storage_id(candidate)
+            if candidate_id not in existing_ids:
+                self._candidates.append(candidate)
+                existing_ids.add(candidate_id)
+                self._dirty = True
+
+    async def list_candidates(
+        self,
+        *,
+        allowed_acls: list[str],
+        include_public: bool = False,
+        limit: int = 100,
+        after: str | None = None,
+    ) -> list[RejectedCandidate]:
+        records = await self.list_candidate_records(
+            allowed_acls=allowed_acls,
+            include_public=include_public,
+            limit=limit,
+            after=after,
+        )
+        return [record.candidate for record in records]
+
+    async def list_candidate_records(
+        self,
+        *,
+        allowed_acls: list[str],
+        include_public: bool = False,
+        limit: int = 100,
+        after: str | None = None,
+    ) -> list[StoredCandidate]:
+        """ACL-filtered, deterministically ordered candidate page."""
+        from ontos.storage.base import (
+            candidate_sort_key,
+            candidate_storage_id,
+            decode_candidate_cursor,
+        )
+
+        if limit < 1:
+            raise ValueError("limit must be positive")
+
+        position = decode_candidate_cursor(after) if after is not None else None
+        allowed = set(allowed_acls)
+
+        visible = [
+            candidate
+            for candidate in self._candidates
+            if (
+                (candidate.acl_ref is None and include_public)
+                or (candidate.acl_ref is not None and candidate.acl_ref in allowed)
+            )
+        ]
+
+        visible.sort(key=candidate_sort_key)
+
+        if position is not None:
+            visible = [
+                candidate for candidate in visible if candidate_sort_key(candidate) > position
+            ]
+
+        return [
+            StoredCandidate(
+                candidate=candidate,
+                stored_id=candidate_storage_id(candidate),
+            )
+            for candidate in visible[:limit]
+        ]
+
     async def close(self) -> None:
         self.flush()
         # Keep the clear so existing in-memory callers see close() as a
@@ -684,6 +779,7 @@ class NetworkxStore:
         self._graph.clear()
         self._facts.clear()
         self._merges.clear()
+        self._candidates.clear()
 
 
 def _acl_allows(

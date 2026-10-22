@@ -435,6 +435,18 @@ def ingest(
             ),
         ),
     ] = None,
+    retain_rejected_candidates: Annotated[
+        bool,
+        typer.Option(
+            "--retain-rejected-candidates",
+            help=(
+                "Opt in to retaining rejected ontology triples in separate "
+                "candidate storage. Disabled by default. No individual "
+                "candidate purge or automatic TTL expiry is currently "
+                "implemented; protect and manage the entire store."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Ingest a directory of .txt / .md / .pdf files via an LLM extractor + the resolver cascade."""
     # Deferred imports keep --help fast.
@@ -479,12 +491,23 @@ def ingest(
     resolver = ExactMatchResolver()
     store = build_store(cfg)
 
+    from ontos.storage.base import CandidateStore
+
+    candidate_store: CandidateStore | None = None
+    if retain_rejected_candidates:
+        if not isinstance(store, CandidateStore):
+            raise typer.BadParameter(
+                "Configured storage backend does not support candidate retention."
+            )
+        candidate_store = store
+
     pipeline = IngestPipeline(
         connector=connector,
         extractor=extractor,
         resolver=resolver,
         store=store,
         ontology=ontology,
+        candidate_store=candidate_store,
         error_policy=ErrorPolicy(error_policy),
     )
 
@@ -1345,6 +1368,140 @@ def export_json_ld(
     )
     output.write_text(render_jsonld(scan), encoding="utf-8")
     typer.echo(f"wrote JSON-LD snapshot to {output}")
+
+
+ontology_app = typer.Typer(
+    help="Ontology administration commands.",
+    no_args_is_help=True,
+)
+candidates_app = typer.Typer(
+    help="Inspect rejected ontology candidates.",
+    no_args_is_help=True,
+)
+
+app.add_typer(ontology_app, name="ontology")
+ontology_app.add_typer(candidates_app, name="candidates")
+
+
+@candidates_app.command("list")
+def ontology_candidates_list(
+    ctx: typer.Context,
+    acting_on_behalf_of: Annotated[
+        str,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Operator-asserted subject identity (not authenticated).",
+        ),
+    ],
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            min=1,
+            max=100,
+            help="Maximum candidates to return.",
+        ),
+    ] = 100,
+    after: Annotated[
+        str | None,
+        typer.Option(
+            "--after",
+            help="Opaque cursor from the preceding candidate page.",
+        ),
+    ] = None,
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help="Local NetworkX storage path, if not using --storage.",
+        ),
+    ] = None,
+) -> None:
+    """List rejected candidates in a trusted local operator context.
+
+    M1 requires a deployment-host operator. The asserted subject is
+    checked for ontology_reviewer and source-level VIEW permissions.
+    Network-exposed inspection is not supported.
+    """
+    from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.runtime.candidate_inspection import (
+        CandidateInspectionDeniedError,
+        inspect_candidates,
+    )
+    from ontos.runtime.server import build_authz, build_store
+    from ontos.storage.base import CandidateStore
+
+    storage_url, storage_password_env = _cli_storage_override(ctx)
+
+    if storage_url is not None and storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    resolved_path = None if storage_url is not None else _resolve_storage_path(storage_path)
+
+    cfg = _build_cli_runtime_config(
+        resolved_path,
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
+    )
+
+    if not cfg.audit_db_url:
+        typer.echo("Persistent audit database is required.", err=True)
+        raise typer.Exit(code=2)
+
+    if not os.environ.get(cfg.audit_signing_key_env):
+        typer.echo("Audit signing key is required.", err=True)
+        raise typer.Exit(code=2)
+
+    audit = PostgresAuditEmitter.from_url(
+        cfg.audit_db_url,
+        signing_key_env=cfg.audit_signing_key_env,
+    )
+
+    async def _run() -> None:
+        store = None
+        try:
+            await audit.initialize()
+            authz = build_authz(cfg)
+            store = build_store(cfg)
+
+            if not isinstance(store, CandidateStore):
+                raise RuntimeError("Configured storage backend does not support candidates.")
+
+            page = await inspect_candidates(
+                candidate_store=store,
+                authz=authz,
+                audit=audit,
+                subject=acting_on_behalf_of,
+                agent_identity="ontos-cli-local-operator",
+                limit=limit,
+                after=after,
+                identity_assurance="operator_asserted",
+                paginated=True,
+            )
+
+            typer.echo(
+                json.dumps(
+                    {
+                        "candidates": [
+                            candidate.model_dump(mode="json") for candidate in page.candidates
+                        ],
+                        "next_cursor": page.next_cursor,
+                    },
+                    indent=2,
+                )
+            )
+        except CandidateInspectionDeniedError:
+            typer.echo("Candidate inspection denied.", err=True)
+            raise typer.Exit(code=1) from None
+        except ValueError:
+            typer.echo("Invalid candidate inspection request.", err=True)
+            raise typer.Exit(code=2) from None
+        finally:
+            if store is not None:
+                await _close_store_without_masking(store)
+            await audit.close()
+
+    asyncio.run(_run())
 
 
 audit_app = typer.Typer(help="Audit chain commands.")

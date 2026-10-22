@@ -232,6 +232,44 @@ def test_acl_mask_with_audit_role_includes_acl_stamped_fact(
 
     public, restricted = _write_store(store_path)
 
+    # Store an untrusted candidate alongside legitimate trusted facts.
+    # The privileged graph export must never expose the candidate.
+    from ontos.extraction import (
+        CandidateProvenance,
+        CandidateTriple,
+        RejectedCandidate,
+    )
+
+    rejected = RejectedCandidate(
+        raw_triple=CandidateTriple(
+            subject_id="candidate-secret-person",
+            subject_type="Person",
+            subject_canonical_name="Candidate Secret Person",
+            predicate="candidate_secret_predicate",
+            object_id="candidate-secret-company",
+            object_type="Company",
+            object_canonical_name="Candidate Secret Company",
+            llm_confidence=0.9,
+        ),
+        reason="pattern_not_in_ontology",
+        provenance=CandidateProvenance(
+            source_id="candidate-secret-source",
+            extractor_id="test",
+            extractor_version="1",
+            ontology_id="starter",
+            ontology_version="1",
+            confidence_score=0.9,
+        ),
+        acl_ref="acl:finance",
+    )
+
+    async def seed_candidate() -> None:
+        store = NetworkxStore(path=store_path)
+        await store.add_candidates([rejected])
+        await store.close()
+
+    asyncio.run(seed_candidate())
+
     event_loops: dict[str, object] = {}
 
     class TrackingAuthz(InMemoryAuthz):
@@ -290,6 +328,18 @@ def test_acl_mask_with_audit_role_includes_acl_stamped_fact(
     assert str(public.id) in exported
     assert str(restricted.id) in exported
     assert "acl:finance" in exported
+
+    # ACL-mask export may reveal trusted fact ACLs, never rejected triples.
+    for secret in (
+        "candidate-secret-person",
+        "candidate-secret-company",
+        "Candidate Secret Person",
+        "Candidate Secret Company",
+        "candidate_secret_predicate",
+        "candidate-secret-source",
+        "RejectedCandidate",
+    ):
+        assert secret not in exported, f"Privileged export leaked {secret}"
 
     assert len(audit_calls) == 1
     assert event_loops["authz"] is event_loops["audit"]
