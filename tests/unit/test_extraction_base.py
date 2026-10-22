@@ -211,7 +211,6 @@ def test_uuid_import_available_in_this_test_context() -> None:
     assert uuid4()
 
 
-
 def test_rejected_candidate_supports_acl_stamping() -> None:
     from ontos.extraction import (
         CandidateProvenance,
@@ -243,9 +242,7 @@ def test_rejected_candidate_supports_acl_stamping() -> None:
 
     assert candidate.acl_ref is None
 
-    stamped = candidate.model_copy(
-        update={"acl_ref": "restricted-department"}
-    )
+    stamped = candidate.model_copy(update={"acl_ref": "restricted-department"})
 
     assert stamped.acl_ref == "restricted-department"
     assert candidate.acl_ref is None

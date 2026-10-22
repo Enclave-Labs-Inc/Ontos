@@ -8,11 +8,11 @@ on the names re-exported here.
 from ontos.extraction.base import (
     CandidateProvenance,
     CandidateTriple,
-    RejectedCandidate,
     ExtractionError,
     ExtractionInput,
     ExtractionResult,
     Extractor,
+    RejectedCandidate,
 )
 from ontos.extraction.llm_extractor import (
     LLMBackend,

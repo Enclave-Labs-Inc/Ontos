@@ -141,7 +141,15 @@ class ExtractionError(RuntimeError):
     sample of `text`, and the underlying error message.
     """
 
-    def __init__(self, source_id: str, message: str, sample: str = "") -> None:
+    def __init__(
+        self,
+        source_id: str,
+        message: str,
+        sample: str = "",
+        *,
+        kind: Literal["empty", "backend", "other"] = "other",
+    ) -> None:
         self.source_id = source_id
         self.sample = sample[:500]
+        self.kind = kind
         super().__init__(f"extraction failed for source_id={source_id!r}: {message}")

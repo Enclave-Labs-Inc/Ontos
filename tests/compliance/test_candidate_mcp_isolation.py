@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from fastmcp import Client
 
 from ontos.audit.emitter import AuditEmitter
@@ -16,30 +15,32 @@ from ontos.storage.networkx_store import NetworkxStore
 async def test_unauthed_mcp_does_not_expose_candidates() -> None:
     store = NetworkxStore()
 
-    await store.add_candidates([
-        RejectedCandidate(
-            raw_triple=CandidateTriple(
-                subject_id="private-person",
-                subject_type="Person",
-                subject_canonical_name="Private Person",
-                predicate="unapproved_relationship",
-                object_id="private-company",
-                object_type="Company",
-                object_canonical_name="Private Company",
-                llm_confidence=0.9,
-            ),
-            reason="pattern_not_in_ontology",
-            provenance=CandidateProvenance(
-                source_id="private-document",
-                extractor_id="test",
-                extractor_version="1",
-                ontology_id="starter",
-                ontology_version="1",
-                confidence_score=0.9,
-            ),
-            acl_ref="acl:private",
-        )
-    ])
+    await store.add_candidates(
+        [
+            RejectedCandidate(
+                raw_triple=CandidateTriple(
+                    subject_id="private-person",
+                    subject_type="Person",
+                    subject_canonical_name="Private Person",
+                    predicate="unapproved_relationship",
+                    object_id="private-company",
+                    object_type="Company",
+                    object_canonical_name="Private Company",
+                    llm_confidence=0.9,
+                ),
+                reason="pattern_not_in_ontology",
+                provenance=CandidateProvenance(
+                    source_id="private-document",
+                    extractor_id="test",
+                    extractor_version="1",
+                    ontology_id="starter",
+                    ontology_version="1",
+                    confidence_score=0.9,
+                ),
+                acl_ref="acl:private",
+            )
+        ]
+    )
 
     authz = InMemoryAuthz()
     authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")

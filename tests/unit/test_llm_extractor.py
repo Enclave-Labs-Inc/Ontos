@@ -258,7 +258,7 @@ async def test_upstream_exception_wraps_as_extraction_error(ontology: Ontology) 
         await extractor.extract(ExtractionInput(source_id="d", text="t"))
     # Original exception remains accessible without appearing
     # in ordinary traceback formatting.
-    assert exc.value.__cause__ is None
+    assert isinstance(exc.value.__cause__, BoomError)
     assert isinstance(exc.value.__context__, BoomError)
     assert exc.value.__suppress_context__ is True
 
@@ -464,9 +464,7 @@ async def test_mixed_valid_and_rejected_triples(
         min_confidence=0.5,
     )
 
-    result = await extractor.extract(
-        ExtractionInput(source_id="doc-mixed", text="Test")
-    )
+    result = await extractor.extract(ExtractionInput(source_id="doc-mixed", text="Test"))
 
     assert len(result.facts) == 1
     assert result.facts[0].predicate == "works_at"
@@ -498,7 +496,6 @@ async def test_valid_extraction_has_no_rejected_candidates(
     assert result.warnings == []
 
 
-
 async def test_generic_backend_exception_does_not_expose_sensitive_details(
     ontology: Ontology,
 ) -> None:
@@ -507,11 +504,50 @@ async def test_generic_backend_exception_does_not_expose_sensitive_details(
     extractor = LlmExtractor(FakeLLM([backend_error]), ontology)
 
     with pytest.raises(ExtractionError, match="LLM backend failed") as caught:
-        await extractor.extract(
-            ExtractionInput(source_id="doc-1", text="Private document.")
-        )
+        await extractor.extract(ExtractionInput(source_id="doc-1", text="Private document."))
 
     assert secret not in str(caught.value)
-    assert caught.value.__cause__ is None
+    assert caught.value.__cause__ is backend_error
     assert caught.value.__context__ is backend_error
     assert caught.value.__suppress_context__ is True
+
+
+async def test_backend_failure_logging_excludes_sensitive_content(
+    ontology: Ontology,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    logger = Mock()
+    monkeypatch.setattr(
+        "ontos.extraction.llm_extractor.log",
+        logger,
+    )
+
+    secret = "SECRET_BACKEND_RESPONSE"
+    document = "PRIVATE_DOCUMENT_CONTENT"
+
+    backend_error = RuntimeError(f"provider returned {secret}")
+    extractor = LlmExtractor(FakeLLM([backend_error]), ontology)
+
+    with pytest.raises(ExtractionError) as caught:
+        await extractor.extract(
+            ExtractionInput(
+                source_id="document-123",
+                text=document,
+            )
+        )
+
+    assert caught.value.kind == "backend"
+    assert caught.value.__cause__ is backend_error
+    assert secret not in str(caught.value)
+
+    logger.warning.assert_called_once_with(
+        "llm-backend-failed",
+        source_id="document-123",
+        error_type="RuntimeError",
+    )
+
+    logged = repr(logger.warning.call_args)
+    assert secret not in logged
+    assert document not in logged

@@ -1109,7 +1109,6 @@ async def test_same_source_reconciliation_refuses_unresolvable_raw_id_collision(
     assert snapshot.facts[0].object_id == "2"
 
 
-
 async def test_pipeline_retains_rejected_candidates_with_document_acl(
     ontology: Ontology,
 ) -> None:
@@ -1148,9 +1147,7 @@ async def test_pipeline_retains_rejected_candidates_with_document_acl(
 
     assert await store.list_candidates(allowed_acls=[]) == []
 
-    candidates = await store.list_candidates(
-        allowed_acls=["acl:private"]
-    )
+    candidates = await store.list_candidates(allowed_acls=["acl:private"])
     assert len(candidates) == 1
     assert candidates[0].acl_ref == "acl:private"
     assert candidates[0].raw_triple.predicate == "unapproved_relation"
@@ -1189,10 +1186,13 @@ async def test_pipeline_candidate_retention_disabled_by_default(
     report = await pipeline.run()
 
     assert report.candidates_retained == 0
-    assert await store.list_candidates(
-        allowed_acls=[],
-        include_public=True,
-    ) == []
+    assert (
+        await store.list_candidates(
+            allowed_acls=[],
+            include_public=True,
+        )
+        == []
+    )
 
 
 async def test_pipeline_candidate_storage_failure_is_not_silent(
@@ -1227,7 +1227,6 @@ async def test_pipeline_candidate_storage_failure_is_not_silent(
 
     with pytest.raises(RuntimeError, match="candidate storage unavailable"):
         await pipeline.run()
-
 
 
 async def test_rejected_document_does_not_retain_candidates(
@@ -1286,20 +1285,25 @@ async def test_rejected_document_does_not_retain_candidates(
     assert len(report.errors) == 1
     assert report.errors[0].source_id == "hr-doc"
 
-    assert await store.list_candidates(
-        allowed_acls=["acl:hr"]
-    ) == []
+    assert await store.list_candidates(allowed_acls=["acl:hr"]) == []
 
-    assert len(await store.search(
-        "works_at",
-        allowed_acls=["acl:finance"],
-    )) == 1
+    assert (
+        len(
+            await store.search(
+                "works_at",
+                allowed_acls=["acl:finance"],
+            )
+        )
+        == 1
+    )
 
-    assert await store.search(
-        "works_at",
-        allowed_acls=["acl:hr"],
-    ) == []
-
+    assert (
+        await store.search(
+            "works_at",
+            allowed_acls=["acl:hr"],
+        )
+        == []
+    )
 
 
 async def test_backend_exception_does_not_leak_into_ingest_report(

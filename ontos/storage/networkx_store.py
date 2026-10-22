@@ -44,7 +44,7 @@ import structlog
 from ontos.extraction.base import RejectedCandidate
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
-from ontos.storage.base import CrossAclUpsertError, StorageError
+from ontos.storage.base import CrossAclUpsertError, StorageError, StoredCandidate
 from ontos.storage.models import GraphScan, StoredEntity
 
 log = structlog.get_logger(__name__)
@@ -233,12 +233,14 @@ class NetworkxStore:
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_bytes(
             self._MAGIC_HEADER
-            + pickle.dumps({
+            + pickle.dumps(
+                {
                     "graph": self._graph,
                     "facts": self._facts,
                     "merges": self._merges,
                     "candidates": self._candidates,
-                })
+                }
+            )
         )
         # Dev-store file: single-user, same-process-writer. Lock down
         # mode so a shared machine doesn't let other users plant a
@@ -696,12 +698,17 @@ class NetworkxStore:
             return
 
         # Revalidate at the storage boundary.
-        validated = [
-            RejectedCandidate.model_validate(candidate)
-            for candidate in candidates
-        ]
-        self._candidates.extend(validated)
-        self._dirty = True
+        validated = [RejectedCandidate.model_validate(candidate) for candidate in candidates]
+        from ontos.storage.base import candidate_storage_id
+
+        existing_ids = {candidate_storage_id(candidate) for candidate in self._candidates}
+
+        for candidate in validated:
+            candidate_id = candidate_storage_id(candidate)
+            if candidate_id not in existing_ids:
+                self._candidates.append(candidate)
+                existing_ids.add(candidate_id)
+                self._dirty = True
 
     async def list_candidates(
         self,
@@ -709,24 +716,60 @@ class NetworkxStore:
         allowed_acls: list[str],
         include_public: bool = False,
         limit: int = 100,
+        after: str | None = None,
     ) -> list[RejectedCandidate]:
-        """ACL-filtered storage read; caller must separately verify reviewer role."""
+        records = await self.list_candidate_records(
+            allowed_acls=allowed_acls,
+            include_public=include_public,
+            limit=limit,
+            after=after,
+        )
+        return [record.candidate for record in records]
+
+    async def list_candidate_records(
+        self,
+        *,
+        allowed_acls: list[str],
+        include_public: bool = False,
+        limit: int = 100,
+        after: str | None = None,
+    ) -> list[StoredCandidate]:
+        """ACL-filtered, deterministically ordered candidate page."""
+        from ontos.storage.base import (
+            candidate_sort_key,
+            candidate_storage_id,
+            decode_candidate_cursor,
+        )
+
         if limit < 1:
             raise ValueError("limit must be positive")
 
+        position = decode_candidate_cursor(after) if after is not None else None
         allowed = set(allowed_acls)
 
-        return [
+        visible = [
             candidate
             for candidate in self._candidates
             if (
                 (candidate.acl_ref is None and include_public)
-                or (
-                    candidate.acl_ref is not None
-                    and candidate.acl_ref in allowed
-                )
+                or (candidate.acl_ref is not None and candidate.acl_ref in allowed)
             )
-        ][:limit]
+        ]
+
+        visible.sort(key=candidate_sort_key)
+
+        if position is not None:
+            visible = [
+                candidate for candidate in visible if candidate_sort_key(candidate) > position
+            ]
+
+        return [
+            StoredCandidate(
+                candidate=candidate,
+                stored_id=candidate_storage_id(candidate),
+            )
+            for candidate in visible[:limit]
+        ]
 
     async def close(self) -> None:
         self.flush()

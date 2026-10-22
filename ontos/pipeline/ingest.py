@@ -274,7 +274,7 @@ class IngestPipeline:
                 # string representation into the public ingestion report.
                 reason = (
                     "LLM returned zero triples for non-empty input"
-                    if "LLM returned zero triples for non-empty input" in str(exc)
+                    if exc.kind == "empty"
                     else "extraction failed; document skipped"
                 )
                 errors.append(IngestError(source_id=doc.source_id, reason=reason))

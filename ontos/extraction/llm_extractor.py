@@ -26,8 +26,9 @@ downstream cares which shape the impl took.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
+import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from ontos.extraction.base import (
@@ -40,6 +41,8 @@ from ontos.extraction.base import (
 )
 from ontos.ontology import Ontology
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
+
+log = structlog.get_logger()
 
 
 class RawTriple(BaseModel):
@@ -175,6 +178,12 @@ class LlmExtractor:
         except ExtractionError:
             raise
         except Exception as exc:
+            # Never log the exception message, traceback, or source text.
+            log.warning(
+                "llm-backend-failed",
+                source_id=input.source_id,
+                error_type=type(exc).__name__,
+            )
             # Deferred import to avoid pulling the Ollama module into every
             # extractor construction (keeps the Scribe-drop-in boundary
             # clean — this except-case is Ollama-specific sugar, not an
@@ -186,18 +195,21 @@ class LlmExtractor:
                     source_id=input.source_id,
                     message=str(exc),
                     sample=input.text,
+                    kind="backend",
                 ) from exc
             raise ExtractionError(
                 source_id=input.source_id,
                 message="LLM backend failed",
                 sample=input.text,
-            ) from None
+                kind="backend",
+            ) from exc
 
         if not raw_triples and input.text.strip():
             raise ExtractionError(
                 source_id=input.source_id,
                 message="LLM returned zero triples for non-empty input",
                 sample=input.text,
+                kind="empty",
             )
 
         warnings: list[str] = []
@@ -213,7 +225,9 @@ class LlmExtractor:
             if not self._ontology.is_valid_pattern(
                 raw.subject_type, raw.predicate, raw.object_type
             ):
-                reason = "pattern_not_in_ontology"
+                reason: Literal["pattern_not_in_ontology", "below_min_confidence"] | None = (
+                    "pattern_not_in_ontology"
+                )
                 warning = "Triple rejected: pattern not in the ontology."
             elif score < self._min_confidence:
                 reason = "below_min_confidence"
@@ -224,9 +238,7 @@ class LlmExtractor:
             if reason is not None:
                 rejected.append(
                     RejectedCandidate(
-                        raw_triple=CandidateTriple.model_validate(
-                            raw.model_dump()
-                        ),
+                        raw_triple=CandidateTriple.model_validate(raw.model_dump()),
                         reason=reason,
                         provenance=CandidateProvenance(
                             source_id=input.source_id,

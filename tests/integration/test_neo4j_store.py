@@ -53,10 +53,10 @@ async def store(neo4j_container) -> AsyncIterator[Neo4jStore]:
     uri = neo4j_container.get_connection_url()
     password = neo4j_container.password
     store = Neo4jStore.from_uri(uri, auth=("neo4j", password))
-    await store.initialize()
     # Clear any leftover state from a previous test in the module.
     async with store._driver.session(database=store._database) as session:
         await session.run("MATCH (n) DETACH DELETE n")
+    await store.initialize()
     try:
         yield store
     finally:
@@ -1041,7 +1041,6 @@ async def test_push_neo4j_visualization_is_idempotent(store: Neo4jStore) -> None
     assert merge_record["count"] == 1
 
 
-
 def _rejected_candidate(acl_ref: str | None):
     from ontos.extraction import (
         CandidateProvenance,
@@ -1076,11 +1075,13 @@ def _rejected_candidate(acl_ref: str | None):
 async def test_rejected_candidates_acl_and_graph_isolation(
     store: Neo4jStore,
 ) -> None:
-    await store.add_candidates([
-        _rejected_candidate("acl:finance"),
-        _rejected_candidate("acl:hr"),
-        _rejected_candidate(None),
-    ])
+    await store.add_candidates(
+        [
+            _rejected_candidate("acl:finance"),
+            _rejected_candidate("acl:hr"),
+            _rejected_candidate(None),
+        ]
+    )
 
     assert await store.list_candidates(allowed_acls=[]) == []
 
@@ -1097,20 +1098,33 @@ async def test_rejected_candidates_acl_and_graph_isolation(
     assert len(public) == 1
     assert public[0].acl_ref is None
 
-    assert len(await store.list_candidates(
-        allowed_acls=["acl:finance"],
-        include_public=True,
-    )) == 2
+    assert (
+        len(
+            await store.list_candidates(
+                allowed_acls=["acl:finance"],
+                include_public=True,
+            )
+        )
+        == 2
+    )
 
-    assert await store.search(
-        "unapproved_relation",
-        allowed_acls=["acl:finance"],
-    ) == []
+    assert (
+        await store.search(
+            "unapproved_relation",
+            allowed_acls=["acl:finance"],
+        )
+        == []
+    )
 
-    assert list(await store.traverse(
-        "private-subject",
-        allowed_acls=["acl:finance"],
-    )) == []
+    assert (
+        list(
+            await store.traverse(
+                "private-subject",
+                allowed_acls=["acl:finance"],
+            )
+        )
+        == []
+    )
 
     snapshot = await store.scan(include_all_acls=True)
     assert snapshot.entities == []
@@ -1145,39 +1159,571 @@ async def test_rejected_candidates_survive_new_store_session(
     assert candidates[0].provenance.source_id == "restricted-source"
 
 
-async def test_rejected_candidate_batch_rolls_back_on_constraint_failure(
+async def test_rejected_candidate_writes_are_idempotent(
     store: Neo4jStore,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import ontos.storage.neo4j_store as neo4j_module
+    candidate = _rejected_candidate("acl:finance")
+    other = _rejected_candidate("acl:hr")
 
-    fixed_id = uuid4()
-    monkeypatch.setattr(neo4j_module, "uuid4", lambda: fixed_id)
+    # Duplicate entries within the same batch.
+    await store.add_candidates([candidate, candidate, other])
 
-    # Two CREATEs with the same candidate id violate the unique
-    # constraint. Neither candidate should survive the transaction.
-    with pytest.raises(Exception):
-        await store.add_candidates([
-            _rejected_candidate("acl:finance"),
-            _rejected_candidate("acl:hr"),
-        ])
+    # Repeated ingestion of the same candidates.
+    await store.add_candidates([candidate, other])
+
+    finance = await store.list_candidates(
+        allowed_acls=["acl:finance"],
+    )
+    hr = await store.list_candidates(
+        allowed_acls=["acl:hr"],
+    )
+
+    assert len(finance) == 1
+    assert len(hr) == 1
+    assert finance[0] == candidate
+    assert hr[0] == other
+
+    # Verify physical storage contains exactly two records.
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run("MATCH (n:RejectedCandidate) RETURN count(n) AS total")
+        row = await result.single()
+        assert row is not None
+        assert row["total"] == 2
+
+
+async def test_rejected_candidate_legacy_identity_is_preserved(
+    store: Neo4jStore,
+) -> None:
+    import hashlib
+    import json
+
+    from ontos.storage.base import candidate_storage_id
+
+    original = _rejected_candidate("acl:finance")
+
+    # The previous algorithm hashed the complete candidate payload,
+    # including both confidence values.
+    legacy_payload = json.dumps(
+        original.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    legacy_id = hashlib.sha256(legacy_payload.encode("utf-8")).hexdigest()
+
+    logical_id = candidate_storage_id(original)
+    assert legacy_id != logical_id
+
+    # Simulate a previously retained candidate with its historical ID.
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            CREATE (c:RejectedCandidate {
+                id: $id,
+                source_id: $source_id,
+                acl_ref: $acl_ref,
+                payload: $payload
+            })
+            """,
+            id=legacy_id,
+            source_id=original.provenance.source_id,
+            acl_ref=original.acl_ref,
+            payload=original.model_dump_json(),
+        )
+        await result.consume()
+
+    updated_confidence = original.model_copy(
+        update={
+            "raw_triple": original.raw_triple.model_copy(update={"llm_confidence": 0.51}),
+            "provenance": original.provenance.model_copy(update={"confidence_score": 0.51}),
+        }
+    )
+
+    assert candidate_storage_id(updated_confidence) == logical_id
+
+    # Schema initialization should migrate the logical identity
+    # without replacing the historical ID.
+    await store.initialize()
+    await store.add_candidates([updated_confidence])
 
     async with store._driver.session(database=store._database) as session:
         result = await session.run(
-            "MATCH (n:RejectedCandidate) RETURN count(n) AS total"
+            """
+            MATCH (c:RejectedCandidate)
+            RETURN c.id AS id, c.logical_id AS logical_id
+            """
+        )
+        rows = await result.data()
+
+    assert rows == [{"id": legacy_id, "logical_id": logical_id}]
+
+    retained = await store.list_candidates(
+        allowed_acls=["acl:finance"],
+    )
+
+    # First-write-wins: original confidence remains unchanged.
+    assert retained == [original]
+
+
+async def test_rejected_candidate_legacy_physical_id_is_audited(
+    store: Neo4jStore,
+) -> None:
+    import hashlib
+    import json
+
+    from ontos.audit.emitter import AuditEmitter
+    from ontos.authz import ONTOLOGY_REVIEWER, VIEW, InMemoryAuthz
+    from ontos.runtime.candidate_inspection import inspect_candidates
+    from ontos.runtime.models import ArticleTwelveField
+    from ontos.storage.base import candidate_storage_id
+
+    candidate = _rejected_candidate("acl:finance")
+
+    # Reproduce the historical full-payload identity algorithm.
+    legacy_payload = json.dumps(
+        candidate.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    historical_id = hashlib.sha256(legacy_payload.encode("utf-8")).hexdigest()
+
+    logical_id = candidate_storage_id(candidate)
+    assert historical_id != logical_id
+
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            CREATE (c:RejectedCandidate {
+                id: $id,
+                acl_ref: $acl_ref,
+                payload: $payload
+            })
+            """,
+            id=historical_id,
+            acl_ref=candidate.acl_ref,
+            payload=candidate.model_dump_json(),
+        )
+        await result.consume()
+
+    await store.initialize()
+
+    # Confirm the storage interface preserves the historical record ID.
+    stored_records = await store.list_candidate_records(
+        allowed_acls=["acl:finance"],
+    )
+    assert len(stored_records) == 1
+    assert stored_records[0].stored_id == historical_id
+    assert stored_records[0].candidate == candidate
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    authz.grant("user:reviewer", VIEW, "acl:finance")
+
+    audit = AuditEmitter(signing_key=b"neo4j-legacy-candidate-audit-test")
+
+    page, record = await inspect_candidates(
+        candidate_store=store,
+        authz=authz,
+        audit=audit,
+        subject="user:reviewer",
+        agent_identity="ontos-cli",
+        identity_assurance="operator_asserted",
+        limit=1,
+    )
+
+    assert page == [candidate]
+    assert len(audit) == 1
+
+    disclosed_ids = json.loads(record.article12[ArticleTwelveField.RESULT_FACT_IDS])
+    assert disclosed_ids == [historical_id]
+    assert disclosed_ids != [logical_id]
+    assert audit.verify_chain()
+
+
+async def test_rejected_candidate_legacy_logical_identity_collision(
+    store: Neo4jStore,
+) -> None:
+    import hashlib
+    import json
+
+    from ontos.storage.base import candidate_storage_id
+
+    first = _rejected_candidate("acl:finance")
+    second = first.model_copy(
+        update={
+            "raw_triple": first.raw_triple.model_copy(update={"llm_confidence": 0.51}),
+            "provenance": first.provenance.model_copy(update={"confidence_score": 0.51}),
+        }
+    )
+
+    assert candidate_storage_id(first) == candidate_storage_id(second)
+
+    historical = []
+    for candidate in (first, second):
+        serialized = json.dumps(
+            candidate.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        old_id = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        historical.append((old_id, candidate.model_dump_json()))
+
+    assert historical[0][0] != historical[1][0]
+
+    async with store._driver.session(database=store._database) as session:
+        for old_id, payload in historical:
+            result = await session.run(
+                """
+                CREATE (c:RejectedCandidate {
+                    id: $id,
+                    acl_ref: $acl_ref,
+                    payload: $payload
+                })
+                """,
+                id=old_id,
+                acl_ref="acl:finance",
+                payload=payload,
+            )
+            await result.consume()
+
+    # A collision must be detected before changing either historical record.
+    with pytest.raises(
+        RuntimeError,
+        match="candidate logical identity migration collision",
+    ) as exc_info:
+        await store.initialize()
+
+    # Error messages must not disclose raw candidate content.
+    message = str(exc_info.value)
+    assert first.raw_triple.subject_id not in message
+    assert first.raw_triple.object_id not in message
+    assert first.raw_triple.predicate not in message
+
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            MATCH (c:RejectedCandidate)
+            RETURN c.id AS id,
+                   c.payload AS payload,
+                   c.logical_id AS logical_id
+            ORDER BY c.id
+            """
+        )
+        rows = await result.data()
+
+    expected = sorted(historical, key=lambda item: item[0])
+
+    assert len(rows) == 2
+    assert [(row["id"], row["payload"]) for row in rows] == expected
+    assert all(row["logical_id"] is None for row in rows)
+
+
+async def test_neo4j_candidate_write_transaction_rolls_back(
+    store: Neo4jStore,
+) -> None:
+    """A failed managed write transaction must undo preceding writes."""
+    candidate = _rejected_candidate("acl:finance")
+
+    await store.add_candidates([candidate])
+
+    from ontos.storage.base import candidate_storage_id
+
+    logical_id = candidate_storage_id(candidate)
+
+    async def failing_transaction(tx):
+        result = await tx.run(
+            """
+            MATCH (c:RejectedCandidate {logical_id: $logical_id})
+            SET c.source_id = 'temporary-migration-change'
+            """,
+            logical_id=logical_id,
+        )
+        await result.consume()
+
+        raise RuntimeError("injected rollback test failure")
+
+    async with store._driver.session(database=store._database) as session:
+        with pytest.raises(RuntimeError, match="injected rollback test failure"):
+            await session.execute_write(failing_transaction)
+
+    records = await store.list_candidate_records(
+        allowed_acls=["acl:finance"],
+    )
+    assert len(records) == 1
+    assert records[0].candidate == candidate
+
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            MATCH (c:RejectedCandidate {logical_id: $logical_id})
+            RETURN c.source_id AS source_id
+            """,
+            logical_id=logical_id,
         )
         row = await result.single()
-        assert row["total"] == 0
+
+    assert row is not None
+    assert row["source_id"] == candidate.provenance.source_id
+
+
+async def test_rejected_candidate_legacy_collides_with_migrated(
+    store: Neo4jStore,
+) -> None:
+    import hashlib
+    import json
+
+    existing = _rejected_candidate("acl:finance")
+    legacy = existing.model_copy(
+        update={
+            "raw_triple": existing.raw_triple.model_copy(update={"llm_confidence": 0.51}),
+            "provenance": existing.provenance.model_copy(update={"confidence_score": 0.51}),
+        }
+    )
+
+    await store.add_candidates([existing])
+
+    serialized = json.dumps(
+        legacy.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    historical_id = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            CREATE (c:RejectedCandidate {
+                id: $id,
+                acl_ref: $acl_ref,
+                payload: $payload
+            })
+            """,
+            id=historical_id,
+            acl_ref=legacy.acl_ref,
+            payload=legacy.model_dump_json(),
+        )
+        await result.consume()
+
+    with pytest.raises(
+        RuntimeError,
+        match="candidate logical identity migration collision",
+    ) as exc_info:
+        await store.initialize()
+
+    message = str(exc_info.value)
+    assert existing.raw_triple.subject_id not in message
+    assert existing.raw_triple.predicate not in message
+
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            MATCH (c:RejectedCandidate)
+            RETURN c.id AS id, c.logical_id AS logical_id
+            """
+        )
+        rows = await result.data()
+
+    assert len(rows) == 2
+    assert historical_id in [row["id"] for row in rows]
+    assert next(row for row in rows if row["id"] == historical_id)["logical_id"] is None
+
+
+async def test_rejected_candidate_legacy_cursor_pagination(
+    store: Neo4jStore,
+) -> None:
+    import hashlib
+    import json
+
+    from ontos.storage.base import (
+        candidate_storage_id,
+        encode_candidate_cursor,
+    )
+
+    original = _rejected_candidate("acl:finance")
+
+    candidates = [
+        original.model_copy(
+            update={
+                "provenance": original.provenance.model_copy(
+                    update={"source_id": f"legacy-source-{i:03d}"}
+                )
+            }
+        )
+        for i in range(3)
+    ]
+
+    historical_ids = []
+
+    async with store._driver.session(database=store._database) as session:
+        for candidate in candidates:
+            payload = json.dumps(
+                candidate.model_dump(mode="json"),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            historical_id = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+            assert historical_id != candidate_storage_id(candidate)
+            historical_ids.append(historical_id)
+
+            result = await session.run(
+                """
+                CREATE (c:RejectedCandidate {
+                    id: $id,
+                    acl_ref: $acl_ref,
+                    payload: $payload
+                })
+                """,
+                id=historical_id,
+                acl_ref=candidate.acl_ref,
+                payload=candidate.model_dump_json(),
+            )
+            await result.consume()
+
+    await store.initialize()
+
+    collected = []
+    cursor = None
+
+    while True:
+        page = await store.list_candidates(
+            allowed_acls=["acl:finance"],
+            limit=1,
+            after=cursor,
+        )
+        if not page:
+            break
+
+        collected.extend(page)
+        cursor = encode_candidate_cursor(page[-1])
+
+    assert collected == candidates
+
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            MATCH (c:RejectedCandidate)
+            RETURN c.id AS id
+            ORDER BY c.source_id
+            """
+        )
+        rows = await result.data()
+
+    assert [row["id"] for row in rows] == historical_ids
+
+
+async def test_rejected_candidate_legacy_source_id_migration(
+    store: Neo4jStore,
+) -> None:
+    from ontos.storage.base import candidate_storage_id
+
+    candidate = _rejected_candidate("acl:finance")
+    candidate_id = candidate_storage_id(candidate)
+
+    # Simulate the earlier storage schema, which had no source_id property.
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            CREATE (c:RejectedCandidate {
+                id: $id,
+                acl_ref: $acl_ref,
+                payload: $payload
+            })
+            """,
+            id=candidate_id,
+            acl_ref=candidate.acl_ref,
+            payload=candidate.model_dump_json(),
+        )
+        await result.consume()
+
+    await store.initialize()
+
+    async with store._driver.session(database=store._database) as session:
+        result = await session.run(
+            """
+            MATCH (c:RejectedCandidate {id: $id})
+            RETURN c.source_id AS source_id
+            """,
+            id=candidate_id,
+        )
+        row = await result.single()
+
+    assert row is not None
+    assert row["source_id"] == candidate.provenance.source_id
+
+    visible = await store.list_candidates(
+        allowed_acls=["acl:finance"],
+        limit=1,
+    )
+    assert candidate in visible
+
+    # Re-running the migration must be harmless.
+    await store.initialize()
+
+    visible_again = await store.list_candidates(
+        allowed_acls=["acl:finance"],
+        limit=1,
+    )
+    assert visible_again == visible
+
+
+async def test_rejected_candidate_cursor_pagination(
+    store: Neo4jStore,
+) -> None:
+    from ontos.storage.base import encode_candidate_cursor
+
+    original = _rejected_candidate("acl:finance")
+
+    candidates = [
+        original.model_copy(
+            update={
+                "provenance": original.provenance.model_copy(
+                    update={"source_id": f"source-{i:03d}"}
+                )
+            }
+        )
+        for i in range(7)
+    ]
+
+    forbidden = original.model_copy(
+        update={
+            "acl_ref": "acl:hr",
+            "provenance": original.provenance.model_copy(update={"source_id": "source-003a"}),
+        }
+    )
+
+    await store.add_candidates(list(reversed(candidates)) + [forbidden])
+
+    collected = []
+    after = None
+
+    while True:
+        page = await store.list_candidates(
+            allowed_acls=["acl:finance"],
+            limit=2,
+            after=after,
+        )
+        if not page:
+            break
+
+        collected.extend(page)
+        after = encode_candidate_cursor(page[-1])
+
+    assert [item.provenance.source_id for item in collected] == [
+        f"source-{i:03d}" for i in range(7)
+    ]
+    assert forbidden not in collected
 
 
 async def test_rejected_candidate_limit_applied_after_acl_filter(
     store: Neo4jStore,
 ) -> None:
-    await store.add_candidates([
-        _rejected_candidate("acl:hr"),
-        _rejected_candidate("acl:finance"),
-        _rejected_candidate("acl:finance"),
-    ])
+    await store.add_candidates(
+        [
+            _rejected_candidate("acl:hr"),
+            _rejected_candidate("acl:finance"),
+            _rejected_candidate("acl:finance"),
+        ]
+    )
 
     candidates = await store.list_candidates(
         allowed_acls=["acl:finance"],

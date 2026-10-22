@@ -26,7 +26,7 @@ import json
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any, Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import structlog
 from neo4j import AsyncDriver, AsyncGraphDatabase
@@ -35,7 +35,7 @@ from neo4j.time import DateTime as Neo4jDateTime
 from ontos.extraction.base import RejectedCandidate
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
-from ontos.storage.base import CrossAclUpsertError
+from ontos.storage.base import CrossAclUpsertError, StoredCandidate
 from ontos.storage.models import GraphScan, StoredEntity
 
 log = structlog.get_logger(__name__)
@@ -131,6 +131,8 @@ class Neo4jStore:
             "CREATE INDEX entity_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.id)",
             "CREATE CONSTRAINT rejected_candidate_id IF NOT EXISTS "
             "FOR (n:RejectedCandidate) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT rejected_candidate_logical_id IF NOT EXISTS "
+            "FOR (n:RejectedCandidate) REQUIRE n.logical_id IS UNIQUE",
             "CREATE INDEX rejected_candidate_acl IF NOT EXISTS "
             "FOR (n:RejectedCandidate) ON (n.acl_ref)",
             # #38: type-filtered reads (e.g. #32's export "all Person nodes")
@@ -153,6 +155,66 @@ class Neo4jStore:
             for stmt in statements:
                 await session.run(stmt)
 
+        from ontos.storage.base import candidate_storage_id
+
+        async def _migrate_candidates(tx: Any) -> None:
+            # Read and update candidates in one transaction.
+            # Historical IDs and payloads must never be overwritten.
+            result = await tx.run(
+                """
+                MATCH (c:RejectedCandidate)
+                WHERE c.source_id IS NULL OR c.logical_id IS NULL
+                RETURN c.id AS id,
+                       c.source_id AS source_id,
+                       c.logical_id AS logical_id,
+                       c.payload AS payload
+                """
+            )
+            legacy_rows = await result.data()
+
+            # Preflight unmigrated candidates before writing.
+            # The database constraint protects against collisions with
+            # already-migrated records.
+            seen_logical_ids: set[str] = set()
+            pending_updates: list[tuple[str, str, str]] = []
+
+            for row in legacy_rows:
+                candidate = RejectedCandidate.model_validate_json(row["payload"])
+                logical_id = candidate_storage_id(candidate)
+
+                if logical_id in seen_logical_ids or (
+                    row["logical_id"] is not None and row["logical_id"] != logical_id
+                ):
+                    raise RuntimeError("candidate logical identity migration collision")
+
+                seen_logical_ids.add(logical_id)
+
+                if row["source_id"] is None or row["logical_id"] is None:
+                    pending_updates.append((row["id"], candidate.provenance.source_id, logical_id))
+
+            for stored_id, source_id, logical_id in pending_updates:
+                result = await tx.run(
+                    """
+                    MATCH (c:RejectedCandidate {id: $id})
+                    SET c.source_id = coalesce(c.source_id, $source_id),
+                        c.logical_id = coalesce(c.logical_id, $logical_id)
+                    """,
+                    id=stored_id,
+                    source_id=source_id,
+                    logical_id=logical_id,
+                )
+                await result.consume()
+
+        from neo4j.exceptions import ConstraintError
+
+        async with self._driver.session(database=self._database) as session:
+            try:
+                await session.execute_write(_migrate_candidates)
+            except ConstraintError:
+                # Neo4j constraint messages can contain internal node details.
+                # Never include them in candidate migration error messages.
+                raise RuntimeError("candidate logical identity migration collision") from None
+
     async def add_candidates(
         self,
         candidates: list[RejectedCandidate],
@@ -161,9 +223,13 @@ class Neo4jStore:
         if not candidates:
             return
 
+        from ontos.storage.base import candidate_storage_id
+
         rows = [
             {
-                "id": str(uuid4()),
+                "id": candidate_storage_id(candidate),
+                "logical_id": candidate_storage_id(candidate),
+                "source_id": candidate.provenance.source_id,
                 "acl_ref": candidate.acl_ref,
                 "payload": candidate.model_dump_json(),
             }
@@ -174,11 +240,12 @@ class Neo4jStore:
             result = await tx.run(
                 """
                 UNWIND $rows AS row
-                CREATE (c:RejectedCandidate {
-                    id: row.id,
-                    acl_ref: row.acl_ref,
-                    payload: row.payload
-                })
+                MERGE (c:RejectedCandidate {logical_id: row.logical_id})
+                ON CREATE SET
+                    c.id = row.id,
+                    c.source_id = row.source_id,
+                    c.acl_ref = row.acl_ref,
+                    c.payload = row.payload
                 """,
                 rows=rows,
             )
@@ -187,13 +254,31 @@ class Neo4jStore:
         async with self._driver.session(database=self._database) as session:
             await session.execute_write(_write_batch)
 
+    # Candidate records retain historical physical IDs.
     async def list_candidates(
         self,
         *,
         allowed_acls: list[str],
         include_public: bool = False,
         limit: int = 100,
+        after: str | None = None,
     ) -> list[RejectedCandidate]:
+        records = await self.list_candidate_records(
+            allowed_acls=allowed_acls,
+            include_public=include_public,
+            limit=limit,
+            after=after,
+        )
+        return [record.candidate for record in records]
+
+    async def list_candidate_records(
+        self,
+        *,
+        allowed_acls: list[str],
+        include_public: bool = False,
+        limit: int = 100,
+        after: str | None = None,
+    ) -> list[StoredCandidate]:
         """Filter by document ACL before limiting returned candidates.
 
         Caller must separately enforce ontology_reviewer authorization
@@ -202,13 +287,24 @@ class Neo4jStore:
         if limit < 1:
             raise ValueError("limit must be positive")
 
+        from ontos.storage.base import decode_candidate_cursor
+
+        position = decode_candidate_cursor(after) if after is not None else None
+        after_source, after_id = position if position is not None else ("", "")
+
         query = """
         MATCH (c:RejectedCandidate)
-        WHERE
+        WHERE (
             (c.acl_ref IS NOT NULL AND c.acl_ref IN $allowed_acls)
             OR (c.acl_ref IS NULL AND $include_public)
-        RETURN c.payload AS payload
-        ORDER BY c.id
+        )
+        AND (
+            $after_source = ""
+            OR c.source_id > $after_source
+            OR (c.source_id = $after_source AND c.logical_id > $after_id)
+        )
+        RETURN c.id AS stored_id, c.payload AS payload
+        ORDER BY c.source_id, c.logical_id
         LIMIT $limit
         """
 
@@ -218,11 +314,16 @@ class Neo4jStore:
                 allowed_acls=list(allowed_acls),
                 include_public=include_public,
                 limit=limit,
+                after_source=after_source,
+                after_id=after_id,
             )
             rows = await result.data()
 
         return [
-            RejectedCandidate.model_validate_json(row["payload"])
+            StoredCandidate(
+                candidate=RejectedCandidate.model_validate_json(row["payload"]),
+                stored_id=row["stored_id"],
+            )
             for row in rows
         ]
 

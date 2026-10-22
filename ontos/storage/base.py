@@ -20,8 +20,9 @@ ACL semantics on read methods:
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 from ontos.extraction.base import RejectedCandidate
@@ -30,6 +31,108 @@ from ontos.runtime.models import Entity, Fact
 from ontos.storage.models import GraphScan, StoredEntity
 
 
+@dataclass(frozen=True)
+class StoredCandidate:
+    """Rejected candidate together with its physical storage ID."""
+
+    candidate: RejectedCandidate
+    stored_id: str
+
+
+def candidate_storage_id(candidate: RejectedCandidate) -> str:
+    """Stable identity for an ACL-scoped rejected candidate."""
+    import hashlib
+    import json
+
+    # Stable logical identity, independent of confidence fluctuations.
+    # ACL scope is part of identity to prevent cross-permission merging.
+    triple = candidate.raw_triple
+    provenance = candidate.provenance
+
+    identity = {
+        "source_id": provenance.source_id,
+        "subject_id": triple.subject_id,
+        "subject_type": triple.subject_type,
+        "subject_canonical_name": triple.subject_canonical_name,
+        "predicate": triple.predicate,
+        "object_id": triple.object_id,
+        "object_type": triple.object_type,
+        "object_canonical_name": triple.object_canonical_name,
+        "reason": candidate.reason,
+        "ontology_id": provenance.ontology_id,
+        "ontology_version": provenance.ontology_version,
+        "extractor_id": provenance.extractor_id,
+        "extractor_version": provenance.extractor_version,
+        "acl_ref": candidate.acl_ref,
+    }
+
+    canonical = json.dumps(
+        identity,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def candidate_sort_key(candidate: RejectedCandidate) -> tuple[str, str]:
+    """Stable cross-backend ordering for candidate inspection."""
+    return (
+        candidate.provenance.source_id,
+        candidate_storage_id(candidate),
+    )
+
+
+def encode_candidate_cursor(candidate: RejectedCandidate) -> str:
+    """Encode the last displayed candidate's position."""
+    import base64
+    import json
+
+    payload = json.dumps(
+        candidate_sort_key(candidate),
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+class InvalidCandidateCursorError(ValueError):
+    """Invalid pagination cursor; safe to report without input details."""
+
+
+def decode_candidate_cursor(cursor: str) -> tuple[str, str]:
+    """Validate and decode a pagination position."""
+    import base64
+    import binascii
+    import json
+    import re
+
+    try:
+        if not cursor or len(cursor) > 8192:
+            raise ValueError("invalid cursor")
+
+        if re.fullmatch(r"[A-Za-z0-9_-]+", cursor) is None:
+            raise ValueError("invalid cursor")
+
+        padded = cursor + "=" * (-len(cursor) % 4)
+        raw = base64.b64decode(padded, altchars=b"-_", validate=True)
+        decoded = json.loads(raw)
+
+        if (
+            not isinstance(decoded, list)
+            or len(decoded) != 2
+            or not all(isinstance(value, str) for value in decoded)
+            or not decoded[0]
+            or re.fullmatch(r"[0-9a-f]{64}", decoded[1]) is None
+        ):
+            raise ValueError("invalid cursor")
+
+        return decoded[0], decoded[1]
+
+    except (ValueError, TypeError, UnicodeError, binascii.Error):
+        raise InvalidCandidateCursorError("invalid candidate cursor") from None
+
+
+@runtime_checkable
 class CandidateStore(Protocol):
     """Separate storage for rejected, untrusted extraction candidates.
 
@@ -47,12 +150,24 @@ class CandidateStore(Protocol):
         """Persist candidates that have already been ACL-stamped by ingestion."""
         ...
 
+    async def list_candidate_records(
+        self,
+        *,
+        allowed_acls: list[str],
+        include_public: bool = False,
+        limit: int = 100,
+        after: str | None = None,
+    ) -> list[StoredCandidate]:
+        """Return ACL-filtered candidates with their actual stored IDs."""
+        ...
+
     async def list_candidates(
         self,
         *,
         allowed_acls: list[str],
         include_public: bool = False,
         limit: int = 100,
+        after: str | None = None,
     ) -> list[RejectedCandidate]:
         """Return only candidates whose ACL the caller may VIEW.
 

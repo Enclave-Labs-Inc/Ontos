@@ -2017,7 +2017,6 @@ def test_export_unauthorized_subject_gets_public_only(
     assert str(finance_fact.id) not in exported
 
 
-
 @pytest.mark.parametrize(
     ("extra_args", "expected_enabled"),
     [
@@ -2054,6 +2053,7 @@ def test_ingest_candidate_retention_flag(
 
         async def run(self):
             from ontos.pipeline.ingest import IngestReport
+
             return IngestReport(
                 documents_processed=0,
                 facts_written=0,
@@ -2070,9 +2070,12 @@ def test_ingest_candidate_retention_flag(
 
     args = [
         "ingest",
-        "--source-dir", str(source_dir),
-        "--ontology", str(STARTER_PATH),
-        "--storage-path", str(tmp_path / "graph.pkl"),
+        "--source-dir",
+        str(source_dir),
+        "--ontology",
+        str(STARTER_PATH),
+        "--storage-path",
+        str(tmp_path / "graph.pkl"),
         *extra_args,
     ]
 
@@ -2091,7 +2094,6 @@ def test_ingest_help_documents_candidate_retention() -> None:
     assert "--retain-rejected-candidates" in result.stdout
 
 
-
 @pytest.mark.parametrize("retention_enabled", [False, True])
 def test_cli_candidate_retention_persists_to_disk(
     tmp_path: Path,
@@ -2101,7 +2103,6 @@ def test_cli_candidate_retention_persists_to_disk(
     """Real CLI -> extractor -> pipeline -> persisted NetworkX V3."""
     import asyncio
 
-    import ontos.extraction
     from ontos.extraction import RawTriple
     from ontos.storage.networkx_store import NetworkxStore
 
@@ -2146,9 +2147,12 @@ def test_cli_candidate_retention_persists_to_disk(
 
     args = [
         "ingest",
-        "--source-dir", str(source_dir),
-        "--ontology", str(STARTER_PATH),
-        "--storage-path", str(storage_path),
+        "--source-dir",
+        str(source_dir),
+        "--ontology",
+        str(STARTER_PATH),
+        "--storage-path",
+        str(storage_path),
     ]
     if retention_enabled:
         args.append("--retain-rejected-candidates")
@@ -2164,9 +2168,7 @@ def test_cli_candidate_retention_persists_to_disk(
                 include_public=True,
             )
             facts = await store.search("works_at")
-            rejected_facts = await store.search(
-                "unapproved_relationship"
-            )
+            rejected_facts = await store.search("unapproved_relationship")
             return candidates, facts, rejected_facts
         finally:
             await store.close()
@@ -2183,3 +2185,507 @@ def test_cli_candidate_retention_persists_to_disk(
         assert candidates[0].provenance.source_id
     else:
         assert candidates == []
+
+
+def test_ontology_candidates_cli_requires_persistent_audit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("ONTOS_AUDIT_DB_URL", raising=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "ontology",
+            "candidates",
+            "list",
+            "--acting-on-behalf-of",
+            "user:reviewer",
+            "--storage-path",
+            str(tmp_path / "store.pkl"),
+        ],
+        env={"ONTOS_AUDIT_DB_URL": ""},
+    )
+
+    assert result.exit_code != 0
+    assert "Persistent audit database is required" in result.output
+
+
+def test_ontology_candidates_cli_denies_without_authz(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ONTOS_AUTHZ_BACKEND", raising=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "ontology",
+            "candidates",
+            "list",
+            "--acting-on-behalf-of",
+            "user:reviewer",
+            "--storage-path",
+            str(tmp_path / "store.pkl"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Candidate inspection denied" in result.output
+
+
+def test_ontology_candidates_cli_help_identifies_asserted_identity() -> None:
+    result = runner.invoke(
+        app,
+        ["ontology", "candidates", "list", "--help"],
+    )
+
+    assert result.exit_code == 0
+    assert "--acting-on-behalf-of" in result.output
+    assert "Operator-asserted" in result.output
+
+
+def test_ontology_candidates_cli_enforces_reviewer_and_view(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import json
+
+    from ontos.authz import ONTOLOGY_REVIEWER, VIEW, InMemoryAuthz
+    from ontos.extraction import (
+        CandidateProvenance,
+        CandidateTriple,
+        RejectedCandidate,
+    )
+    from ontos.storage.networkx_store import NetworkxStore
+
+    path = tmp_path / "candidate-store.pkl"
+
+    def candidate(acl: str, source: str) -> RejectedCandidate:
+        return RejectedCandidate(
+            raw_triple=CandidateTriple(
+                subject_id=f"private-{source}",
+                subject_type="Person",
+                subject_canonical_name="Private Name",
+                predicate="restricted_predicate",
+                object_id="private-object",
+                object_type="Company",
+                object_canonical_name="Private Company",
+                llm_confidence=0.9,
+            ),
+            reason="pattern_not_in_ontology",
+            provenance=CandidateProvenance(
+                source_id=source,
+                extractor_id="test",
+                extractor_version="1",
+                ontology_id="starter",
+                ontology_version="1",
+                confidence_score=0.9,
+            ),
+            acl_ref=acl,
+        )
+
+    async def seed() -> None:
+        store = NetworkxStore(path=path)
+        await store.add_candidates(
+            [
+                candidate("acl:finance", "finance-document"),
+                candidate("acl:hr", "hr-document"),
+            ]
+        )
+        await store.close()
+
+    asyncio.run(seed())
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    authz.grant("user:reviewer", VIEW, "acl:finance")
+
+    monkeypatch.setattr(
+        "ontos.runtime.server.build_authz",
+        lambda cfg: authz,
+    )
+
+    arguments = [
+        "ontology",
+        "candidates",
+        "list",
+        "--acting-on-behalf-of",
+        "user:reviewer",
+        "--storage-path",
+        str(path),
+    ]
+
+    allowed = runner.invoke(app, arguments)
+
+    assert allowed.exit_code == 0, allowed.output
+    payload = json.loads(allowed.stdout)
+    returned = payload["candidates"]
+
+    assert len(returned) == 1
+    assert returned[0]["provenance"]["source_id"] == "finance-document"
+    assert payload["next_cursor"] is None
+    assert "hr-document" not in allowed.output
+
+    # Reviewer without VIEW must see the same empty result
+    # as a reviewer inspecting an empty store.
+    authz.revoke("user:reviewer", VIEW, "acl:finance")
+
+    no_view = runner.invoke(app, arguments)
+
+    assert no_view.exit_code == 0, no_view.output
+    assert json.loads(no_view.stdout) == {
+        "candidates": [],
+        "next_cursor": None,
+    }
+
+    # A user with VIEW but without the reviewer role is denied.
+    authz.grant("user:employee", VIEW, "acl:finance")
+
+    denied = runner.invoke(
+        app,
+        [
+            "ontology",
+            "candidates",
+            "list",
+            "--acting-on-behalf-of",
+            "user:employee",
+            "--storage-path",
+            str(path),
+        ],
+    )
+
+    assert denied.exit_code == 1
+    assert "Candidate inspection denied" in denied.output
+    assert "finance-document" not in denied.output
+    assert "hr-document" not in denied.output
+
+
+def test_ontology_candidates_cli_denial_is_persistently_audited(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.authz import InMemoryAuthz
+
+    audit_path = tmp_path / "candidate-audit.sqlite"
+    audit_url = f"sqlite+aiosqlite:///{audit_path}"
+
+    monkeypatch.setenv("ONTOS_AUDIT_DB_URL", audit_url)
+    monkeypatch.setattr(
+        "ontos.runtime.server.build_authz",
+        lambda cfg: InMemoryAuthz(),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "ontology",
+            "candidates",
+            "list",
+            "--acting-on-behalf-of",
+            "user:employee",
+            "--storage-path",
+            str(tmp_path / "store.pkl"),
+        ],
+        env={"ONTOS_AUDIT_DB_URL": audit_url},
+    )
+
+    assert result.exit_code == 1
+    assert "Candidate inspection denied" in result.output
+
+    async def verify() -> None:
+        audit = PostgresAuditEmitter.from_url(audit_url)
+        try:
+            assert await audit.verify_chain_async()
+            assert await audit.count_async() == 1
+        finally:
+            await audit.close()
+
+    asyncio.run(verify())
+
+
+def test_ontology_candidates_cli_audit_failure_does_not_leak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.authz import ONTOLOGY_REVIEWER, VIEW, InMemoryAuthz
+    from ontos.extraction import (
+        CandidateProvenance,
+        CandidateTriple,
+        RejectedCandidate,
+    )
+    from ontos.storage.networkx_store import NetworkxStore
+
+    path = tmp_path / "candidates.pkl"
+    candidate = RejectedCandidate(
+        raw_triple=CandidateTriple(
+            subject_id="secret-person",
+            subject_type="Person",
+            subject_canonical_name="Secret Person",
+            predicate="secret_predicate",
+            object_id="secret-company",
+            object_type="Company",
+            object_canonical_name="Secret Company",
+            llm_confidence=0.9,
+        ),
+        reason="pattern_not_in_ontology",
+        provenance=CandidateProvenance(
+            source_id="secret-source",
+            extractor_id="test",
+            extractor_version="1",
+            ontology_id="starter",
+            ontology_version="1",
+            confidence_score=0.9,
+        ),
+        acl_ref="acl:finance",
+    )
+
+    async def seed() -> None:
+        store = NetworkxStore(path=path)
+        await store.add_candidates([candidate])
+        await store.close()
+
+    asyncio.run(seed())
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    authz.grant("user:reviewer", VIEW, "acl:finance")
+
+    monkeypatch.setattr(
+        "ontos.runtime.server.build_authz",
+        lambda cfg: authz,
+    )
+
+    async def failed_emit(self, **kwargs):
+        raise RuntimeError("Audit write unavailable")
+
+    monkeypatch.setattr(
+        PostgresAuditEmitter,
+        "emit_async",
+        failed_emit,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "ontology",
+            "candidates",
+            "list",
+            "--acting-on-behalf-of",
+            "user:reviewer",
+            "--storage-path",
+            str(path),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "secret-person" not in result.output
+    assert "secret_predicate" not in result.output
+    assert "secret-source" not in result.output
+
+
+def test_ontology_candidates_cli_cursor_pagination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import json
+
+    from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.authz import ONTOLOGY_REVIEWER, VIEW, InMemoryAuthz
+    from ontos.extraction import (
+        CandidateProvenance,
+        CandidateTriple,
+        RejectedCandidate,
+    )
+    from ontos.storage.networkx_store import NetworkxStore
+
+    audit_url = f"sqlite+aiosqlite:///{tmp_path / 'pagination-audit.sqlite'}"
+    storage_path = tmp_path / "paginated-candidates.pkl"
+
+    monkeypatch.setenv("ONTOS_AUDIT_DB_URL", audit_url)
+
+    original = RejectedCandidate(
+        raw_triple=CandidateTriple(
+            subject_id="secret-person",
+            subject_type="Person",
+            subject_canonical_name="Secret Person",
+            predicate="restricted_relationship",
+            object_id="secret-company",
+            object_type="Company",
+            object_canonical_name="Secret Company",
+            llm_confidence=0.8,
+        ),
+        reason="pattern_not_in_ontology",
+        provenance=CandidateProvenance(
+            source_id="finance-000",
+            extractor_id="test",
+            extractor_version="1",
+            ontology_id="starter",
+            ontology_version="1",
+            confidence_score=0.8,
+        ),
+        acl_ref="acl:finance",
+    )
+
+    visible = [
+        original.model_copy(
+            update={
+                "provenance": original.provenance.model_copy(
+                    update={"source_id": f"finance-{i:03d}"}
+                )
+            }
+        )
+        for i in range(3)
+    ]
+
+    forbidden = original.model_copy(
+        update={
+            "acl_ref": "acl:hr",
+            "provenance": original.provenance.model_copy(update={"source_id": "finance-001a"}),
+        }
+    )
+
+    async def seed() -> None:
+        store = NetworkxStore(path=storage_path)
+        await store.add_candidates(list(reversed(visible)) + [forbidden])
+        await store.close()
+
+    asyncio.run(seed())
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    authz.grant("user:reviewer", VIEW, "acl:finance")
+
+    monkeypatch.setattr(
+        "ontos.runtime.server.build_authz",
+        lambda cfg: authz,
+    )
+
+    arguments = [
+        "ontology",
+        "candidates",
+        "list",
+        "--acting-on-behalf-of",
+        "user:reviewer",
+        "--storage-path",
+        str(storage_path),
+        "--limit",
+        "2",
+    ]
+
+    first = runner.invoke(app, arguments)
+    assert first.exit_code == 0, first.output
+
+    first_payload = json.loads(first.stdout)
+
+    assert [candidate["provenance"]["source_id"] for candidate in first_payload["candidates"]] == [
+        "finance-000",
+        "finance-001",
+    ]
+
+    cursor = first_payload["next_cursor"]
+    assert isinstance(cursor, str)
+    assert cursor
+
+    second = runner.invoke(app, arguments + ["--after", cursor])
+    assert second.exit_code == 0, second.output
+
+    second_payload = json.loads(second.stdout)
+
+    assert [candidate["provenance"]["source_id"] for candidate in second_payload["candidates"]] == [
+        "finance-002"
+    ]
+
+    assert second_payload["next_cursor"] is None
+
+    assert "finance-001a" not in first.stdout
+    assert "finance-001a" not in second.stdout
+
+    # A malformed cursor must fail safely and be persistently audited.
+    malformed = runner.invoke(
+        app,
+        arguments + ["--after", "not-a-valid-cursor"],
+    )
+
+    assert malformed.exit_code == 2
+    assert "Invalid candidate inspection request." in malformed.output
+    assert "secret-person" not in malformed.output
+    assert "restricted_relationship" not in malformed.output
+    assert "finance-000" not in malformed.output
+    assert "not-a-valid-cursor" not in malformed.output
+
+    async def verify_audit() -> None:
+        import hashlib
+
+        from sqlalchemy import select
+
+        from ontos.runtime.models import ArticleTwelveField
+
+        audit = PostgresAuditEmitter.from_url(audit_url)
+        try:
+            assert await audit.verify_chain_async()
+            assert await audit.count_async() == 3
+
+            async with audit._engine.connect() as conn:
+                result = await conn.execute(
+                    select(audit._table.c.article12).order_by(audit._table.c.ordinal)
+                )
+                records = result.scalars().all()
+
+            assert len(records) == 3
+
+            decisions = [
+                json.loads(record[ArticleTwelveField.POLICY_DECISIONS])[0]["result"]
+                for record in records
+            ]
+            assert decisions == [
+                "allow",
+                "allow",
+                "invalid_request",
+            ]
+
+            arguments = [
+                json.loads(record[ArticleTwelveField.TOOL_ARGUMENTS]) for record in records
+            ]
+
+            expected_fingerprint = hashlib.sha256(cursor.encode("utf-8")).hexdigest()
+
+            assert arguments[0]["after_cursor_sha256"] is None
+            assert arguments[1]["after_cursor_sha256"] == expected_fingerprint
+            assert (
+                arguments[2]["after_cursor_sha256"]
+                == hashlib.sha256(b"not-a-valid-cursor").hexdigest()
+            )
+
+            disclosed_ids = [
+                json.loads(record[ArticleTwelveField.RESULT_FACT_IDS]) for record in records
+            ]
+
+            assert len(disclosed_ids[0]) == 2
+            assert len(disclosed_ids[1]) == 1
+            assert disclosed_ids[2] == []
+
+            serialized = json.dumps(records)
+
+            for sensitive in (
+                cursor,
+                "not-a-valid-cursor",
+                "secret-person",
+                "secret-company",
+                "restricted_relationship",
+                "finance-001a",
+            ):
+                assert sensitive not in serialized
+
+        finally:
+            await audit.close()
+
+    asyncio.run(verify_audit())
