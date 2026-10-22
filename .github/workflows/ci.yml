@@ -63,8 +63,25 @@ jobs:
 
       - name: Helm template renders (deploy/helm/ontos)
         # `--dry-run=client` skips the API server; we just want to
-        # prove every template compiles into valid YAML.
-        run: helm template ontos deploy/helm/ontos > /dev/null
+        # prove every template compiles into valid YAML. The chart
+        # requires MCP caller auth (#69), so render each supported mode
+        # explicitly and assert the bare default still refuses.
+        run: |
+          helm template ontos deploy/helm/ontos \
+            --set auth.issuer=https://idp.example.internal \
+            --set auth.audience=ontos \
+            --set auth.jwksUri=https://idp.example.internal/jwks > /dev/null
+          helm template ontos deploy/helm/ontos \
+            --set auth.issuer=https://idp.example.internal \
+            --set auth.audience=ontos \
+            --set auth.publicKeySecretRef.name=ontos-idp-key > /dev/null
+          helm template ontos deploy/helm/ontos \
+            --set auth.mode=none \
+            --set auth.allowUnauthenticatedBind=true > /dev/null
+          if helm template ontos deploy/helm/ontos > /dev/null 2>&1; then
+            echo "chart rendered without auth configuration; expected refusal" >&2
+            exit 1
+          fi
 
   test-macos-arm64:
     # Apple Silicon reports platform_machine == "arm64", which several
