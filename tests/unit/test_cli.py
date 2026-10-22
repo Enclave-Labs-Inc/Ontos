@@ -2089,9 +2089,14 @@ def test_ingest_candidate_retention_flag(
 
 
 def test_ingest_help_documents_candidate_retention() -> None:
-    result = runner.invoke(app, ["ingest", "--help"])
-    assert result.exit_code == 0
-    assert "--retain-rejected-candidates" in result.stdout
+    # Introspect the parsed command rather than rendered help: under
+    # GITHUB_ACTIONS rich ignores COLUMNS and truncates long option names.
+    import typer
+
+    ingest = typer.main.get_command(app).commands["ingest"]  # type: ignore[attr-defined]
+    options = {opt: param for param in ingest.params for opt in param.opts}
+    assert "--retain-rejected-candidates" in options
+    assert options["--retain-rejected-candidates"].help
 
 
 @pytest.mark.parametrize("retention_enabled", [False, True])

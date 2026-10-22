@@ -1737,3 +1737,46 @@ async def test_rejected_candidate_limit_applied_after_acl_filter(
             allowed_acls=["acl:finance"],
             limit=0,
         )
+
+
+async def test_rejected_candidate_pagination_matches_networkx_for_non_bmp_sources(
+    store: Neo4jStore,
+) -> None:
+    """Neo4j orders raw non-BMP strings differently from its own `>` cursor
+    comparison, which silently skipped candidates. Paging must return every
+    candidate exactly once, in the same order as NetworkX."""
+    from ontos.storage.base import encode_candidate_cursor
+    from ontos.storage.networkx_store import NetworkxStore
+
+    template = _rejected_candidate("acl:finance")
+    sources = ["￿", "\U0001f600", "Ａ-doc", "\U00020000", "ascii-doc", ""]
+    candidates = [
+        template.model_copy(
+            update={
+                "raw_triple": template.raw_triple.model_copy(update={"subject_id": f"s-{i}"}),
+                "provenance": template.provenance.model_copy(update={"source_id": source}),
+            }
+        )
+        for i, source in enumerate(sources * 2)
+    ]
+
+    reference = NetworkxStore()
+    await reference.add_candidates(candidates)
+    await store.add_candidates(candidates)
+
+    async def page_all(backend: NetworkxStore | Neo4jStore) -> list[str]:
+        seen: list[str] = []
+        after: str | None = None
+        while True:
+            records = await backend.list_candidate_records(
+                allowed_acls=["acl:finance"], limit=2, after=after
+            )
+            page = records[:1]
+            seen += [record.stored_id for record in page]
+            if len(records) <= 1:
+                return seen
+            after = encode_candidate_cursor(page[-1].candidate)
+
+    expected = await page_all(reference)
+    assert len(expected) == len(candidates)
+    assert await page_all(store) == expected

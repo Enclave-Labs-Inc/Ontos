@@ -155,7 +155,7 @@ class Neo4jStore:
             for stmt in statements:
                 await session.run(stmt)
 
-        from ontos.storage.base import candidate_storage_id
+        from ontos.storage.base import candidate_source_key, candidate_storage_id
 
         async def _migrate_candidates(tx: Any) -> None:
             # Read and update candidates in one transaction.
@@ -163,10 +163,11 @@ class Neo4jStore:
             result = await tx.run(
                 """
                 MATCH (c:RejectedCandidate)
-                WHERE c.source_id IS NULL OR c.logical_id IS NULL
+                WHERE c.source_id IS NULL OR c.logical_id IS NULL OR c.source_key IS NULL
                 RETURN c.id AS id,
                        c.source_id AS source_id,
                        c.logical_id AS logical_id,
+                       c.source_key AS source_key,
                        c.payload AS payload
                 """
             )
@@ -176,7 +177,7 @@ class Neo4jStore:
             # The database constraint protects against collisions with
             # already-migrated records.
             seen_logical_ids: set[str] = set()
-            pending_updates: list[tuple[str, str, str]] = []
+            pending_updates: list[tuple[str, str, str, str]] = []
 
             for row in legacy_rows:
                 candidate = RejectedCandidate.model_validate_json(row["payload"])
@@ -189,19 +190,28 @@ class Neo4jStore:
 
                 seen_logical_ids.add(logical_id)
 
-                if row["source_id"] is None or row["logical_id"] is None:
-                    pending_updates.append((row["id"], candidate.provenance.source_id, logical_id))
+                if (
+                    row["source_id"] is None
+                    or row["logical_id"] is None
+                    or row["source_key"] is None
+                ):
+                    source_id = candidate.provenance.source_id
+                    pending_updates.append(
+                        (row["id"], source_id, logical_id, candidate_source_key(source_id))
+                    )
 
-            for stored_id, source_id, logical_id in pending_updates:
+            for stored_id, source_id, logical_id, source_key in pending_updates:
                 result = await tx.run(
                     """
                     MATCH (c:RejectedCandidate {id: $id})
                     SET c.source_id = coalesce(c.source_id, $source_id),
-                        c.logical_id = coalesce(c.logical_id, $logical_id)
+                        c.logical_id = coalesce(c.logical_id, $logical_id),
+                        c.source_key = coalesce(c.source_key, $source_key)
                     """,
                     id=stored_id,
                     source_id=source_id,
                     logical_id=logical_id,
+                    source_key=source_key,
                 )
                 await result.consume()
 
@@ -223,13 +233,14 @@ class Neo4jStore:
         if not candidates:
             return
 
-        from ontos.storage.base import candidate_storage_id
+        from ontos.storage.base import candidate_source_key, candidate_storage_id
 
         rows = [
             {
                 "id": candidate_storage_id(candidate),
                 "logical_id": candidate_storage_id(candidate),
                 "source_id": candidate.provenance.source_id,
+                "source_key": candidate_source_key(candidate.provenance.source_id),
                 "acl_ref": candidate.acl_ref,
                 "payload": candidate.model_dump_json(),
             }
@@ -244,6 +255,7 @@ class Neo4jStore:
                 ON CREATE SET
                     c.id = row.id,
                     c.source_id = row.source_id,
+                    c.source_key = row.source_key,
                     c.acl_ref = row.acl_ref,
                     c.payload = row.payload
                 """,
@@ -287,10 +299,13 @@ class Neo4jStore:
         if limit < 1:
             raise ValueError("limit must be positive")
 
-        from ontos.storage.base import decode_candidate_cursor
+        from ontos.storage.base import candidate_source_key, decode_candidate_cursor
 
         position = decode_candidate_cursor(after) if after is not None else None
         after_source, after_id = position if position is not None else ("", "")
+        # Page on the ASCII source key: Neo4j's ordering of raw non-BMP
+        # strings disagrees with the cursor comparison and skipped rows.
+        after_key = candidate_source_key(after_source)
 
         query = """
         MATCH (c:RejectedCandidate)
@@ -299,12 +314,12 @@ class Neo4jStore:
             OR (c.acl_ref IS NULL AND $include_public)
         )
         AND (
-            $after_source = ""
-            OR c.source_id > $after_source
-            OR (c.source_id = $after_source AND c.logical_id > $after_id)
+            NOT $has_cursor
+            OR c.source_key > $after_key
+            OR (c.source_key = $after_key AND c.logical_id > $after_id)
         )
         RETURN c.id AS stored_id, c.payload AS payload
-        ORDER BY c.source_id, c.logical_id
+        ORDER BY c.source_key, c.logical_id
         LIMIT $limit
         """
 
@@ -314,7 +329,8 @@ class Neo4jStore:
                 allowed_acls=list(allowed_acls),
                 include_public=include_public,
                 limit=limit,
-                after_source=after_source,
+                has_cursor=position is not None,
+                after_key=after_key,
                 after_id=after_id,
             )
             rows = await result.data()

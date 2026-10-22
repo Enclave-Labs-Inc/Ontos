@@ -74,6 +74,17 @@ def candidate_storage_id(candidate: RejectedCandidate) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def candidate_source_key(source_id: str) -> str:
+    """ASCII form of `source_id` whose ordering matches Python `str` ordering.
+
+    Neo4j does not order non-BMP strings consistently with Python's
+    code-point order, which made cursor pages skip candidates. UTF-8 byte
+    order equals code-point order, so its hex form sorts identically
+    everywhere.
+    """
+    return source_id.encode("utf-8").hex()
+
+
 def candidate_sort_key(candidate: RejectedCandidate) -> tuple[str, str]:
     """Stable cross-backend ordering for candidate inspection."""
     return (

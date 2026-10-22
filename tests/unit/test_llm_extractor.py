@@ -258,7 +258,7 @@ async def test_upstream_exception_wraps_as_extraction_error(ontology: Ontology) 
         await extractor.extract(ExtractionInput(source_id="d", text="t"))
     # Original exception remains accessible without appearing
     # in ordinary traceback formatting.
-    assert isinstance(exc.value.__cause__, BoomError)
+    assert exc.value.__cause__ is None
     assert isinstance(exc.value.__context__, BoomError)
     assert exc.value.__suppress_context__ is True
 
@@ -506,10 +506,14 @@ async def test_generic_backend_exception_does_not_expose_sensitive_details(
     with pytest.raises(ExtractionError, match="LLM backend failed") as caught:
         await extractor.extract(ExtractionInput(source_id="doc-1", text="Private document."))
 
+    import traceback
+
     assert secret not in str(caught.value)
-    assert caught.value.__cause__ is backend_error
-    assert caught.value.__context__ is backend_error
+    assert caught.value.__cause__ is None
     assert caught.value.__suppress_context__ is True
+    # What an operator sees on FAIL_FAST: the full printed traceback.
+    assert secret not in "".join(traceback.format_exception(caught.value))
+    assert caught.value.__context__ is backend_error
 
 
 async def test_backend_failure_logging_excludes_sensitive_content(
@@ -539,7 +543,8 @@ async def test_backend_failure_logging_excludes_sensitive_content(
         )
 
     assert caught.value.kind == "backend"
-    assert caught.value.__cause__ is backend_error
+    assert caught.value.__context__ is backend_error
+    assert caught.value.__suppress_context__ is True
     assert secret not in str(caught.value)
 
     logger.warning.assert_called_once_with(

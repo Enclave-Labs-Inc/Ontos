@@ -197,12 +197,15 @@ class LlmExtractor:
                     sample=input.text,
                     kind="backend",
                 ) from exc
+            # `from None`: a chained cause is printed in FAIL_FAST tracebacks,
+            # and backend messages can echo document text. The log line above
+            # keeps the error type for diagnosis.
             raise ExtractionError(
                 source_id=input.source_id,
                 message="LLM backend failed",
                 sample=input.text,
                 kind="backend",
-            ) from exc
+            ) from None
 
         if not raw_triples and input.text.strip():
             raise ExtractionError(
