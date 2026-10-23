@@ -2661,14 +2661,20 @@ def test_ontology_candidates_cli_cursor_pagination(
                 json.loads(record[ArticleTwelveField.TOOL_ARGUMENTS]) for record in records
             ]
 
-            expected_fingerprint = hashlib.sha256(cursor.encode("utf-8")).hexdigest()
-
-            assert arguments[0]["after_cursor_sha256"] is None
-            assert arguments[1]["after_cursor_sha256"] == expected_fingerprint
-            assert (
-                arguments[2]["after_cursor_sha256"]
-                == hashlib.sha256(b"not-a-valid-cursor").hexdigest()
+            from ontos.runtime.candidate_inspection import (
+                CANDIDATE_REFERENCE_KEY_LABEL,
+                candidate_audit_reference,
             )
+
+            key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
+
+            assert arguments[0]["after_cursor_ref"] is None
+            assert arguments[1]["after_cursor_ref"] == candidate_audit_reference(key, cursor)
+            assert arguments[2]["after_cursor_ref"] == candidate_audit_reference(
+                key, "not-a-valid-cursor"
+            )
+            # #72: the unkeyed cursor hash must not appear in the audit trail.
+            assert hashlib.sha256(cursor.encode("utf-8")).hexdigest() not in json.dumps(arguments)
 
             disclosed_ids = [
                 json.loads(record[ArticleTwelveField.RESULT_FACT_IDS]) for record in records
