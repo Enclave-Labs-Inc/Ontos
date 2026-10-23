@@ -46,12 +46,26 @@ def _audit() -> AuditEmitter:
     return AuditEmitter(signing_key=b"candidate-inspection-test-key")
 
 
-def _assert_article12(audit: AuditEmitter) -> None:
+def _assert_article12(
+    audit: AuditEmitter, *, decision: str, subject: str, agent: str = "agent:test"
+) -> None:
+    """One complete record carrying the expected decision and identities.
+
+    Field presence alone would pass even if a deny were logged as allow.
+    """
+    import json
+
     assert len(audit) == 1
     record = audit._chain[0]
     for field in ArticleTwelveField:
         assert field in record.article12, field.value
     assert record.article12[ArticleTwelveField.TOOL_INVOKED] == "candidates"
+    decisions = json.loads(record.article12[ArticleTwelveField.POLICY_DECISIONS])
+    assert decisions == [{"policy": "ontology_candidate_inspection", "result": decision}]
+    assert record.article12[ArticleTwelveField.ACTING_ON_BEHALF_OF] == subject
+    assert record.article12[ArticleTwelveField.AGENT_IDENTITY] == agent
+    if decision != "allow":
+        assert record.article12[ArticleTwelveField.RESULT_FACT_IDS] == "[]"
     assert audit.verify_chain()
 
 
@@ -72,7 +86,7 @@ async def test_non_reviewer_denied_and_audited() -> None:
             agent_identity="agent:test",
         )
 
-    _assert_article12(audit)
+    _assert_article12(audit, decision="deny", subject="user:employee")
 
 
 async def test_reviewer_without_view_sees_same_empty_result_as_empty_store() -> None:
@@ -102,8 +116,8 @@ async def test_reviewer_without_view_sees_same_empty_result_as_empty_store() -> 
     )
 
     assert populated_result == empty_result == []
-    _assert_article12(populated_audit)
-    _assert_article12(empty_audit)
+    _assert_article12(populated_audit, decision="allow", subject="user:reviewer")
+    _assert_article12(empty_audit, decision="allow", subject="user:reviewer")
 
 
 async def test_reviewer_with_view_sees_only_authorized_candidates() -> None:
@@ -131,7 +145,7 @@ async def test_reviewer_with_view_sees_only_authorized_candidates() -> None:
     assert len(candidates) == 1
     assert candidates[0].acl_ref == "acl:finance"
     assert audit.by_query_id(record.query_id) == record
-    _assert_article12(audit)
+    _assert_article12(audit, decision="allow", subject="user:reviewer")
 
 
 async def test_missing_authz_fails_closed_and_audits() -> None:
@@ -146,7 +160,7 @@ async def test_missing_authz_fails_closed_and_audits() -> None:
             agent_identity="agent:test",
         )
 
-    _assert_article12(audit)
+    _assert_article12(audit, decision="deny", subject="user:reviewer")
 
 
 async def test_public_candidate_still_requires_reviewer() -> None:
@@ -164,7 +178,7 @@ async def test_public_candidate_still_requires_reviewer() -> None:
             agent_identity="agent:test",
         )
 
-    _assert_article12(audit)
+    _assert_article12(audit, decision="deny", subject="user:employee")
 
     authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
     reviewer_audit = _audit()
@@ -177,7 +191,7 @@ async def test_public_candidate_still_requires_reviewer() -> None:
     )
     assert len(candidates) == 1
     assert candidates[0].acl_ref is None
-    _assert_article12(reviewer_audit)
+    _assert_article12(reviewer_audit, decision="allow", subject="user:reviewer")
 
 
 async def test_candidate_storage_failure_is_audited() -> None:
@@ -198,7 +212,7 @@ async def test_candidate_storage_failure_is_audited() -> None:
             agent_identity="agent:test",
         )
 
-    _assert_article12(audit)
+    _assert_article12(audit, decision="storage_error", subject="user:reviewer")
 
 
 async def test_authorization_failure_is_audited() -> None:
@@ -216,7 +230,7 @@ async def test_authorization_failure_is_audited() -> None:
             agent_identity="agent:test",
         )
 
-    _assert_article12(audit)
+    _assert_article12(audit, decision="authorization_error", subject="user:reviewer")
 
 
 @pytest.mark.parametrize("limit", [0, -1, 101, True])
@@ -235,7 +249,7 @@ async def test_invalid_inspection_limit_is_audited(limit) -> None:
             limit=limit,
         )
 
-    _assert_article12(audit)
+    _assert_article12(audit, decision="invalid_request", subject="user:reviewer")
 
 
 async def test_missing_openfga_reviewer_relation_fails_closed() -> None:
@@ -278,7 +292,12 @@ async def test_missing_openfga_reviewer_relation_fails_closed() -> None:
             identity_assurance="operator_asserted",
         )
 
-    _assert_article12(audit)
+    _assert_article12(
+        audit,
+        decision="authorization_error",
+        subject="user:reviewer",
+        agent="ontos-cli-local-operator",
+    )
 
     import json
 

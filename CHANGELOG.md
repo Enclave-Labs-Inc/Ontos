@@ -53,16 +53,27 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   audit records back, so a distinct outcome would reveal that the record
   exists.
 
-- Every MCP Article-12 record now starts with an `authn` entry in
-  `policy_decisions`. Consumers that read `policy_decisions[0]` as the
-  authz decision should match on `policy` instead.
-- **Custom `GraphStore` implementations must add `get_visible_fact(...)`**,
-  the ACL-filtered fact lookup used by read surfaces. `get_fact` remains
-  the unfiltered write-path lookup. Both bundled stores implement it.
-- `provenance` and `audit_lookup` now enforce read permissions (#78).
-  Callers relying on reading facts outside their ACLs, or other
-  principals' audit records, now get `null`. Grant `audit_exporter` on
-  `audit` (OpenFGA) to readers of other principals' records.
+### Fixed — candidate inspection CLI and audit (#73, part 2)
+- **Setup failures in `ontos ontology candidates list` are now audited.**
+  An unusable authz backend or candidate store writes an Article-12
+  `authorization_error` / `storage_error` record and exits 1 with a short
+  message, no traceback. If the audit store itself can't initialise, the
+  command fails closed before reading anything.
+- **Only real request errors (bad limit, bad cursor) report "Invalid
+  candidate inspection request" (exit 2).** Storage and audit failures
+  report "Candidate inspection failed" (exit 1), matching the audit trail.
+- **`--limit` is range-checked by the audited inspection service**, so an
+  out-of-range value leaves an `invalid_request` record, as the library
+  already did.
+- **A failing audit-sink close no longer turns a completed, audited listing
+  into exit 1**, and can't mask an earlier error.
+- **`serve --snapshot` reports the pickle's real format** (for example
+  `ontos-nx-store-v3`) and warns that V3 dev stores can contain retained
+  candidates.
+- **The candidate compliance tests now assert the decision, subject and
+  agent of each record**, not just that the fields are present.
+
+### Added — MCP caller authentication (#69)
 - `ONTOS_AUTH_MODE=jwt` verifies a bearer JWT on every MCP request
   against a customer-configured issuer and audience. The key source is
   either a pinned public key (`ONTOS_AUTH_PUBLIC_KEY_FILE`, no network

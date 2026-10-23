@@ -65,7 +65,7 @@ class SnapshotMetadata(BaseModel):
       multiple snapshots an orchestrator may have loaded.
     - `mtime` — ISO-8601 UTC mtime of the source file (operator
       orientation: "when was this snapshot taken").
-    - `format` — snapshot format identifier (`"ontos-nx-store-v2"`
+    - `format` — snapshot format identifier (e.g. `"ontos-nx-store-v3"`
       today; new values land alongside #32's text formats).
     - `ontology_id` / `ontology_version` — the ontology stamp from
       #34 (all facts within one snapshot agree). Captured at load

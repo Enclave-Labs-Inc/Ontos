@@ -141,7 +141,7 @@ async def test_snapshot_info_tool_reports_stamp_through_mcp(
     payload = outer["payload"]
     assert payload["ontology_id"] == "ontos.starter"
     assert payload["ontology_version"] == "0.1"
-    assert payload["format"] == "ontos-nx-store-v2"
+    assert payload["format"] == "ontos-nx-store-v3"
     assert len(payload["id"]) == 16
     assert "mtime" in payload
     # Review BLOCKING #2 + SUGGESTION #4: no fact_count, no snapshot_path.

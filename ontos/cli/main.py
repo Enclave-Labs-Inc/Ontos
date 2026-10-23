@@ -23,7 +23,7 @@ import dataclasses
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 import typer
@@ -103,14 +103,16 @@ def serve(
             "--snapshot",
             help=(
                 "Serve MCP over a frozen graph snapshot (read-only). "
-                "Accepts ONTOS-NX-STORE-V2 pickle (.pkl / .pickle) "
+                "Accepts ONTOS-NX-STORE pickle (.pkl / .pickle) "
                 "JSON-LD (.jsonld), GraphML (.graphml), and Cypher "
                 "(.cypher / .txt) snapshots. WARNING: pickle "
                 "snapshots use Python pickle — loading an untrusted file executes "
                 "arbitrary code. FORMAT check only: the magic header rejects "
                 "non-Ontos files but is NOT a safety mitigation. A crafted "
                 "pickle with the right prefix still runs on load. Only load "
-                "trusted pickle snapshots."
+                "trusted pickle snapshots. Pickle dev stores (V3) can also "
+                "contain retained rejected candidates; share JSON-LD, GraphML "
+                "or Cypher exports instead."
             ),
         ),
     ] = None,
@@ -202,10 +204,21 @@ def _collect_snapshot_metadata(path: Path, store: object) -> object:
     return SnapshotMetadata(
         id=_compute_snapshot_id(path),
         mtime=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
-        format="ontos-nx-store-v2",
+        format=_pickle_snapshot_format(path),
         ontology_id=ontology_id,
         ontology_version=ontology_version,
     )
+
+
+def _pickle_snapshot_format(path: Path) -> str:
+    """Format id from the pickle's magic header, e.g. `ontos-nx-store-v3`.
+
+    Reported as found rather than assumed: V3 files can carry retained
+    rejected candidates, which operators should be able to see at a glance.
+    """
+    with path.open("rb") as handle:
+        header = handle.readline(64).strip().decode("ascii", errors="replace")
+    return header.lower() if header.startswith("ONTOS-NX-STORE-V") else "ontos-nx-store"
 
 
 def _load_snapshot(path: Path) -> tuple[object, object]:
@@ -271,7 +284,7 @@ def _serve_snapshot(path: Path) -> None:
     """Boot an MCP server over a frozen NetworkxStore snapshot.
 
     Dispatches on file extension: `.pkl` / `.pickle` loads an
-    ONTOS-NX-STORE-V2 pickle; `.jsonld` loads JSON-LD; `.graphml`
+    ONTOS-NX-STORE pickle (V1-V3); `.jsonld` loads JSON-LD; `.graphml`
     loads GraphML; `.cypher` and `.txt` load Ontos-generated Cypher snapshots.
 
     The loaded store's `_path` is set to `None` after load so a
@@ -290,7 +303,7 @@ def _serve_snapshot(path: Path) -> None:
             "snapshot-pickle-loaded",
             path=str(path.resolve()),
             reason=(
-                "ONTOS-NX-STORE-V2 is a Python pickle format; loading a "
+                "ONTOS-NX-STORE is a Python pickle format; loading a "
                 "crafted file executes arbitrary code. The loader's "
                 "magic-header check is a FORMAT check only (rejects "
                 "non-Ontos files), NOT a safety mitigation — a crafted "
@@ -1441,9 +1454,9 @@ def ontology_candidates_list(
         int,
         typer.Option(
             "--limit",
-            min=1,
-            max=100,
-            help="Maximum candidates to return.",
+            # Range-checked by the inspection service, not Typer, so an
+            # out-of-range value is audited like any other bad request.
+            help="Maximum candidates to return (1-100).",
         ),
     ] = 100,
     after: Annotated[
@@ -1470,10 +1483,12 @@ def ontology_candidates_list(
     from ontos.audit.postgres import PostgresAuditEmitter
     from ontos.runtime.candidate_inspection import (
         CandidateInspectionDeniedError,
+        CandidateInspectionRequestError,
+        audit_inspection_failure,
         inspect_candidates,
     )
     from ontos.runtime.server import build_authz, build_store
-    from ontos.storage.base import CandidateStore
+    from ontos.storage.base import CandidateStore, InvalidCandidateCursorError
 
     storage_url, storage_password_env = _cli_storage_override(ctx)
 
@@ -1501,15 +1516,51 @@ def ontology_candidates_list(
         signing_key_env=cfg.audit_signing_key_env,
     )
 
+    async def _audit_setup_failure(
+        decision: Literal["authorization_error", "storage_error"],
+    ) -> None:
+        await audit_inspection_failure(
+            audit=audit,
+            subject=acting_on_behalf_of,
+            agent_identity="ontos-cli-local-operator",
+            decision=decision,
+            limit=limit,
+            after=after,
+            identity_assurance="operator_asserted",
+        )
+
     async def _run() -> None:
+        import structlog
+
+        log = structlog.get_logger()
         store = None
         try:
-            await audit.initialize()
-            authz = build_authz(cfg)
-            store = build_store(cfg)
+            try:
+                await audit.initialize()
+            except Exception as exc:
+                # Without a working audit sink nothing may be read: fail
+                # closed before touching authz or candidate storage.
+                log.error("candidate-inspection-audit-unavailable", error_type=type(exc).__name__)
+                typer.echo("Audit store unavailable; no candidates were read.", err=True)
+                raise typer.Exit(code=1) from None
 
-            if not isinstance(store, CandidateStore):
-                raise RuntimeError("Configured storage backend does not support candidates.")
+            try:
+                authz = build_authz(cfg)
+            except Exception as exc:
+                log.error("candidate-inspection-authz-setup-failed", error_type=type(exc).__name__)
+                await _audit_setup_failure("authorization_error")
+                typer.echo("Candidate inspection authorization is unavailable.", err=True)
+                raise typer.Exit(code=1) from None
+
+            try:
+                store = build_store(cfg)
+                if not isinstance(store, CandidateStore):
+                    raise TypeError("storage backend does not support candidates")
+            except Exception as exc:
+                log.error("candidate-inspection-store-setup-failed", error_type=type(exc).__name__)
+                await _audit_setup_failure("storage_error")
+                typer.echo("Candidate storage is unavailable.", err=True)
+                raise typer.Exit(code=1) from None
 
             page = await inspect_candidates(
                 candidate_store=store,
@@ -1534,16 +1585,24 @@ def ontology_candidates_list(
                     indent=2,
                 )
             )
+        except typer.Exit:
+            raise
         except CandidateInspectionDeniedError:
             typer.echo("Candidate inspection denied.", err=True)
             raise typer.Exit(code=1) from None
-        except ValueError:
+        except (CandidateInspectionRequestError, InvalidCandidateCursorError):
             typer.echo("Invalid candidate inspection request.", err=True)
             raise typer.Exit(code=2) from None
+        except Exception as exc:
+            # inspect_candidates audited this attempt before re-raising;
+            # don't print a traceback that could carry candidate content.
+            log.error("candidate-inspection-failed", error_type=type(exc).__name__)
+            typer.echo("Candidate inspection failed.", err=True)
+            raise typer.Exit(code=1) from None
         finally:
             if store is not None:
                 await _close_store_without_masking(store)
-            await audit.close()
+            await _close_store_without_masking(audit)
 
     asyncio.run(_run())
 
