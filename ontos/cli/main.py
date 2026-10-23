@@ -18,6 +18,7 @@ until the command that needs them, so `ontos --help` stays fast.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import json
 import os
@@ -859,11 +860,45 @@ def _cli_storage_override(ctx: typer.Context) -> tuple[str | None, str | None]:
     return cli_options.get("storage_url"), cli_options.get("storage_password_env")
 
 
-def _neo4j_endpoint(uri: str) -> tuple[str, int]:
+_LOOPBACK = "<loopback>"
+
+
+def _host_identities(host: str, port: int) -> set[str]:
+    """Every name a host can be matched under: itself, its addresses, loopback.
+
+    `localhost`, `127.0.0.1` and `::1` are one machine, and a DNS name and
+    its IP are one server, so comparing raw hostnames let a push reach
+    the operational database under an alias (#74).
+    """
+    import ipaddress
+    import socket
+
+    name = host.lower().rstrip(".")
+    identities = {name}
+    candidates = [name]
+    # Unresolvable here (offline operator box): fall back to the literal.
+    with contextlib.suppress(OSError):
+        candidates += [
+            str(info[4][0]) for info in socket.getaddrinfo(name, port, type=socket.SOCK_STREAM)
+        ]
+    for candidate in candidates:
+        if candidate == "localhost" or candidate.endswith(".localhost"):
+            identities.add(_LOOPBACK)
+            continue
+        try:
+            address = ipaddress.ip_address(candidate.split("%", 1)[0])
+        except ValueError:
+            continue
+        identities.add(_LOOPBACK if address.is_loopback else str(address))
+    return identities
+
+
+def _neo4j_endpoint(uri: str) -> tuple[set[str], int]:
     # neo4j://, bolt://, neo4j+s:// … all reach the same server for a given
     # host:port, so the scheme must not let a push slip past the guard.
     parsed = urlsplit(uri)
-    return (parsed.hostname or "").lower(), parsed.port or 7687
+    port = parsed.port or 7687
+    return _host_identities(parsed.hostname or "", port), port
 
 
 def _reject_operational_push_target(
@@ -871,12 +906,21 @@ def _reject_operational_push_target(
     push_uri: str,
     push_database: str,
 ) -> None:
-    """Refuse an ``export neo4j --push`` aimed at the operational Ontos database."""
-    if cfg.storage_backend != "neo4j" or cfg.neo4j_uri is None:
+    """Refuse an ``export neo4j --push`` aimed at the operational Ontos database.
+
+    Applies whenever an operational Neo4j is configured, even when this
+    export reads from NetworkX: a dev export must not land in the
+    production database either. Database names compare case-insensitively,
+    as Neo4j resolves them.
+    """
+    if cfg.neo4j_uri is None:
         return
+    push_hosts, push_port = _neo4j_endpoint(push_uri)
+    operational_hosts, operational_port = _neo4j_endpoint(cfg.neo4j_uri)
     if (
-        _neo4j_endpoint(push_uri) == _neo4j_endpoint(cfg.neo4j_uri)
-        and push_database == cfg.neo4j_database
+        push_port == operational_port
+        and push_hosts & operational_hosts
+        and push_database.casefold() == cfg.neo4j_database.casefold()
     ):
         raise typer.BadParameter(
             "--push must target a separate Neo4j visualization database, "
