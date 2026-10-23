@@ -17,6 +17,7 @@ import os
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from ontos.audit.base import derive_subkey
 from ontos.runtime.models import ArticleTwelveField, AuditRecord
 
 
@@ -86,6 +87,10 @@ class AuditEmitter:
         )
         self._chain.append(record)
         return record
+
+    def derive_key(self, label: bytes) -> bytes:
+        """Purpose-specific key derived from this emitter's signing key."""
+        return derive_subkey(self._key, label)
 
     def by_query_id(self, query_id: UUID) -> AuditRecord | None:
         for record in reversed(self._chain):
