@@ -20,7 +20,7 @@ from starlette.middleware import Middleware
 
 from ontos.audit.base import AuditSink
 from ontos.audit.emitter import AuditEmitter
-from ontos.authz import VIEW, AuthzBackend, InMemoryAuthz
+from ontos.authz import AUDIT_EXPORTER, VIEW, AuthzBackend, InMemoryAuthz
 from ontos.executor import DeterministicExecutor, Executor
 from ontos.planner import Planner, PlannerError
 from ontos.runtime.auth import (
@@ -33,7 +33,7 @@ from ontos.runtime.auth import (
     resolve_caller,
 )
 from ontos.runtime.config import RuntimeConfig
-from ontos.runtime.models import AuditRecord, Fact
+from ontos.runtime.models import ArticleTwelveField, AuditRecord, Fact
 from ontos.runtime.temporal import parse_as_of
 from ontos.storage.base import GraphStore
 from ontos.storage.networkx_store import NetworkxStore
@@ -384,16 +384,29 @@ def build_server(
         )
 
     @mcp.tool()
-    async def provenance(fact_id: str, agent_identity: str) -> ToolResponse:
-        """Return the full provenance chain for one fact."""
+    async def provenance(
+        fact_id: str,
+        agent_identity: str,
+        acting_on_behalf_of: str | None = None,
+    ) -> ToolResponse:
+        """Return the full provenance chain for one fact the caller may see.
+
+        A fact outside the caller's ACLs returns the same `null` payload as
+        a nonexistent id, so the response never reveals that it exists.
+        """
         started = time.perf_counter()
         caller = _authenticate(
             tool="provenance",
             agent_identity=agent_identity,
-            acting_on_behalf_of=None,
+            acting_on_behalf_of=acting_on_behalf_of,
             query_text=fact_id,
         )
-        fact = await store.get_fact(UUID(fact_id))
+        allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
+        fact = await store.get_visible_fact(
+            UUID(fact_id),
+            acl_subject=caller.principal,
+            allowed_acls=allowed_acls,
+        )
         latency_ms = (time.perf_counter() - started) * 1000
         payload: Fact | None = fact
         record = _emit(
@@ -403,7 +416,7 @@ def build_server(
             tool_arguments={},
             result_fact_ids=[fact_id] if fact else [],
             latency_ms=latency_ms,
-            policy_decisions=[],
+            policy_decisions=policy_decisions,
         )
         return ToolResponse(
             query_id=record.query_id,
@@ -412,28 +425,50 @@ def build_server(
         )
 
     @mcp.tool()
-    async def audit_lookup(query_id: str, agent_identity: str) -> ToolResponse:
-        """Return the Article-12 audit record for a prior query."""
+    async def audit_lookup(
+        query_id: str,
+        agent_identity: str,
+        acting_on_behalf_of: str | None = None,
+    ) -> ToolResponse:
+        """Return the Article-12 audit record for a prior query.
+
+        Callers may read records of their own queries. Reading another
+        principal's records requires `audit_exporter` on `audit`. A record
+        the caller may not read returns the same `null` payload as a
+        nonexistent one.
+        """
+        started = time.perf_counter()
         caller = _authenticate(
             tool="audit",
             agent_identity=agent_identity,
-            acting_on_behalf_of=None,
+            acting_on_behalf_of=acting_on_behalf_of,
             query_text=query_id,
         )
         record = audit.by_query_id(UUID(query_id))
+        readable = False
+        if record is not None and caller.principal is not None:
+            owner = record.article12.get(ArticleTwelveField.ACTING_ON_BEHALF_OF)
+            readable = owner == caller.principal or (
+                resolved_authz is not None
+                and await resolved_authz.check(caller.principal, AUDIT_EXPORTER, "audit")
+            )
         emitted = _emit(
             tool="audit",
             caller=caller,
             query_text=query_id,
             tool_arguments={},
             result_fact_ids=[],
-            latency_ms=0.0,
-            policy_decisions=[],
+            latency_ms=(time.perf_counter() - started) * 1000,
+            # One outcome for "missing" and "not yours": the caller can read
+            # this record back, so distinct values would reveal existence.
+            policy_decisions=[
+                {"policy": "audit_lookup", "result": "returned" if readable else "none"}
+            ],
         )
         return ToolResponse(
             query_id=emitted.query_id,
             audit_hash=emitted.hash,
-            payload=record.model_dump(mode="json") if record else None,
+            payload=record.model_dump(mode="json") if record is not None and readable else None,
         )
 
     @mcp.tool()

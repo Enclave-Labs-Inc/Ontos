@@ -32,8 +32,37 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 - Every MCP Article-12 record now starts with an `authn` entry in
   `policy_decisions`. Consumers that read `policy_decisions[0]` as the
   authz decision should match on `policy` instead.
+- **Custom `GraphStore` implementations must add `get_visible_fact(...)`**,
+  the ACL-filtered fact lookup used by read surfaces. `get_fact` remains
+  the unfiltered write-path lookup. Both bundled stores implement it.
+- `provenance` and `audit_lookup` now enforce read permissions (#78).
+  Callers relying on reading facts outside their ACLs, or other
+  principals' audit records, now get `null`. Grant `audit_exporter` on
+  `audit` (OpenFGA) to readers of other principals' records.
 
-### Added — MCP caller authentication (#69)
+### Fixed — permission checks on record lookups (#78)
+- **`provenance(fact_id)`** returned any fact by id, whatever the caller's
+  ACLs. It now resolves `allowed_acls` like `search` and filters in the
+  store (`GraphStore.get_visible_fact`). It gained an optional
+  `acting_on_behalf_of` argument for `ONTOS_AUTH_MODE=none`.
+- **`audit_lookup(query_id)`** returned any principal's Article-12 record.
+  It now returns only the caller's own records, or any record for holders
+  of `audit_exporter` on `audit`.
+- In both tools, a forbidden record gets the same `null` response and the
+  same audit outcome as a nonexistent one. The caller can read its own
+  audit records back, so a distinct outcome would reveal that the record
+  exists.
+
+- Every MCP Article-12 record now starts with an `authn` entry in
+  `policy_decisions`. Consumers that read `policy_decisions[0]` as the
+  authz decision should match on `policy` instead.
+- **Custom `GraphStore` implementations must add `get_visible_fact(...)`**,
+  the ACL-filtered fact lookup used by read surfaces. `get_fact` remains
+  the unfiltered write-path lookup. Both bundled stores implement it.
+- `provenance` and `audit_lookup` now enforce read permissions (#78).
+  Callers relying on reading facts outside their ACLs, or other
+  principals' audit records, now get `null`. Grant `audit_exporter` on
+  `audit` (OpenFGA) to readers of other principals' records.
 - `ONTOS_AUTH_MODE=jwt` verifies a bearer JWT on every MCP request
   against a customer-configured issuer and audience. The key source is
   either a pinned public key (`ONTOS_AUTH_PUBLIC_KEY_FILE`, no network
