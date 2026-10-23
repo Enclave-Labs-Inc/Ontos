@@ -152,7 +152,7 @@ def test_snapshot_metadata_is_captured_at_load_time(tmp_path: Path) -> None:
     assert isinstance(metadata, SnapshotMetadata)
     assert metadata.ontology_id == "ontos.starter"
     assert metadata.ontology_version == "0.1"
-    assert metadata.format == "ontos-nx-store-v2"
+    assert metadata.format == "ontos-nx-store-v3"
     # id is a stable 16-hex-char digest of the file bytes.
     assert len(metadata.id) == 16
     assert metadata.id == _compute_snapshot_id(snap)

@@ -43,6 +43,92 @@ def candidate_audit_reference(reference_key: bytes, value: str) -> str:
     return hmac.new(reference_key, value.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+class CandidateInspectionRequestError(ValueError):
+    """The inspection request itself is invalid (limit out of range)."""
+
+
+async def _emit_inspection_record(
+    audit: AuditSink,
+    *,
+    agent_identity: str,
+    subject: str,
+    limit: object,
+    identity_assurance: str,
+    after_ref: str | None,
+    decision: str,
+    disclosed_refs: list[str],
+    latency_ms: float,
+) -> AuditRecord:
+    tool_arguments: dict[str, object] = {
+        "limit": limit,
+        "identity_assurance": identity_assurance,
+        "after_cursor_ref": after_ref,
+    }
+    policy_decisions = [{"policy": "ontology_candidate_inspection", "result": decision}]
+    model_versions = {"component": "candidate-inspection-m1"}
+    from ontos.audit.postgres import PostgresAuditEmitter
+
+    if isinstance(audit, PostgresAuditEmitter):
+        return await audit.emit_async(
+            query_id=None,
+            agent_identity=agent_identity,
+            acting_on_behalf_of=subject,
+            query_text="ontology candidate inspection",
+            tool_invoked="candidates",
+            tool_arguments=tool_arguments,
+            result_fact_ids=disclosed_refs,
+            latency_ms=latency_ms,
+            model_versions=model_versions,
+            policy_decisions=policy_decisions,
+        )
+    return audit.emit(
+        query_id=None,
+        agent_identity=agent_identity,
+        acting_on_behalf_of=subject,
+        query_text="ontology candidate inspection",
+        tool_invoked="candidates",
+        tool_arguments=tool_arguments,
+        result_fact_ids=disclosed_refs,
+        latency_ms=latency_ms,
+        model_versions=model_versions,
+        policy_decisions=policy_decisions,
+    )
+
+
+def _cursor_reference(audit: AuditSink, after: object) -> str | None:
+    if not isinstance(after, str):
+        return None
+    return candidate_audit_reference(audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL), after)
+
+
+async def audit_inspection_failure(
+    *,
+    audit: AuditSink,
+    subject: str,
+    agent_identity: str,
+    decision: Literal["authorization_error", "storage_error"],
+    limit: object,
+    after: str | None,
+    identity_assurance: str,
+) -> AuditRecord:
+    """Audit an inspection attempt that failed before `inspect_candidates`.
+
+    Callers that build the authz backend or store themselves (the CLI)
+    use this so setup failures still leave an Article-12 record.
+    """
+    return await _emit_inspection_record(
+        audit,
+        agent_identity=agent_identity,
+        subject=subject,
+        limit=limit,
+        identity_assurance=identity_assurance,
+        after_ref=_cursor_reference(audit, after),
+        decision=decision,
+        disclosed_refs=[],
+        latency_ms=0.0,
+    )
+
+
 class CandidateInspectionDeniedError(PermissionError):
     """The caller cannot inspect ontology candidates."""
 
@@ -97,58 +183,19 @@ async def inspect_candidates(
     started = time.perf_counter()
 
     reference_key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
-    cursor_reference = (
-        candidate_audit_reference(reference_key, after) if isinstance(after, str) else None
-    )
+    cursor_reference = _cursor_reference(audit, after)
 
-    async def emit(
-        decision: str,
-        disclosed_ids: list[str] | None = None,
-    ) -> AuditRecord:
-        policy_decisions = [
-            {
-                "policy": "ontology_candidate_inspection",
-                "result": decision,
-            }
-        ]
-        latency_ms = (time.perf_counter() - started) * 1000
-
-        if hasattr(audit, "emit_async"):
-            from ontos.audit.postgres import PostgresAuditEmitter
-
-            if isinstance(audit, PostgresAuditEmitter):
-                return await audit.emit_async(
-                    query_id=None,
-                    agent_identity=agent_identity,
-                    acting_on_behalf_of=subject,
-                    query_text="ontology candidate inspection",
-                    tool_invoked="candidates",
-                    tool_arguments={
-                        "limit": limit,
-                        "identity_assurance": identity_assurance,
-                        "after_cursor_ref": cursor_reference,
-                    },
-                    result_fact_ids=disclosed_ids or [],
-                    latency_ms=latency_ms,
-                    model_versions={"component": "candidate-inspection-m1"},
-                    policy_decisions=policy_decisions,
-                )
-
-        return audit.emit(
-            query_id=None,
+    async def emit(decision: str, disclosed_ids: list[str] | None = None) -> AuditRecord:
+        return await _emit_inspection_record(
+            audit,
             agent_identity=agent_identity,
-            acting_on_behalf_of=subject,
-            query_text="ontology candidate inspection",
-            tool_invoked="candidates",
-            tool_arguments={
-                "limit": limit,
-                "identity_assurance": identity_assurance,
-                "after_cursor_ref": cursor_reference,
-            },
-            result_fact_ids=disclosed_ids or [],
-            latency_ms=latency_ms,
-            model_versions={"component": "candidate-inspection-m1"},
-            policy_decisions=policy_decisions,
+            subject=subject,
+            limit=limit,
+            identity_assurance=identity_assurance,
+            after_ref=cursor_reference,
+            decision=decision,
+            disclosed_refs=disclosed_ids or [],
+            latency_ms=(time.perf_counter() - started) * 1000,
         )
 
     if not subject or authz is None:
@@ -157,7 +204,7 @@ async def inspect_candidates(
 
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
         await emit("invalid_request")
-        raise ValueError("limit must be between 1 and 100")
+        raise CandidateInspectionRequestError("limit must be between 1 and 100")
 
     try:
         is_reviewer = await authz.check(subject, ONTOLOGY_REVIEWER, "ontology")

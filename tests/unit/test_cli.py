@@ -2055,9 +2055,8 @@ def test_ingest_candidate_retention_flag(
             from ontos.pipeline.ingest import IngestReport
 
             return IngestReport(
-                documents_processed=0,
+                documents_seen=0,
                 facts_written=0,
-                entities_written=0,
             )
 
     monkeypatch.setattr(ontos.llm, "OllamaBackend", StubLLM)
@@ -2490,7 +2489,11 @@ def test_ontology_candidates_cli_audit_failure_does_not_leak(
         ],
     )
 
-    assert result.exit_code != 0
+    # The allow-path audit write failed, so nothing may be printed: the
+    # command must fail on that write, not for some earlier reason.
+    assert result.exit_code == 1
+    assert "Candidate inspection failed." in result.output
+    assert '"candidates"' not in result.output
     assert "secret-person" not in result.output
     assert "secret_predicate" not in result.output
     assert "secret-source" not in result.output
@@ -2700,3 +2703,139 @@ def test_ontology_candidates_cli_cursor_pagination(
             await audit.close()
 
     asyncio.run(verify_audit())
+
+
+def _candidate_audit_decisions(audit_url: str) -> list[str]:
+    """Policy decisions persisted by `ontos ontology candidates list`."""
+    import asyncio
+    import json
+
+    from sqlalchemy import select
+
+    from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.runtime.models import ArticleTwelveField
+
+    async def read() -> list[str]:
+        audit = PostgresAuditEmitter.from_url(audit_url)
+        try:
+            await audit.initialize()
+            assert await audit.verify_chain_async()
+            async with audit._engine.connect() as conn:
+                rows = (
+                    await conn.execute(
+                        select(audit._table.c.article12).order_by(audit._table.c.ordinal)
+                    )
+                ).scalars()
+                return [
+                    json.loads(row[ArticleTwelveField.POLICY_DECISIONS])[0]["result"]
+                    for row in rows
+                ]
+        finally:
+            await audit.close()
+
+    return asyncio.run(read())
+
+
+def _list_candidates(tmp_path: Path, *extra: str) -> tuple[object, str]:
+    audit_url = f"sqlite+aiosqlite:///{tmp_path / 'candidate-audit.sqlite'}"
+    result = runner.invoke(
+        app,
+        [
+            "ontology",
+            "candidates",
+            "list",
+            "--acting-on-behalf-of",
+            "user:reviewer",
+            "--storage-path",
+            str(tmp_path / "store.pkl"),
+            *extra,
+        ],
+        env={"ONTOS_AUDIT_DB_URL": audit_url},
+    )
+    return result, audit_url
+
+
+def test_ontology_candidates_cli_audits_authz_setup_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#73: a broken authz backend is an audited, clean failure."""
+    monkeypatch.setenv("ONTOS_AUTHZ_BACKEND", "bogus")
+
+    result, audit_url = _list_candidates(tmp_path)
+
+    assert result.exit_code == 1  # type: ignore[attr-defined]
+    assert "authorization is unavailable" in result.output  # type: ignore[attr-defined]
+    assert "Traceback" not in result.output  # type: ignore[attr-defined]
+    assert _candidate_audit_decisions(audit_url) == ["authorization_error"]
+
+
+def test_ontology_candidates_cli_audits_out_of_range_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#73: the CLI and library agree: a bad limit is audited, not just
+    rejected by option parsing."""
+    from ontos.authz import ONTOLOGY_REVIEWER, InMemoryAuthz
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    monkeypatch.setattr("ontos.runtime.server.build_authz", lambda cfg: authz)
+
+    result, audit_url = _list_candidates(tmp_path, "--limit", "0")
+
+    assert result.exit_code == 2  # type: ignore[attr-defined]
+    assert "Invalid candidate inspection request." in result.output  # type: ignore[attr-defined]
+    assert _candidate_audit_decisions(audit_url) == ["invalid_request"]
+
+
+def test_ontology_candidates_cli_storage_failure_is_not_reported_as_bad_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#73: a corrupt stored candidate is a storage error, not "invalid request"."""
+    from ontos.authz import ONTOLOGY_REVIEWER, VIEW, InMemoryAuthz
+    from ontos.extraction import RejectedCandidate
+    from ontos.storage.networkx_store import NetworkxStore
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    authz.grant("user:reviewer", VIEW, "acl:finance")
+    monkeypatch.setattr("ontos.runtime.server.build_authz", lambda cfg: authz)
+
+    async def corrupt(self, **kwargs):
+        RejectedCandidate.model_validate_json("{}")
+
+    monkeypatch.setattr(NetworkxStore, "list_candidate_records", corrupt)
+
+    result, audit_url = _list_candidates(tmp_path)
+
+    assert result.exit_code == 1  # type: ignore[attr-defined]
+    assert "Candidate inspection failed." in result.output  # type: ignore[attr-defined]
+    assert "Invalid candidate inspection request" not in result.output  # type: ignore[attr-defined]
+    assert _candidate_audit_decisions(audit_url) == ["storage_error"]
+
+
+def test_ontology_candidates_cli_audit_close_failure_does_not_fail_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#73: once data was audited and printed, a failing close must not turn
+    the command into an error."""
+    from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.authz import ONTOLOGY_REVIEWER, InMemoryAuthz
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    monkeypatch.setattr("ontos.runtime.server.build_authz", lambda cfg: authz)
+
+    real_close = PostgresAuditEmitter.close
+
+    async def failing_close(self):
+        await real_close(self)
+        raise RuntimeError("dispose failed")
+
+    monkeypatch.setattr(PostgresAuditEmitter, "close", failing_close)
+
+    result, audit_url = _list_candidates(tmp_path)
+
+    assert result.exit_code == 0  # type: ignore[attr-defined]
+    assert '"candidates"' in result.output  # type: ignore[attr-defined]
+    monkeypatch.setattr(PostgresAuditEmitter, "close", real_close)
+    assert _candidate_audit_decisions(audit_url) == ["allow"]
