@@ -1786,3 +1786,25 @@ async def test_rejected_candidate_pagination_matches_networkx_for_non_bmp_source
     expected = await page_all(reference)
     assert len(expected) == len(candidates)
     assert await page_all(store) == expected
+
+
+async def test_get_visible_fact_applies_acl_in_query(
+    store: Neo4jStore,
+    sample_fact: Fact,
+) -> None:
+    """#78: the read-path fact lookup filters by ACL inside the query."""
+    from uuid import uuid4
+
+    restricted = sample_fact.model_copy(update={"acl_ref": "acl:finance"})
+    public = sample_fact.model_copy(update={"id": uuid4(), "acl_ref": None})
+    await store.add_fact(restricted)
+    await store.add_fact(public)
+
+    assert await store.get_visible_fact(restricted.id, allowed_acls=["acl:finance"]) is not None
+    assert await store.get_visible_fact(restricted.id, allowed_acls=["acl:legal"]) is None
+    assert await store.get_visible_fact(restricted.id) is None
+    assert await store.get_visible_fact(restricted.id, acl_subject="acl:finance") is not None
+    assert await store.get_visible_fact(uuid4(), allowed_acls=["acl:finance"]) is None
+    assert await store.get_visible_fact(public.id) is not None
+    # The write path still sees everything.
+    assert await store.get_fact(restricted.id) is not None

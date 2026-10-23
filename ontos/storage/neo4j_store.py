@@ -495,6 +495,35 @@ class Neo4jStore:
                 return None
             return _edge_props_to_fact(record["subject_id"], record["object_id"], record["props"])
 
+    async def get_visible_fact(
+        self,
+        fact_id: UUID,
+        *,
+        acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
+    ) -> Fact | None:
+        query = """
+        MATCH (a:Entity)-[r:RELATES {fact_id: $fact_id}]->(b:Entity)
+        WHERE
+            r.acl_ref IS NULL
+            OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
+            OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                AND r.acl_ref = $acl_subject)
+        RETURN a.id AS subject_id, b.id AS object_id, properties(r) AS props
+        LIMIT 1
+        """
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                query,
+                fact_id=str(fact_id),
+                acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
+            )
+            record = await result.single()
+            if record is None:
+                return None
+            return _edge_props_to_fact(record["subject_id"], record["object_id"], record["props"])
+
     async def search(
         self,
         query: str,

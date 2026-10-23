@@ -14,134 +14,31 @@ Gate-blocking. With ``ONTOS_AUTH_MODE=jwt``:
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import dataclasses
-import socket
-from collections.abc import AsyncIterator
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import httpx
 import pytest
-import uvicorn
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.auth.providers.jwt import RSAKeyPair
 from mcp.shared.exceptions import MCPError
-from starlette.middleware import Middleware
 
 from ontos.audit.emitter import AuditEmitter
-from ontos.authz import VIEW, InMemoryAuthz
-from ontos.runtime.auth import AuthRejectionAuditMiddleware, UnauthenticatedBindError
+from ontos.authz import InMemoryAuthz
+from ontos.runtime.auth import UnauthenticatedBindError
 from ontos.runtime.config import RuntimeConfig
-from ontos.runtime.models import ArticleTwelveField, AuditRecord, Confidence, Fact, Provenance
+from ontos.runtime.models import ArticleTwelveField, Fact
 from ontos.runtime.server import SnapshotMetadata, build_server, run_server
 from ontos.storage.networkx_store import NetworkxStore
-
-ISSUER = "https://idp.customer.internal"
-AUDIENCE = "ontos"
-
-
-@pytest.fixture
-def key_pair() -> RSAKeyPair:
-    return RSAKeyPair.generate()
-
-
-@pytest.fixture
-def jwt_config(tmp_path: Path, key_pair: RSAKeyPair) -> RuntimeConfig:
-    key_file = tmp_path / "idp.pem"
-    key_file.write_text(key_pair.public_key)
-    return dataclasses.replace(
-        RuntimeConfig.from_env(),
-        auth_mode="jwt",
-        auth_issuer=ISSUER,
-        auth_audience=AUDIENCE,
-        auth_public_key_file=key_file,
-    )
-
-
-def _fact(subject: str, acl_ref: str) -> Fact:
-    return Fact(
-        id=uuid4(),
-        subject_id=subject,
-        predicate="acquired",
-        object_id="Widget Inc",
-        provenance=Provenance(
-            source_id=f"doc:{acl_ref}",
-            extractor_id="test",
-            extractor_version="0",
-            confidence=Confidence.EXTRACTED,
-            confidence_score=0.99,
-        ),
-        t_valid=datetime(2025, 1, 1, tzinfo=UTC),
-        ingested_at=datetime.now(UTC),
-        acl_ref=acl_ref,
-    )
-
-
-@pytest.fixture
-async def finance_and_legal_store() -> tuple[NetworkxStore, Fact, Fact]:
-    store = NetworkxStore()
-    finance = _fact("Acme Finance", "acl:finance")
-    legal = _fact("Acme Legal", "acl:legal")
-    await store.add_fact(finance)
-    await store.add_fact(legal)
-    return store, finance, legal
-
-
-@pytest.fixture
-def authz() -> InMemoryAuthz:
-    authz = InMemoryAuthz()
-    authz.grant("user:alice", VIEW, "acl:finance")
-    authz.grant("user:bob", VIEW, "acl:legal")
-    return authz
-
-
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port: int = sock.getsockname()[1]
-        return port
-
-
-@contextlib.asynccontextmanager
-async def _serving(server: FastMCP, audit: AuditEmitter) -> AsyncIterator[str]:
-    """Run `server` over real streamable HTTP, wired like `run_server`."""
-    app = server.http_app(
-        middleware=[
-            Middleware(
-                AuthRejectionAuditMiddleware,
-                audit=audit,
-                model_versions={"runtime": "test"},
-            )
-        ]
-    )
-    port = _free_port()
-    uvi = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    task = asyncio.create_task(uvi.serve())
-    while not uvi.started:
-        if task.done():
-            task.result()
-        await asyncio.sleep(0.01)
-    try:
-        yield f"http://127.0.0.1:{port}/mcp"
-    finally:
-        uvi.should_exit = True
-        await task
-
-
-def _records(audit: AuditEmitter) -> list[AuditRecord]:
-    return list(audit._chain)
-
-
-def _payload(result: Any) -> dict[str, Any]:
-    content = result.structured_content
-    assert isinstance(content, dict)
-    return content
-
+from tests.compliance._mcp_harness import (
+    AUDIENCE,
+    ISSUER,
+    audit_records,
+    free_port,
+    serving,
+    structured_payload,
+)
 
 _INITIALIZE = {
     "jsonrpc": "2.0",
@@ -169,11 +66,11 @@ async def test_transport_rejects_and_audits_missing_or_invalid_token(
     if bearer is not None:
         headers["Authorization"] = f"Bearer {bearer}"
 
-    async with _serving(server, audit) as url, httpx.AsyncClient() as http:
+    async with serving(server, audit) as url, httpx.AsyncClient() as http:
         response = await http.post(url, json=_INITIALIZE, headers=headers)
 
     assert response.status_code == 401
-    records = _records(audit)
+    records = audit_records(audit)
     assert len(records) == 1
     article12 = records[0].article12
     for field in ArticleTwelveField:
@@ -198,14 +95,14 @@ async def test_token_from_wrong_key_is_rejected(
         subject="user:bob", issuer=ISSUER, audience=AUDIENCE
     )
 
-    async with _serving(server, audit) as url:
+    async with serving(server, audit) as url:
         with pytest.raises(MCPError):
             async with Client(url, auth=forged) as client:
                 await client.call_tool("search", {"query": "Acme", "agent_identity": "a"})
 
     # Every attempt died at the transport: rejections are on record and
     # no tool ever ran as the forged subject.
-    tools_invoked = {r.article12[ArticleTwelveField.TOOL_INVOKED] for r in _records(audit)}
+    tools_invoked = {r.article12[ArticleTwelveField.TOOL_INVOKED] for r in audit_records(audit)}
     assert tools_invoked == {"authn"}
 
 
@@ -225,12 +122,12 @@ async def test_principal_comes_from_verified_token(
         additional_claims={"act": {"sub": "agent:copilot"}},
     )
 
-    async with _serving(server, audit) as url, Client(url, auth=token) as client:
+    async with serving(server, audit) as url, Client(url, auth=token) as client:
         result = await client.call_tool(
             "search", {"query": "Acme", "agent_identity": "agent:copilot"}
         )
 
-    payload = _payload(result)
+    payload = structured_payload(result)
     assert [fact["id"] for fact in payload["payload"]] == [str(finance.id)]
     record = audit.by_query_id(UUID(payload["query_id"]))
     assert record is not None
@@ -253,7 +150,7 @@ async def test_caller_cannot_claim_another_principal(
     server = build_server(jwt_config, store=store, audit=audit, authz=authz)
     alice = key_pair.create_token(subject="user:alice", issuer=ISSUER, audience=AUDIENCE)
 
-    async with _serving(server, audit) as url, Client(url, auth=alice) as client:
+    async with serving(server, audit) as url, Client(url, auth=alice) as client:
         with pytest.raises(ToolError, match="authentication failed") as exc:
             await client.call_tool(
                 "search",
@@ -261,7 +158,7 @@ async def test_caller_cannot_claim_another_principal(
             )
 
     assert str(legal.id) not in str(exc.value)
-    deny = _records(audit)[-1].article12
+    deny = audit_records(audit)[-1].article12
     assert deny[ArticleTwelveField.TOOL_INVOKED] == "search"
     assert deny[ArticleTwelveField.RESULT_FACT_IDS] == "[]"
     decisions = deny[ArticleTwelveField.POLICY_DECISIONS]
@@ -312,7 +209,7 @@ async def test_every_tool_refuses_and_audits_unauthenticated_calls(
             with pytest.raises(ToolError, match="authentication failed"):
                 await client.call_tool(tool.name, _minimal_arguments(tool))
             assert len(audit) == before + 1, f"{tool.name} did not audit its rejection"
-            record = _records(audit)[-1].article12
+            record = audit_records(audit)[-1].article12
             for field in ArticleTwelveField:
                 assert field in record
             assert record[ArticleTwelveField.RESULT_FACT_IDS] == "[]"
@@ -323,4 +220,4 @@ def test_unauthenticated_server_refuses_public_bind(audit: AuditEmitter) -> None
     server = build_server(RuntimeConfig.from_env(), store=NetworkxStore(), audit=audit)
 
     with pytest.raises(UnauthenticatedBindError):
-        run_server(server, host="0.0.0.0", port=_free_port(), auth_mode="none", audit=audit)
+        run_server(server, host="0.0.0.0", port=free_port(), auth_mode="none", audit=audit)

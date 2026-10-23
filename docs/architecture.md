@@ -65,6 +65,8 @@ Every Article-12 record starts with an `authn` policy decision stating the metho
 
 The CLI is a trusted local operator: commands such as `ontos export --acting-on-behalf-of` still take an asserted identity.
 
+Lookups by id follow the same permission rules as search (#78). `provenance` reads through `GraphStore.get_visible_fact`, which applies the caller's ACLs inside the store query. `audit_lookup` returns only the caller's own records unless the caller holds `audit_exporter` on `audit`. A forbidden record and a missing one produce the same response and the same audit outcome.
+
 ## Ontology evolution and lazy migration
 
 Every `Provenance` carries `ontology_id` and `ontology_version`, stamped by `LlmExtractor` from the active `Ontology` at ingest. Readers plug an `ontos.migration.MigrationRegistry` into the executor to translate historical facts forward when the schema evolves (predicate rename, deprecation, cardinality tighten). The seam mirrors `SupersessionPolicy`: a Protocol-shaped `OntologyMigration` with `id`, `from_version`, `to_version`, and an async per-fact `migrate_fact` method.

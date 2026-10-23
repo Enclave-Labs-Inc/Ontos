@@ -252,7 +252,27 @@ class GraphStore(Protocol):
         superseded_by: UUID | None = None,
     ) -> None: ...
 
-    async def get_fact(self, fact_id: UUID) -> Fact | None: ...
+    async def get_fact(self, fact_id: UUID) -> Fact | None:
+        """Unfiltered lookup for the write path (supersession, ingest).
+
+        Never call from a read surface: it ignores ACLs. Read paths use
+        `get_visible_fact`.
+        """
+        ...
+
+    async def get_visible_fact(
+        self,
+        fact_id: UUID,
+        *,
+        acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
+    ) -> Fact | None:
+        """Return the fact only if the caller may see it, else None.
+
+        Same visibility rule as `search` / `facts_for_entity`, applied in
+        the store. A forbidden fact and a missing one are indistinguishable.
+        """
+        ...
 
     async def search(
         self,

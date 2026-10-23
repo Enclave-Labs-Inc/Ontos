@@ -345,6 +345,19 @@ class NetworkxStore:
     async def get_fact(self, fact_id: UUID) -> Fact | None:
         return self._facts.get(fact_id)
 
+    async def get_visible_fact(
+        self,
+        fact_id: UUID,
+        *,
+        acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
+    ) -> Fact | None:
+        fact = self._facts.get(fact_id)
+        allowed_set = set(allowed_acls) if allowed_acls is not None else None
+        if fact is None or not _acl_allows(fact, acl_subject, allowed_set):
+            return None
+        return fact
+
     async def search(
         self,
         query: str,
