@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ontos.extraction import ExtractionError, LlmExtractor, RawTriple
+from ontos.extraction import ExtractionError, ExtractionInput, LlmExtractor, RawTriple
 from ontos.ingest import TextConnector
 from ontos.ontology import Ontology, load_ontology
 from ontos.pipeline import ErrorPolicy, IngestPipeline
@@ -1333,3 +1333,120 @@ async def test_backend_exception_does_not_leak_into_ingest_report(
     assert report.errors[0].source_id == "private-doc"
     assert report.errors[0].reason == "extraction failed; document skipped"
     assert secret not in report.model_dump_json()
+
+
+async def _retain(store: NetworkxStore, ontology: Ontology, script, *, acl: str = "acl:x"):
+    return await IngestPipeline(
+        connector=TextConnector({"doc": "Doc"}, acl_ref_by_source={"doc": acl}),
+        extractor=LlmExtractor(ScriptedLLM(script), ontology),
+        resolver=None,
+        store=store,
+        ontology=ontology,
+        candidate_store=store,
+    ).run()
+
+
+async def test_candidates_follow_same_source_id_reconciliation(ontology: Ontology) -> None:
+    """#73: when the LLM renames an entity across re-ingests, candidates are
+    remapped like facts instead of being stored again under the new id."""
+    store = NetworkxStore()
+
+    def script(person_id: str) -> dict[str, list[RawTriple]]:
+        return {
+            "Doc": [
+                _triple(person_id, "Person", "Alice", "works_at", "co:acme", "Company", "Acme"),
+                _triple(person_id, "Person", "Alice", "mentored", "co:acme", "Company", "Acme"),
+            ]
+        }
+
+    await _retain(store, ontology, script("person:alice"))
+    await _retain(store, ontology, script("person:alice-v2"))
+
+    candidates = await store.list_candidates(allowed_acls=["acl:x"])
+    assert [c.raw_triple.subject_id for c in candidates] == ["person:alice"]
+
+
+async def test_candidates_retained_counts_only_new_candidates(ontology: Ontology) -> None:
+    store = NetworkxStore()
+    script = {"Doc": [_triple("p:a", "Person", "A", "mentored", "c:b", "Company", "B")] * 2}
+
+    first = await _retain(store, ontology, script)
+    second = await _retain(store, ontology, script)
+
+    assert first.candidates_retained == 1
+    assert second.candidates_retained == 0
+
+
+async def test_candidates_are_stamped_with_document_source_and_first_ingest_time(
+    ontology: Ontology,
+) -> None:
+    store = NetworkxStore()
+    script = {"Doc": [_triple("p:a", "Person", "A", "mentored", "c:b", "Company", "B")]}
+
+    await _retain(store, ontology, script)
+    [first] = await store.list_candidates(allowed_acls=["acl:x"])
+    await _retain(store, ontology, script)
+    [again] = await store.list_candidates(allowed_acls=["acl:x"])
+
+    assert first.provenance.source_id == "doc"
+    assert first.ingested_at is not None
+    assert again.ingested_at == first.ingested_at
+
+
+async def test_pipeline_overrides_extractor_supplied_candidate_source(
+    ontology: Ontology,
+) -> None:
+    """#73: a non-LlmExtractor backend must not attribute candidates to
+    another document."""
+    from ontos.extraction import (
+        CandidateProvenance,
+        CandidateTriple,
+        ExtractionResult,
+        RejectedCandidate,
+    )
+
+    class LyingExtractor:
+        id = "lying"
+        version = "0"
+
+        async def extract(self, input: ExtractionInput) -> ExtractionResult:
+            return ExtractionResult(
+                rejected=[
+                    RejectedCandidate(
+                        raw_triple=CandidateTriple(
+                            subject_id="p:a",
+                            subject_type="Person",
+                            subject_canonical_name="A",
+                            predicate="mentored",
+                            object_id="c:b",
+                            object_type="Company",
+                            object_canonical_name="B",
+                            llm_confidence=0.9,
+                        ),
+                        reason="pattern_not_in_ontology",
+                        provenance=CandidateProvenance(
+                            source_id="other-secret-doc",
+                            extractor_id="lying",
+                            extractor_version="0",
+                            ontology_id="o",
+                            ontology_version="1",
+                            confidence_score=0.9,
+                        ),
+                        acl_ref="acl:public",
+                    )
+                ]
+            )
+
+    store = NetworkxStore()
+    await IngestPipeline(
+        connector=TextConnector({"mydoc": "text"}, acl_ref_by_source={"mydoc": "acl:mine"}),
+        extractor=LyingExtractor(),  # type: ignore[arg-type]
+        resolver=None,
+        store=store,
+        ontology=ontology,
+        candidate_store=store,
+    ).run()
+
+    [stored] = await store.list_candidates(allowed_acls=["acl:mine"])
+    assert stored.provenance.source_id == "mydoc"
+    assert stored.acl_ref == "acl:mine"

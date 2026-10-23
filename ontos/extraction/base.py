@@ -23,6 +23,7 @@ Every implementation MUST uphold these invariants (checked by
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -65,7 +66,8 @@ class CandidateTriple(BaseModel):
 class CandidateProvenance(BaseModel):
     """Partial provenance before the pipeline stamps document ACLs."""
 
-    source_id: str
+    # An empty source id cannot round-trip through the pagination cursor.
+    source_id: str = Field(min_length=1)
     extractor_id: str
     extractor_version: str
     ontology_id: str
@@ -82,6 +84,9 @@ class RejectedCandidate(BaseModel):
     reason: Literal["pattern_not_in_ontology", "below_min_confidence"]
     provenance: CandidateProvenance
     acl_ref: str | None = None
+    # First time this candidate was retained. Stamped by the pipeline and
+    # kept on later re-ingests (first write wins); not part of identity.
+    ingested_at: datetime | None = None
 
     model_config = ConfigDict(frozen=True)
 

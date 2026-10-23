@@ -40,6 +40,27 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   principals' audit records, now get `null`. Grant `audit_exporter` on
   `audit` (OpenFGA) to readers of other principals' records.
 
+### Fixed — rejected-candidate retention follow-ups (#73, part 1)
+- **Entity ids that change between runs no longer duplicate candidates.**
+  Same-source entity reconciliation now remaps rejected candidates' raw ids,
+  as it already did for entities and facts.
+- **Candidates carry `ingested_at`**, set the first time they are retained
+  and kept on later re-ingests. It is not part of candidate identity.
+- **The pipeline stamps `provenance.source_id` from the document**, as it
+  already did for `acl_ref`, so an extractor can't attribute candidates to
+  another source.
+- **`IngestReport.candidates_retained` counts only newly stored candidates.**
+  `CandidateStore.add_candidates` now returns that count (an upgrade note for
+  custom stores).
+- **Candidate `source_id` must be non-empty.** An empty one couldn't
+  round-trip through the pagination cursor.
+- **NetworkX candidate storage is indexed.** Adding 10k candidates in
+  batches of 20 dropped from about 15 s to 0.2 s, and paging all of them
+  from about 12 s to 0.01 s. Storage-boundary validation now actually
+  re-validates.
+- **Neo4j gets a `(source_key, logical_id)` index for inspection paging.**
+- **Both backends reject `limit=True`.**
+
 ### Fixed — permission checks on record lookups (#78)
 - **`provenance(fact_id)`** returned any fact by id, whatever the caller's
   ACLs. It now resolves `allowed_acls` like `search` and filters in the

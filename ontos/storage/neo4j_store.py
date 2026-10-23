@@ -135,6 +135,9 @@ class Neo4jStore:
             "FOR (n:RejectedCandidate) REQUIRE n.logical_id IS UNIQUE",
             "CREATE INDEX rejected_candidate_acl IF NOT EXISTS "
             "FOR (n:RejectedCandidate) ON (n.acl_ref)",
+            # Inspection pages ORDER BY (source_key, logical_id).
+            "CREATE INDEX rejected_candidate_order IF NOT EXISTS "
+            "FOR (n:RejectedCandidate) ON (n.source_key, n.logical_id)",
             # #38: type-filtered reads (e.g. #32's export "all Person nodes")
             # stay O(matching-nodes) on 10k+ node graphs with this index.
             "CREATE INDEX entity_type_idx IF NOT EXISTS FOR (n:Entity) ON (n.type)",
@@ -228,10 +231,13 @@ class Neo4jStore:
     async def add_candidates(
         self,
         candidates: list[RejectedCandidate],
-    ) -> None:
-        """Persist untrusted candidates without linking them to the graph."""
+    ) -> int:
+        """Persist untrusted candidates without linking them to the graph.
+
+        Returns how many were new; existing logical ids are left untouched.
+        """
         if not candidates:
-            return
+            return 0
 
         from ontos.storage.base import candidate_source_key, candidate_storage_id
 
@@ -247,7 +253,7 @@ class Neo4jStore:
             for candidate in candidates
         ]
 
-        async def _write_batch(tx: Any) -> None:
+        async def _write_batch(tx: Any) -> int:
             result = await tx.run(
                 """
                 UNWIND $rows AS row
@@ -261,10 +267,13 @@ class Neo4jStore:
                 """,
                 rows=rows,
             )
-            await result.consume()
+            summary = await result.consume()
+            created: int = summary.counters.nodes_created
+            return created
 
         async with self._driver.session(database=self._database) as session:
-            await session.execute_write(_write_batch)
+            added: int = await session.execute_write(_write_batch)
+        return added
 
     # Candidate records retain historical physical IDs.
     async def list_candidates(
@@ -296,7 +305,7 @@ class Neo4jStore:
         Caller must separately enforce ontology_reviewer authorization
         and record an Article-12 audit event.
         """
-        if limit < 1:
+        if isinstance(limit, bool) or limit < 1:
             raise ValueError("limit must be positive")
 
         from ontos.storage.base import candidate_source_key, decode_candidate_cursor

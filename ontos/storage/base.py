@@ -157,8 +157,8 @@ class CandidateStore(Protocol):
     async def add_candidates(
         self,
         candidates: list[RejectedCandidate],
-    ) -> None:
-        """Persist candidates that have already been ACL-stamped by ingestion."""
+    ) -> int:
+        """Persist ACL-stamped candidates; return how many were newly stored."""
         ...
 
     async def list_candidate_records(
