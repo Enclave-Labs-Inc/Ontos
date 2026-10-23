@@ -7,6 +7,8 @@ between them is a config change.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from typing import Protocol
 from uuid import UUID
 
@@ -33,6 +35,20 @@ class AuditSink(Protocol):
 
     def by_query_id(self, query_id: UUID) -> AuditRecord | None: ...
 
+    def derive_key(self, label: bytes) -> bytes:
+        """Return a purpose-specific key derived from the signing key."""
+        ...
+
     def verify_chain(self) -> bool: ...
 
     def __len__(self) -> int: ...
+
+
+def derive_subkey(signing_key: bytes, label: bytes) -> bytes:
+    """Derive an independent key for `label` from the audit signing key.
+
+    Keeps the signing key single-purpose: values keyed with a subkey
+    (e.g. audit references to sensitive records) can't be used to forge
+    chain hashes, and vice versa.
+    """
+    return hmac.new(signing_key, b"ontos.audit.subkey.v1:" + label, hashlib.sha256).digest()

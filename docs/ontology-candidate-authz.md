@@ -77,6 +77,15 @@ returning candidate data.
 Audit metadata must not contain inaccessible candidate identifiers,
 raw triples, hidden candidate counts, or forbidden source ACL lists.
 
+Candidate ids and pagination cursors are hashes of guessable content
+(source, entities, predicate), so they are never logged directly. The
+record's `result_fact_ids` and `tool_arguments.after_cursor_ref` hold an
+HMAC-SHA256 keyed with a subkey of the audit signing key
+(`audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)`, see
+`candidate_audit_reference`). Someone holding the deployment key can map a
+reference back to a candidate. An audit reader without it cannot confirm a
+guessed triple against the log (#72).
+
 ## Deployment isolation
 
 Rejected candidates remain outside trusted graph search, traversal, scans,

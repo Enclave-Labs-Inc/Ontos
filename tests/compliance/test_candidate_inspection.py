@@ -8,7 +8,9 @@ from ontos.audit.emitter import AuditEmitter
 from ontos.authz import ONTOLOGY_REVIEWER, VIEW, InMemoryAuthz
 from ontos.extraction import CandidateProvenance, CandidateTriple, RejectedCandidate
 from ontos.runtime.candidate_inspection import (
+    CANDIDATE_REFERENCE_KEY_LABEL,
     CandidateInspectionDeniedError,
+    candidate_audit_reference,
     inspect_candidates,
 )
 from ontos.runtime.models import ArticleTwelveField
@@ -317,8 +319,11 @@ async def test_candidate_audit_records_only_disclosed_ids() -> None:
     assert returned == [finance]
 
     disclosed = json.loads(record.article12[ArticleTwelveField.RESULT_FACT_IDS])
-    assert disclosed == [candidate_storage_id(finance)]
-    assert candidate_storage_id(hr) not in disclosed
+    key = allowed_audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
+    assert disclosed == [candidate_audit_reference(key, candidate_storage_id(finance))]
+    assert candidate_audit_reference(key, candidate_storage_id(hr)) not in disclosed
+    # #72: never the raw, guessable candidate id.
+    assert candidate_storage_id(finance) not in disclosed
 
     denied_audit = _audit()
     with pytest.raises(CandidateInspectionDeniedError):
@@ -412,7 +417,11 @@ async def test_candidate_inspection_pagination_is_independently_audited() -> Non
         (second_page, second_record),
     ):
         actual_ids = json.loads(record.article12[ArticleTwelveField.RESULT_FACT_IDS])
-        expected_ids = [physical_ids[candidate.provenance.source_id] for candidate in page]
+        key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
+        expected_ids = [
+            candidate_audit_reference(key, physical_ids[candidate.provenance.source_id])
+            for candidate in page
+        ]
 
         # Article-12 serialization may order IDs independently of the page.
         # Require exactly the disclosed physical IDs, without duplicates.
@@ -484,3 +493,69 @@ async def test_unrelated_storage_value_error_is_audited_as_storage_error() -> No
     assert disclosed_ids == []
 
     assert audit.verify_chain()
+
+
+async def test_audit_log_cannot_confirm_guessed_candidates() -> None:
+    """#72: an audit reader without the deployment key who correctly guesses a
+    restricted triple must not be able to match it against the log, neither
+    through disclosed candidate ids nor through cursor fingerprints."""
+    import hashlib
+    import json
+
+    from ontos.storage.base import candidate_storage_id
+
+    store = NetworkxStore()
+    first = _candidate("acl:finance")
+    second = first.model_copy(
+        update={"provenance": first.provenance.model_copy(update={"source_id": "z-source"})}
+    )
+    await store.add_candidates([first, second])
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    authz.grant("user:reviewer", VIEW, "acl:finance")
+    audit = _audit()
+
+    page_one = await inspect_candidates(
+        candidate_store=store,
+        authz=authz,
+        audit=audit,
+        subject="user:reviewer",
+        agent_identity="agent",
+        limit=1,
+        paginated=True,
+    )
+    assert page_one.next_cursor is not None
+    await inspect_candidates(
+        candidate_store=store,
+        authz=authz,
+        audit=audit,
+        subject="user:reviewer",
+        agent_identity="agent",
+        limit=1,
+        after=page_one.next_cursor,
+        paginated=True,
+    )
+
+    trail = json.dumps([dict(record.article12) for record in audit._chain])
+    for guessed in (first, second):
+        assert candidate_storage_id(guessed) not in trail
+    assert hashlib.sha256(page_one.next_cursor.encode("utf-8")).hexdigest() not in trail
+
+    # The key holder can still trace references back to candidates.
+    key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
+    assert candidate_audit_reference(key, candidate_storage_id(first)) in trail
+    assert candidate_audit_reference(key, page_one.next_cursor) in trail
+
+    # References are deployment-specific: another key yields other values.
+    other_key = AuditEmitter(signing_key=b"another-deployment").derive_key(
+        CANDIDATE_REFERENCE_KEY_LABEL
+    )
+    assert candidate_audit_reference(other_key, candidate_storage_id(first)) not in trail
+
+
+def test_reference_key_is_separate_from_signing_key() -> None:
+    audit = _audit()
+    key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
+    assert key != b"candidate-inspection-test-key"
+    assert key != audit.derive_key(b"some-other-purpose")

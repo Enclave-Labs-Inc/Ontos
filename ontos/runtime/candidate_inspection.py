@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import time
 from dataclasses import dataclass
 from typing import Literal, overload
@@ -23,6 +25,22 @@ class CandidateInspectionPage:
     candidates: list[RejectedCandidate]
     next_cursor: str | None
     audit_record: AuditRecord
+
+
+CANDIDATE_REFERENCE_KEY_LABEL = b"candidate-audit-reference"
+
+
+def candidate_audit_reference(reference_key: bytes, value: str) -> str:
+    """Keyed reference to a candidate id or cursor for the audit log.
+
+    Candidate ids and cursors are plain hashes of guessable content
+    (source, entities, predicate). Logging them directly would let an
+    audit reader confirm guessed restricted triples offline (#72). A keyed
+    HMAC keeps records traceable for whoever holds the deployment's audit
+    key, via `audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)`, and opaque
+    to everyone else.
+    """
+    return hmac.new(reference_key, value.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 class CandidateInspectionDeniedError(PermissionError):
@@ -78,10 +96,9 @@ async def inspect_candidates(
     """
     started = time.perf_counter()
 
-    import hashlib
-
-    cursor_fingerprint = (
-        hashlib.sha256(after.encode("utf-8")).hexdigest() if after is not None else None
+    reference_key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
+    cursor_reference = (
+        candidate_audit_reference(reference_key, after) if isinstance(after, str) else None
     )
 
     async def emit(
@@ -109,7 +126,7 @@ async def inspect_candidates(
                     tool_arguments={
                         "limit": limit,
                         "identity_assurance": identity_assurance,
-                        "after_cursor_sha256": cursor_fingerprint,
+                        "after_cursor_ref": cursor_reference,
                     },
                     result_fact_ids=disclosed_ids or [],
                     latency_ms=latency_ms,
@@ -126,7 +143,7 @@ async def inspect_candidates(
             tool_arguments={
                 "limit": limit,
                 "identity_assurance": identity_assurance,
-                "after_cursor_sha256": cursor_fingerprint,
+                "after_cursor_ref": cursor_reference,
             },
             result_fact_ids=disclosed_ids or [],
             latency_ms=latency_ms,
@@ -176,7 +193,9 @@ async def inspect_candidates(
     # Never disclose or audit the lookahead candidate.
     visible_records = stored_records[:limit]
     visible_page = [item.candidate for item in visible_records]
-    disclosed_ids = [item.stored_id for item in visible_records]
+    disclosed_ids = [
+        candidate_audit_reference(reference_key, item.stored_id) for item in visible_records
+    ]
     record = await emit("allow", disclosed_ids)
 
     if paginated:

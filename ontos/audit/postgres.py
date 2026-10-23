@@ -54,7 +54,10 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.schema import SchemaItem
 
-from ontos.audit.base import AuditSink  # noqa: F401 — protocol reference for imports
+from ontos.audit.base import (
+    AuditSink,  # noqa: F401 — protocol reference for imports
+    derive_subkey,
+)
 from ontos.runtime.models import ArticleTwelveField, AuditRecord
 
 _TABLE_NAME = "ontos_audit_records"
@@ -175,6 +178,10 @@ class PostgresAuditEmitter:
         """Create tables + indexes idempotently."""
         async with self._engine.begin() as conn:
             await conn.run_sync(self._table.metadata.create_all)
+
+    def derive_key(self, label: bytes) -> bytes:
+        """Purpose-specific key derived from this emitter's signing key."""
+        return derive_subkey(self._key, label)
 
     def emit(
         self,

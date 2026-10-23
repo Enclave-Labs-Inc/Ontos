@@ -1333,9 +1333,15 @@ async def test_rejected_candidate_legacy_physical_id_is_audited(
     assert page == [candidate]
     assert len(audit) == 1
 
+    from ontos.runtime.candidate_inspection import (
+        CANDIDATE_REFERENCE_KEY_LABEL,
+        candidate_audit_reference,
+    )
+
     disclosed_ids = json.loads(record.article12[ArticleTwelveField.RESULT_FACT_IDS])
-    assert disclosed_ids == [historical_id]
-    assert disclosed_ids != [logical_id]
+    key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
+    assert disclosed_ids == [candidate_audit_reference(key, historical_id)]
+    assert disclosed_ids != [candidate_audit_reference(key, logical_id)]
     assert audit.verify_chain()
 
 
