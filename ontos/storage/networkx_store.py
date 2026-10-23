@@ -30,7 +30,9 @@ A crash mid-save leaves the previous valid file intact.
 
 from __future__ import annotations
 
+import bisect
 import contextlib
+import itertools
 import pickle
 from collections.abc import Iterable
 from datetime import datetime
@@ -85,7 +87,10 @@ class NetworkxStore:
         # re-record; last-write-wins on resolved_at. See #46 and the
         # GraphStore.record_merge Protocol docstring for semantics.
         self._merges: dict[tuple[str, str, str], MergeRecord] = {}
-        self._candidates: list[RejectedCandidate] = []
+        # Keyed by candidate_storage_id; `_candidate_order` keeps
+        # (source_id, id) sorted so pages are a bisect, not a full sort.
+        self._candidates: dict[str, RejectedCandidate] = {}
+        self._candidate_order: list[tuple[str, str]] = []
         self._path: Path | None = path
         # Set by any state-mutating method; checked by `flush()` so that
         # read-only callers (e.g. `ontos query`) never rewrite the file —
@@ -208,7 +213,8 @@ class NetworkxStore:
             # migration path — on next flush the file gets rewritten
             # under the current magic header with the new key).
             self._merges = payload.get("merges", {})
-            self._candidates = payload.get("candidates", [])
+            for candidate in payload.get("candidates", []):
+                self._index_candidate(candidate)
         except (KeyError, TypeError) as exc:
             raise StorageError(
                 f"{path} payload shape is not recognised: {exc!r}. "
@@ -238,7 +244,7 @@ class NetworkxStore:
                     "graph": self._graph,
                     "facts": self._facts,
                     "merges": self._merges,
-                    "candidates": self._candidates,
+                    "candidates": list(self._candidates.values()),
                 }
             )
         )
@@ -702,26 +708,34 @@ class NetworkxStore:
             return False
         return all(_endpoint_visible(mid) for mid in record.merged_ids)
 
+    def _index_candidate(self, candidate: RejectedCandidate) -> bool:
+        from ontos.storage.base import candidate_storage_id
+
+        candidate_id = candidate_storage_id(candidate)
+        if candidate_id in self._candidates:
+            return False
+        self._candidates[candidate_id] = candidate
+        bisect.insort(self._candidate_order, (candidate.provenance.source_id, candidate_id))
+        return True
+
     async def add_candidates(
         self,
         candidates: list[RejectedCandidate],
-    ) -> None:
-        """Store untrusted candidates outside the trusted graph."""
-        if not candidates:
-            return
+    ) -> int:
+        """Store untrusted candidates outside the trusted graph.
 
-        # Revalidate at the storage boundary.
-        validated = [RejectedCandidate.model_validate(candidate) for candidate in candidates]
-        from ontos.storage.base import candidate_storage_id
-
-        existing_ids = {candidate_storage_id(candidate) for candidate in self._candidates}
-
-        for candidate in validated:
-            candidate_id = candidate_storage_id(candidate)
-            if candidate_id not in existing_ids:
-                self._candidates.append(candidate)
-                existing_ids.add(candidate_id)
-                self._dirty = True
+        Returns how many were new; duplicates of stored candidates are
+        skipped (first write wins).
+        """
+        # Round-trip through a dict so validation actually runs: pydantic v2
+        # returns an existing instance unchanged from `model_validate`.
+        validated = [
+            RejectedCandidate.model_validate(candidate.model_dump()) for candidate in candidates
+        ]
+        added = sum(self._index_candidate(candidate) for candidate in validated)
+        if added:
+            self._dirty = True
+        return added
 
     async def list_candidates(
         self,
@@ -748,41 +762,24 @@ class NetworkxStore:
         after: str | None = None,
     ) -> list[StoredCandidate]:
         """ACL-filtered, deterministically ordered candidate page."""
-        from ontos.storage.base import (
-            candidate_sort_key,
-            candidate_storage_id,
-            decode_candidate_cursor,
-        )
+        from ontos.storage.base import decode_candidate_cursor
 
-        if limit < 1:
+        if isinstance(limit, bool) or limit < 1:
             raise ValueError("limit must be positive")
 
         position = decode_candidate_cursor(after) if after is not None else None
         allowed = set(allowed_acls)
+        start = bisect.bisect_right(self._candidate_order, position) if position else 0
 
-        visible = [
-            candidate
-            for candidate in self._candidates
-            if (
-                (candidate.acl_ref is None and include_public)
-                or (candidate.acl_ref is not None and candidate.acl_ref in allowed)
-            )
-        ]
-
-        visible.sort(key=candidate_sort_key)
-
-        if position is not None:
-            visible = [
-                candidate for candidate in visible if candidate_sort_key(candidate) > position
-            ]
-
-        return [
-            StoredCandidate(
-                candidate=candidate,
-                stored_id=candidate_storage_id(candidate),
-            )
-            for candidate in visible[:limit]
-        ]
+        page: list[StoredCandidate] = []
+        for _, candidate_id in itertools.islice(self._candidate_order, start, None):
+            candidate = self._candidates[candidate_id]
+            acl = candidate.acl_ref
+            if (acl is None and include_public) or (acl is not None and acl in allowed):
+                page.append(StoredCandidate(candidate=candidate, stored_id=candidate_id))
+                if len(page) == limit:
+                    break
+        return page
 
     async def close(self) -> None:
         self.flush()
@@ -793,6 +790,7 @@ class NetworkxStore:
         self._facts.clear()
         self._merges.clear()
         self._candidates.clear()
+        self._candidate_order.clear()
 
 
 def _acl_allows(

@@ -220,7 +220,7 @@ async def test_close_clears_candidates_after_persisting(
     await store.add_candidates([_candidate()])
     await store.close()
 
-    assert store._candidates == []
+    assert await store.list_candidates(allowed_acls=["team-private"]) == []
 
     reader = NetworkxStore(path=path)
     assert len(await reader.list_candidates(allowed_acls=["team-private"])) == 1
@@ -360,3 +360,61 @@ async def test_logical_candidate_identity_ignores_confidence() -> None:
 
     assert private == [original]
     assert other == [different_acl]
+
+
+def _variant(i: int, source_id: str) -> RejectedCandidate:
+    base = _candidate()
+    return base.model_copy(
+        update={
+            "raw_triple": base.raw_triple.model_copy(update={"subject_id": f"s-{i}"}),
+            "provenance": base.provenance.model_copy(update={"source_id": source_id}),
+        }
+    )
+
+
+async def test_add_candidates_returns_number_newly_stored() -> None:
+    store = NetworkxStore()
+    batch = [_variant(1, "a"), _variant(2, "a"), _variant(1, "a")]
+
+    assert await store.add_candidates(batch) == 2
+    assert await store.add_candidates(batch) == 0
+    assert await store.add_candidates([]) == 0
+
+
+async def test_paging_large_store_returns_each_candidate_once_in_order() -> None:
+    from ontos.storage.base import candidate_sort_key, encode_candidate_cursor
+
+    store = NetworkxStore()
+    candidates = [_variant(i, f"src-{i % 37:02d}") for i in range(1500)]
+    for start in range(0, len(candidates), 50):
+        await store.add_candidates(candidates[start : start + 50])
+
+    seen = []
+    after = None
+    while True:
+        page = await store.list_candidate_records(
+            allowed_acls=["team-private"], limit=97, after=after
+        )
+        seen += page
+        if len(page) < 97:
+            break
+        after = encode_candidate_cursor(page[-1].candidate)
+
+    assert len(seen) == len(candidates)
+    assert len({item.stored_id for item in seen}) == len(candidates)
+    assert [candidate_sort_key(item.candidate) for item in seen] == sorted(
+        candidate_sort_key(c) for c in candidates
+    )
+
+
+async def test_list_rejects_boolean_limit() -> None:
+    store = NetworkxStore()
+    with pytest.raises(ValueError):
+        await store.list_candidate_records(allowed_acls=[], limit=True)
+
+
+def test_candidate_source_id_must_be_non_empty() -> None:
+    with pytest.raises(ValueError):
+        _candidate().provenance.model_validate(
+            {**_candidate().provenance.model_dump(), "source_id": ""}
+        )
