@@ -1808,3 +1808,18 @@ async def test_get_visible_fact_applies_acl_in_query(
     assert await store.get_visible_fact(public.id) is not None
     # The write path still sees everything.
     assert await store.get_fact(restricted.id) is not None
+
+
+async def test_add_candidates_returns_number_newly_created(store: Neo4jStore) -> None:
+    """#73: lets the pipeline report retained candidates without counting
+    duplicates."""
+    first = _rejected_candidate("acl:finance")
+    second = first.model_copy(
+        update={"raw_triple": first.raw_triple.model_copy(update={"subject_id": "other"})}
+    )
+
+    assert await store.add_candidates([first, second, first]) == 2
+    assert await store.add_candidates([first, second]) == 0
+    assert await store.add_candidates([]) == 0
+    with pytest.raises(ValueError):
+        await store.list_candidate_records(allowed_acls=[], limit=True)

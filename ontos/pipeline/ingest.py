@@ -19,6 +19,7 @@ report so the operator sees exactly what didn't land.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from enum import StrEnum
 
 import structlog
@@ -166,10 +167,31 @@ def _reconcile_same_source_entity_ids(
         for fact in extraction.facts
     ]
 
+    # Candidate identity includes the raw ids, so an unmapped candidate would
+    # be stored again under the drifted id on every re-ingest (#73).
+    rejected = [
+        candidate.model_copy(
+            update={
+                "raw_triple": candidate.raw_triple.model_copy(
+                    update={
+                        "subject_id": id_map.get(
+                            candidate.raw_triple.subject_id, candidate.raw_triple.subject_id
+                        ),
+                        "object_id": id_map.get(
+                            candidate.raw_triple.object_id, candidate.raw_triple.object_id
+                        ),
+                    }
+                )
+            }
+        )
+        for candidate in extraction.rejected
+    ]
+
     return extraction.model_copy(
         update={
             "entities": entities,
             "facts": facts,
+            "rejected": rejected,
         }
     )
 
@@ -389,16 +411,26 @@ class IngestPipeline:
 
             # Retain rejected candidates only after the existing
             # cross-ACL checks and entity writes have succeeded.
-            # Extractor-supplied ACL values are never trusted.
+            # Extractor-supplied ACL and source values are never trusted.
             if self._candidate_store is not None and extraction.rejected:
+                retained_at = datetime.now(UTC)
                 stamped_candidates = [
-                    candidate.model_copy(update={"acl_ref": doc.acl_ref})
+                    candidate.model_copy(
+                        update={
+                            "acl_ref": doc.acl_ref,
+                            "ingested_at": retained_at,
+                            "provenance": candidate.provenance.model_copy(
+                                update={"source_id": doc.source_id}
+                            ),
+                        }
+                    )
                     for candidate in extraction.rejected
                 ]
                 # Storage failures deliberately propagate. Retention
                 # must never silently lose rejected candidates.
-                await self._candidate_store.add_candidates(stamped_candidates)
-                candidates_retained += len(stamped_candidates)
+                candidates_retained += await self._candidate_store.add_candidates(
+                    stamped_candidates
+                )
 
             if self._resolver is not None and extraction.entities:
                 resolution = await self._resolver.resolve(list(extraction.entities))
