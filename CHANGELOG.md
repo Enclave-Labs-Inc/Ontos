@@ -14,6 +14,17 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-27 - MCP authentication and rejected-candidate retention
+
+MCP callers can now be authenticated with JWTs from the customer's own
+IdP, and identity comes from the verified token instead of tool
+arguments. Relationships the ontology rejects can be retained (opt-in)
+in a separate candidate store and inspected, with an audited CLI gated
+on `ontology_reviewer` plus source-level VIEW. Three security fixes
+land alongside: permission checks on `provenance` / `audit_lookup`,
+keyed audit references for candidates, and a hardened export push
+guard. **Read the upgrade notes: this release has breaking changes.**
+
 ### Upgrade notes
 - **Breaking: an unauthenticated server no longer binds beyond
   loopback.** With `ONTOS_AUTH_MODE=none` (the default), `ontos serve`
@@ -39,6 +50,34 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   Callers relying on reading facts outside their ACLs, or other
   principals' audit records, now get `null`. Grant `audit_exporter` on
   `audit` (OpenFGA) to readers of other principals' records.
+
+### Added — rejected-candidate retention and inspection (#66 M1, #68)
+- **`ontos ingest --retain-rejected-candidates`** (off by default) keeps
+  relationships that fail ontology validation as typed `RejectedCandidate`
+  records. Each holds the raw triple, the rejection reason, partial
+  provenance and the source document's ACL.
+- **Candidates live in a separate `CandidateStore`**: NetworkX V3 pickles
+  (V1/V2 still load) and Neo4j `:RejectedCandidate` nodes. They are never
+  part of search, traversal, scans, exports, Bloom or snapshots.
+- **`ontos ontology candidates list`** inspects them in a trusted local
+  operator context. It requires the `ontology_reviewer` relation plus VIEW
+  on each candidate's source ACL, and audits every attempt. There is no MCP
+  tool for candidates yet.
+- **Rejection warnings in ingest reports are sanitized**, so they no longer
+  carry raw ids or predicates.
+
+### Fixed — security
+- **Candidate audit references are keyed (#72, #77).** Inspection logged
+  unkeyed SHA-256 candidate ids and cursor hashes, which an audit reader
+  could test guesses against. It now logs an HMAC under a subkey of the
+  audit signing key (`AuditSink.derive_key`). The audit field
+  `after_cursor_sha256` is renamed to `after_cursor_ref`.
+- **The export push guard can no longer be bypassed (#74, #76).**
+  `ontos export neo4j --push` could reach the operational database
+  through a loopback or DNS alias of its host, a differently cased
+  database name, or a NetworkX-sourced export. Hosts are now compared by
+  every resolved identity, names case-insensitively, and the guard applies
+  whenever an operational Neo4j is configured.
 
 ### Fixed — rejected-candidate retention follow-ups (#73, part 1)
 - **Entity ids that change between runs no longer duplicate candidates.**
