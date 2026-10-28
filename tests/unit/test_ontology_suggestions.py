@@ -187,3 +187,24 @@ def test_missing_reference_key_is_rejected() -> None:
             ontology=_ontology(),
             reference_key=b"",
         )
+
+
+def test_reextracting_same_relationship_does_not_inflate_support() -> None:
+    original = _candidate(source_id="document-1")
+    updated_candidate = original.candidate.model_copy(
+        update={
+            "provenance": original.candidate.provenance.model_copy(
+                update={"extractor_version": "2.0"}
+            )
+        }
+    )
+    updated = StoredCandidate(
+        candidate=updated_candidate,
+        stored_id=candidate_storage_id(updated_candidate),
+    )
+
+    suggestions = _suggest([original, updated])
+
+    assert len(suggestions) == 1
+    assert suggestions[0].support_count == 1
+    assert len(suggestions[0].supporting_candidate_refs) == 2

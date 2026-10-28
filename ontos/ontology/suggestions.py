@@ -55,6 +55,10 @@ def suggest_missing_patterns(
         tuple[str | None, str, str, str],
         set[str],
     ] = defaultdict(set)
+    unique_support: dict[
+        tuple[str | None, str, str, str],
+        set[tuple[str, str, str]],
+    ] = defaultdict(set)
 
     for stored in candidates:
         candidate = stored.candidate
@@ -89,6 +93,7 @@ def suggest_missing_patterns(
         )
 
         groups[key].add(candidate_audit_reference(reference_key, stored.stored_id))
+        unique_support[key].add((provenance.source_id, triple.subject_id, triple.object_id))
 
     timestamp = generated_at or datetime.now(UTC)
     suggestions: list[OntologySuggestion] = []
@@ -108,7 +113,7 @@ def suggest_missing_patterns(
                     object_type=object_type,
                 ),
                 acl_ref=acl_ref,
-                support_count=len(references),
+                support_count=len(unique_support[key]),
                 supporting_candidate_refs=references,
                 generator_id="ontos.ontology.deterministic",
                 generator_version="m2a-v1",

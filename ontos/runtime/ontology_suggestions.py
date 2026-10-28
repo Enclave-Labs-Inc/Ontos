@@ -7,6 +7,7 @@ from typing import Literal
 
 from ontos.audit.base import AuditSink
 from ontos.authz import ONTOLOGY_REVIEWER, VIEW, AuthzBackend
+from ontos.authz.base import AuthzError
 from ontos.ontology.loader import Ontology
 from ontos.ontology.suggestions import (
     OntologySuggestion,
@@ -14,6 +15,8 @@ from ontos.ontology.suggestions import (
 )
 from ontos.runtime.candidate_inspection import (
     CANDIDATE_REFERENCE_KEY_LABEL,
+    CandidateInspectionAuditError,
+    CandidateInspectionDeniedError,
     inspect_candidates,
 )
 from ontos.runtime.models import AuditRecord
@@ -112,6 +115,7 @@ async def list_ontology_suggestions(
         "deny",
         "authorization_error",
         "storage_error",
+        "audit_error",
         "incomplete_result",
         "generation_error",
     ] = "allow"
@@ -195,6 +199,7 @@ async def list_ontology_suggestions(
 
         refs = [ref for suggestion in suggestions for ref in suggestion.supporting_candidate_refs]
 
+        stage = "audit"
         audit_record = await _audit_suggestions(
             audit=audit,
             subject=subject,
@@ -211,39 +216,40 @@ async def list_ontology_suggestions(
         return suggestions, audit_record
 
     except Exception as exc:
-        from ontos.runtime.candidate_inspection import (
-            CandidateInspectionDeniedError,
-        )
-
-        if isinstance(exc, CandidateInspectionDeniedError):
+        if isinstance(exc, CandidateInspectionAuditError):
+            decision = "audit_error"
+        elif isinstance(exc, CandidateInspectionDeniedError):
             decision = "deny"
         elif isinstance(exc, PermissionError):
             decision = "authorization_error"
         elif isinstance(exc, (SuggestionLimitExceededError, SuggestionPaginationError)):
             decision = "incomplete_result"
-        elif stage == "authorization":
+        elif isinstance(exc, AuthzError) or stage == "authorization":
             decision = "authorization_error"
+        elif stage == "audit":
+            decision = "audit_error"
         elif stage == "generation":
             decision = "generation_error"
-        elif stage == "inspection":
-            from ontos.authz.base import AuthzError
-
-            decision = "authorization_error" if isinstance(exc, AuthzError) else "storage_error"
         else:
             decision = "storage_error"
 
-        await _audit_suggestions(
-            audit=audit,
-            subject=subject,
-            agent_identity=agent_identity,
-            identity_assurance=identity_assurance,
-            ontology=ontology,
-            decision=decision,
-            suggestion_refs=[],
-            candidate_count=0,
-            suggestion_count=0,
-            latency_ms=(time.perf_counter() - started) * 1000,
-        )
+        try:
+            await _audit_suggestions(
+                audit=audit,
+                subject=subject,
+                agent_identity=agent_identity,
+                identity_assurance=identity_assurance,
+                ontology=ontology,
+                decision=decision,
+                suggestion_refs=[],
+                candidate_count=len(records),
+                suggestion_count=0,
+                latency_ms=(time.perf_counter() - started) * 1000,
+            )
+        except Exception:
+            # The request must still fail. Preserve the original failure,
+            # rather than replacing it with a secondary audit-write error.
+            raise exc from None
         raise
 
 

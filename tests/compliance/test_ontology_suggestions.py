@@ -357,3 +357,108 @@ async def test_authz_backend_failure_is_classified_correctly(
     for record in audit._chain:
         assert "finance-secret" not in str(record.article12)
         assert "sensitive authorization backend failure" not in str(record.article12)
+
+
+async def test_public_candidates_are_separate_and_visible_to_reviewer() -> None:
+    """Public candidates require reviewer authorization but no private VIEW grant."""
+    store = NetworkxStore()
+    await store.add_candidates(
+        [
+            _candidate("public-document", None),
+            _candidate("private-document", "acl:finance"),
+        ]
+    )
+
+    audit = _audit()
+    suggestions, _ = await _suggest(store, _reviewer(), audit)
+
+    assert len(suggestions) == 1
+    assert suggestions[0].acl_ref is None
+    assert suggestions[0].support_count == 1
+    assert len(suggestions[0].supporting_candidate_refs) == 1
+    assert _request_decisions(audit) == ["request_started", "allow"]
+    assert audit.verify_chain()
+
+
+async def test_final_allow_audit_failure_returns_no_suggestions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final request audit must succeed before results are returned."""
+    store = NetworkxStore()
+    await store.add_candidates([_candidate("finance-1", "acl:finance")])
+    audit = _audit()
+    original_emit = audit.emit
+
+    def fail_final_audit(**kwargs: object):
+        if kwargs.get("tool_invoked") == "ontology_suggestions" and kwargs.get(
+            "policy_decisions"
+        ) == [{"policy": "ontology_suggestions", "result": "allow"}]:
+            raise RuntimeError("final audit unavailable")
+        return original_emit(**kwargs)
+
+    monkeypatch.setattr(audit, "emit", fail_final_audit)
+
+    with pytest.raises(RuntimeError, match="final audit unavailable"):
+        await _suggest(store, _reviewer("acl:finance"), audit)
+
+    assert _request_decisions(audit) == [
+        "request_started",
+        "audit_error",
+    ]
+    assert audit.verify_chain()
+
+
+async def test_reviewer_role_revocation_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Revoking ontology_reviewer mid-request prevents disclosure."""
+    store = NetworkxStore()
+    await store.add_candidates([_candidate("finance-1", "acl:finance")])
+
+    authz = _reviewer("acl:finance")
+    audit = _audit()
+    original_list = store.list_candidate_records
+
+    async def revoke_after_read(**kwargs: object):
+        result = await original_list(**kwargs)
+        authz.revoke("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+        return result
+
+    monkeypatch.setattr(store, "list_candidate_records", revoke_after_read)
+
+    with pytest.raises(PermissionError, match="Ontology suggestions denied"):
+        await _suggest(store, authz, audit)
+
+    assert _request_decisions(audit) == [
+        "request_started",
+        "authorization_error",
+    ]
+    assert audit.verify_chain()
+
+
+async def test_page_audit_failure_is_not_classified_as_storage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A per-page inspection audit outage must be identified correctly."""
+    from ontos.runtime.candidate_inspection import CandidateInspectionAuditError
+
+    store = NetworkxStore()
+    await store.add_candidates([_candidate("finance-1", "acl:finance")])
+    audit = _audit()
+    original_emit = audit.emit
+
+    def fail_inspection_audit(**kwargs: object):
+        if kwargs.get("tool_invoked") == "candidates":
+            raise RuntimeError("inspection audit unavailable")
+        return original_emit(**kwargs)
+
+    monkeypatch.setattr(audit, "emit", fail_inspection_audit)
+
+    with pytest.raises(CandidateInspectionAuditError):
+        await _suggest(store, _reviewer("acl:finance"), audit)
+
+    assert _request_decisions(audit) == [
+        "request_started",
+        "audit_error",
+    ]
+    assert audit.verify_chain()
