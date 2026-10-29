@@ -14,10 +14,64 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-29 - MCP authentication, rejected-candidate retention and ontology suggestions
+
+MCP callers can now be authenticated with JWTs from the customer's own
+IdP, and identity comes from the verified token instead of tool
+arguments. Relationships the ontology rejects can be retained (opt-in)
+in a separate candidate store, inspected, and turned into deterministic
+`add_pattern` suggestions, with audited CLIs gated on
+`ontology_reviewer` plus source-level VIEW. Entities now resolve by
+canonical name and alias. Several security fixes land alongside:
+permission checks on `provenance` / `audit_lookup`, keyed audit
+references for candidates, a hardened export push guard, and an entity
+name leak in Neo4j search. **Read the upgrade notes: this release has
+breaking changes.**
+
 ### Upgrade notes
+- **Breaking: an unauthenticated server no longer binds beyond
+  loopback.** With `ONTOS_AUTH_MODE=none` (the default), `ontos serve`
+  and `python -m ontos.runtime.server` refuse a non-loopback
+  `ONTOS_LISTEN_HOST` such as `0.0.0.0`. To fix:
+  - configure `ONTOS_AUTH_MODE=jwt`, or
+  - set `ONTOS_ALLOW_UNAUTHENTICATED_BIND=1` (dev only).
+  
+  The bundled `docker-compose.yml` sets the opt-in. The Docker image does
+  not, so a bare `docker run` needs one of the two.
+- **Helm:** the chart now defaults to `auth.mode: jwt` and fails to
+  render until `auth.issuer`, `auth.audience` and one key source
+  (`auth.jwksUri` or `auth.publicKeySecretRef.name`) are set. To keep an
+  unauthenticated deployment, set `auth.mode: none` and
+  `auth.allowUnauthenticatedBind: true`.
+- Every MCP Article-12 record now starts with an `authn` entry in
+  `policy_decisions`. Consumers that read `policy_decisions[0]` as the
+  authz decision should match on `policy` instead.
+- **Custom `GraphStore` implementations must add `get_visible_fact(...)`**,
+  the ACL-filtered fact lookup used by read surfaces. `get_fact` remains
+  the unfiltered write-path lookup. Both bundled stores implement it.
+- `provenance` and `audit_lookup` now enforce read permissions (#78).
+  Callers relying on reading facts outside their ACLs, or other
+  principals' audit records, now get `null`. Grant `audit_exporter` on
+  `audit` (OpenFGA) to readers of other principals' records.
 - **Custom `GraphStore` implementations must add
   `search_entities(query, *, as_of, k, acl_subject, allowed_acls)`** (#82).
   Both bundled stores implement it.
+
+### Fixed — release packaging (Tier 0)
+- **The container image now runs the Helm chart's defaults.** It installs
+  the `neo4j` and `authz` (OpenFGA) extras from `uv.lock` in a two-stage
+  build. Before, a default chart install (`ONTOS_STORAGE_BACKEND=neo4j`)
+  failed at startup with `ModuleNotFoundError: No module named 'neo4j'`.
+- **Neo4j schema setup now runs on the runtime path.** `ontos serve`, via
+  the MCP server lifespan, and the `ingest`, `query`, `export`,
+  `ontology candidates` and `ontology suggestions` commands call
+  `Neo4jStore.initialize()`. Production databases previously ran without
+  indexes, without the rejected-candidate uniqueness constraints, and
+  without the candidate migration.
+- **CI builds and smoke-tests the image on every change**: backend imports,
+  non-root uid, and refusal of an unauthenticated public bind. The release
+  workflow also checks that the Helm chart's `version`, `appVersion` and
+  image tag match the release version.
 
 ### Fixed — entity lookup by name (#82)
 - **`search` matches canonical names and aliases.** It now also matches the
@@ -64,43 +118,6 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   `ontology-suggestions-failure-audit-failed` event records both error types.
 - **`OntologySuggestion` validates kind against fields.** `add_pattern`
   requires a pattern; the M2b kinds are rejected until they are specified.
-
-## [0.7.0] - 2026-10-27 - MCP authentication and rejected-candidate retention
-
-MCP callers can now be authenticated with JWTs from the customer's own
-IdP, and identity comes from the verified token instead of tool
-arguments. Relationships the ontology rejects can be retained (opt-in)
-in a separate candidate store and inspected, with an audited CLI gated
-on `ontology_reviewer` plus source-level VIEW. Three security fixes
-land alongside: permission checks on `provenance` / `audit_lookup`,
-keyed audit references for candidates, and a hardened export push
-guard. **Read the upgrade notes: this release has breaking changes.**
-
-### Upgrade notes
-- **Breaking: an unauthenticated server no longer binds beyond
-  loopback.** With `ONTOS_AUTH_MODE=none` (the default), `ontos serve`
-  and `python -m ontos.runtime.server` refuse a non-loopback
-  `ONTOS_LISTEN_HOST` such as `0.0.0.0`. To fix:
-  - configure `ONTOS_AUTH_MODE=jwt`, or
-  - set `ONTOS_ALLOW_UNAUTHENTICATED_BIND=1` (dev only).
-  
-  The bundled `docker-compose.yml` sets the opt-in. The Docker image does
-  not, so a bare `docker run` needs one of the two.
-- **Helm:** the chart now defaults to `auth.mode: jwt` and fails to
-  render until `auth.issuer`, `auth.audience` and one key source
-  (`auth.jwksUri` or `auth.publicKeySecretRef.name`) are set. To keep an
-  unauthenticated deployment, set `auth.mode: none` and
-  `auth.allowUnauthenticatedBind: true`.
-- Every MCP Article-12 record now starts with an `authn` entry in
-  `policy_decisions`. Consumers that read `policy_decisions[0]` as the
-  authz decision should match on `policy` instead.
-- **Custom `GraphStore` implementations must add `get_visible_fact(...)`**,
-  the ACL-filtered fact lookup used by read surfaces. `get_fact` remains
-  the unfiltered write-path lookup. Both bundled stores implement it.
-- `provenance` and `audit_lookup` now enforce read permissions (#78).
-  Callers relying on reading facts outside their ACLs, or other
-  principals' audit records, now get `null`. Grant `audit_exporter` on
-  `audit` (OpenFGA) to readers of other principals' records.
 
 ### Added — rejected-candidate retention and inspection (#66 M1, #68)
 - **`ontos ingest --retain-rejected-candidates`** (off by default) keeps

@@ -62,6 +62,21 @@ jobs:
             exit 1
           fi
 
+      - name: Verify Helm chart and image tag match the version
+        # The chart's default image tag must point at the image this release
+        # pushes; otherwise a fresh install pulls a tag that doesn't exist.
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          CHART_VERSION="$(sed -n 's/^version: *//p' deploy/helm/ontos/Chart.yaml)"
+          APP_VERSION="$(sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' deploy/helm/ontos/Chart.yaml)"
+          IMAGE_TAG="$(sed -n 's/^  tag: *//p' deploy/helm/ontos/values.yaml)"
+          for pair in "Chart.yaml version=$CHART_VERSION" "Chart.yaml appVersion=$APP_VERSION" "values.yaml image.tag=$IMAGE_TAG"; do
+            if [[ "${pair##*=}" != "$VERSION" ]]; then
+              echo "ERROR: ${pair%%=*} is '${pair##*=}', expected '$VERSION'"
+              exit 1
+            fi
+          done
+
       - name: Build sdist + wheel
         run: uv build
 
