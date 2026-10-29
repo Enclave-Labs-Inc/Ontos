@@ -22,6 +22,7 @@ Indexes and constraints are created idempotently on `initialize()`.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Iterable
 from datetime import datetime
@@ -63,6 +64,24 @@ def _fact_to_edge_props(fact: Fact) -> dict[str, Any]:
         "prov_confidence": fact.provenance.confidence.value,
         "prov_confidence_score": fact.provenance.confidence_score,
     }
+
+
+def _stored_entity_from_props(entity_id: str, props: dict[str, Any]) -> StoredEntity:
+    properties_raw = props.get("properties")
+    properties: dict[str, str] = {}
+    if isinstance(properties_raw, str):
+        with contextlib.suppress(json.JSONDecodeError):
+            properties = json.loads(properties_raw)
+    return StoredEntity(
+        id=entity_id,
+        type=props.get("type"),
+        canonical_name=props.get("canonical_name"),
+        aliases=list(props.get("aliases") or []),
+        properties=properties,
+        provenance_source_id=props.get("provenance_source_id"),
+        provenance_extractor_id=props.get("provenance_extractor_id"),
+        acl_ref=props.get("acl_ref"),
+    )
 
 
 def _edge_props_to_fact(subject_id: str, object_id: str, props: dict[str, Any]) -> Fact:
@@ -542,8 +561,10 @@ class Neo4jStore:
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
     ) -> list[Fact]:
-        # M1.b uses substring match — mirrors NetworkxStore for parity.
-        # M3 upgrades to full-text + vector hybrid.
+        # Substring match over ids, predicate, and names/aliases of endpoint
+        # entities the caller can see — same rule as NetworkxStore (#82).
+        # Entity names carry the entity's ACL, not the fact's. M3 upgrades
+        # to full-text + vector hybrid.
         cypher = """
         MATCH (a:Entity)-[r:RELATES]->(b:Entity)
         WHERE
@@ -561,16 +582,34 @@ class Neo4jStore:
                 OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
                     AND r.acl_ref = $acl_subject)
             )
-            AND toLower(coalesce(a.canonical_name, "") + " "
-                        + r.predicate + " "
-                        + coalesce(b.canonical_name, "")) CONTAINS toLower($needle)
+            AND (
+                toLower(a.id + " " + r.predicate + " " + b.id) CONTAINS $needle
+                OR (
+                    (a.acl_ref IS NULL
+                     OR ($allowed_acls IS NOT NULL AND a.acl_ref IN $allowed_acls)
+                     OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                         AND a.acl_ref = $acl_subject))
+                    AND (toLower(coalesce(a.canonical_name, "")) CONTAINS $needle
+                         OR any(alias IN coalesce(a.aliases, [])
+                                WHERE toLower(alias) CONTAINS $needle))
+                )
+                OR (
+                    (b.acl_ref IS NULL
+                     OR ($allowed_acls IS NOT NULL AND b.acl_ref IN $allowed_acls)
+                     OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                         AND b.acl_ref = $acl_subject))
+                    AND (toLower(coalesce(b.canonical_name, "")) CONTAINS $needle
+                         OR any(alias IN coalesce(b.aliases, [])
+                                WHERE toLower(alias) CONTAINS $needle))
+                )
+            )
         RETURN a.id AS subject_id, b.id AS object_id, properties(r) AS props
         LIMIT $k
         """
         async with self._driver.session(database=self._database) as session:
             result = await session.run(
                 cypher,
-                needle=query,
+                needle=query.lower(),
                 as_of=as_of,
                 acl_subject=acl_subject,
                 allowed_acls=allowed_acls,
@@ -578,6 +617,58 @@ class Neo4jStore:
             )
             records = await result.data()
         return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]
+
+    async def search_entities(
+        self,
+        query: str,
+        *,
+        as_of: datetime | None = None,
+        k: int = 10,
+        acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
+    ) -> list[StoredEntity]:
+        cypher = """
+        MATCH (n:Entity)
+        WHERE
+            (n.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND n.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND n.acl_ref = $acl_subject))
+            AND (toLower(n.id) CONTAINS $needle
+                 OR toLower(coalesce(n.canonical_name, "")) CONTAINS $needle
+                 OR any(alias IN coalesce(n.aliases, []) WHERE toLower(alias) CONTAINS $needle))
+            // Raw nodes carry no ACL of their own: require a fact the caller
+            // can see, or an entity known only via forbidden facts would leak.
+            AND EXISTS {
+                MATCH (n)-[r:RELATES]-(:Entity)
+                WHERE ((($as_of IS NULL AND r.t_invalid IS NULL)
+                        OR ($as_of IS NOT NULL AND r.t_valid <= $as_of
+                            AND (r.t_invalid IS NULL OR r.t_invalid > $as_of))))
+                  AND (r.acl_ref IS NULL
+                       OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
+                       OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                           AND r.acl_ref = $acl_subject))
+            }
+        WITH n,
+             CASE WHEN toLower(n.id) = $needle
+                    OR toLower(coalesce(n.canonical_name, "")) = $needle
+                    OR any(alias IN coalesce(n.aliases, []) WHERE toLower(alias) = $needle)
+                  THEN 0 ELSE 1 END AS rank
+        RETURN n.id AS id, properties(n) AS props
+        ORDER BY rank, n.id
+        LIMIT $k
+        """
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                cypher,
+                needle=query.lower(),
+                as_of=as_of,
+                k=k,
+                acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
+            )
+            rows = await result.data()
+        return [_stored_entity_from_props(row["id"], row["props"]) for row in rows]
 
     async def traverse(
         self,
@@ -704,28 +795,7 @@ class Neo4jStore:
 
         entities: list[StoredEntity] = []
         for row in rows:
-            props = row["props"]
-            properties_raw = props.get("properties")
-            if isinstance(properties_raw, str):
-                try:
-                    properties = json.loads(properties_raw)
-                except json.JSONDecodeError:
-                    properties = {}
-            else:
-                properties = {}
-
-            entities.append(
-                StoredEntity(
-                    id=row["id"],
-                    type=props.get("type"),
-                    canonical_name=props.get("canonical_name"),
-                    aliases=list(props.get("aliases") or []),
-                    properties=properties,
-                    provenance_source_id=props.get("provenance_source_id"),
-                    provenance_extractor_id=props.get("provenance_extractor_id"),
-                    acl_ref=props.get("acl_ref"),
-                )
-            )
+            entities.append(_stored_entity_from_props(row["id"], row["props"]))
 
         return entities
 
@@ -882,28 +952,7 @@ class Neo4jStore:
 
         entities: list[StoredEntity] = []
         for row in entity_rows:
-            props = row["props"]
-            properties_raw = props.get("properties")
-            if isinstance(properties_raw, str):
-                try:
-                    properties = json.loads(properties_raw)
-                except json.JSONDecodeError:
-                    properties = {}
-            else:
-                properties = {}
-
-            entities.append(
-                StoredEntity(
-                    id=row["id"],
-                    type=props.get("type"),
-                    canonical_name=props.get("canonical_name"),
-                    aliases=list(props.get("aliases") or []),
-                    properties=properties,
-                    provenance_source_id=props.get("provenance_source_id"),
-                    provenance_extractor_id=props.get("provenance_extractor_id"),
-                    acl_ref=props.get("acl_ref"),
-                )
-            )
+            entities.append(_stored_entity_from_props(row["id"], row["props"]))
 
         facts = [
             _edge_props_to_fact(

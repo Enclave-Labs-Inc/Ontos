@@ -284,6 +284,25 @@ class GraphStore(Protocol):
         allowed_acls: list[str] | None = None,
     ) -> list[Fact]: ...
 
+    async def search_entities(
+        self,
+        query: str,
+        *,
+        as_of: datetime | None = None,
+        k: int = 10,
+        acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
+    ) -> list[StoredEntity]:
+        """Entities whose id, canonical name or alias contains `query`.
+
+        Case-insensitive; exact matches rank first. An entity matches only
+        if the caller may see it AND at least one fact touching it that is
+        alive at `as_of`. Raw nodes created by `add_fact` carry no ACL of
+        their own, so the entity check alone would reveal entities known
+        only through forbidden facts (#82).
+        """
+        ...
+
     async def traverse(
         self,
         start: str,

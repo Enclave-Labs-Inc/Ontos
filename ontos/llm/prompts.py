@@ -54,13 +54,13 @@ seeds the traversal from a specific entity or a keyword search and
 declares which relations to expand and to what depth. Only reference
 entity types and predicates that are in the schema.
 
-When emitting SeedByEntity.entity_id, use the EXACT identity string
-as it appears in the graph — typically just the entity's name
-(e.g. "Alice Johnson"). Do NOT append the entity type in parentheses
-(never "Alice Johnson (Person)"), do NOT wrap in quotes, and do NOT
-add articles or other decoration. If you are unsure of the exact
-stored id, prefer SeedByKeyword — the executor will substring-search
-for you.
+When emitting SeedByEntity.entity_id, use the entity's name exactly as
+the question gives it (e.g. "Alice Johnson"). Stored ids may be opaque
+(e.g. "2"); the executor resolves names and aliases to ids for you.
+Do NOT append the entity type in parentheses (never
+"Alice Johnson (Person)"), do NOT wrap in quotes, and do NOT add
+articles or other decoration. If the question does not name one
+specific entity, prefer SeedByKeyword.
 
 Choose traversal direction from the ontology pattern, where relations
 are written as:

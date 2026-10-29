@@ -191,8 +191,8 @@ class DeterministicExecutor:
         operator can see resolution happened:
           1. Exact match — id is already correct, no warning.
           2. Strip trailing " (Type)" annotation and retry.
-          3. Search the store for the cleaned-up name. Resolve ONLY
-             when there is a single unambiguous candidate; on
+          3. Search entities by id, canonical name or alias (#82).
+             Resolve ONLY when there is a single unambiguous candidate; on
              multiple matches, emit an ambiguity warning naming the
              candidates and return None instead of guessing.
         Returns None if all three miss OR if the search fallback is
@@ -235,41 +235,35 @@ class DeterministicExecutor:
         # warning on top of whatever we resolve. Refusing to resolve on
         # saturation would break every entity with ≥50 facts.
         needle = _TYPE_SUFFIX_RE.sub("", entity_id).strip() or entity_id
-        hits = await store.search(
+        # Resolve against entity ids, canonical names and aliases (#82): ids
+        # are often opaque ("2"), so matching endpoint ids alone missed
+        # "Atlas Robotics". The store only matches entities the caller can
+        # see through at least one visible fact, so nothing hidden is echoed.
+        # Searching entities rather than facts also means a popular entity
+        # can no longer crowd namesakes out of a fact window.
+        matches = await store.search_entities(
             needle,
             as_of=as_of,
             k=_SEED_FALLBACK_SEARCH_K,
             acl_subject=acl_subject,
             allowed_acls=allowed_acls,
         )
-        candidates: list[str] = []
-        seen_candidates: set[str] = set()
-        needle_lower = needle.lower()
-        for f in hits:
-            for endpoint in (f.subject_id, f.object_id):
-                if needle_lower in endpoint.lower() and endpoint not in seen_candidates:
-                    candidates.append(endpoint)
-                    seen_candidates.add(endpoint)
-
-        window_saturated = len(hits) >= _SEED_FALLBACK_SEARCH_K
+        candidates = [entity.id for entity in matches]
 
         if len(candidates) == 1:
             warnings.append(
                 f"seed entity {entity_id!r} resolved to "
                 f"{candidates[0]!r} via keyword search fallback"
             )
-            if window_saturated:
-                warnings.append(
-                    f"seed entity {entity_id!r} search window was "
-                    f"saturated (k={_SEED_FALLBACK_SEARCH_K}) — "
-                    "additional substring-matching entities may exist "
-                    "beyond the window; use SeedByKeyword or pass an "
-                    "exact id if the resolved entity is wrong"
-                )
             return candidates[0]
         if len(candidates) > 1:
             preview = ", ".join(repr(c) for c in candidates[:5])
-            tail = "" if len(candidates) <= 5 else f", ... ({len(candidates)} total)"
+            total = (
+                f"{len(candidates)}+"
+                if len(matches) >= _SEED_FALLBACK_SEARCH_K
+                else str(len(candidates))
+            )
+            tail = "" if len(candidates) <= 5 else f", ... ({total} total)"
             warnings.append(
                 f"seed entity {entity_id!r} matches multiple graph "
                 f"entities via keyword search ({preview}{tail}); "

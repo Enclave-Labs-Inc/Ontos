@@ -243,58 +243,32 @@ async def test_unambiguous_keyword_fallback_still_resolves(
     assert any("keyword search fallback" in w for w in result.warnings)
 
 
-async def test_saturated_search_window_still_resolves_with_warning(
+def _works_at_fact(subject: str, obj: str, source: str) -> Fact:
+    now = datetime.now(UTC)
+    return Fact(
+        subject_id=subject,
+        predicate="works_at",
+        object_id=obj,
+        provenance=Provenance(
+            source_id=source,
+            extractor_id="test",
+            extractor_version="0.0.0",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+        t_valid=now,
+        ingested_at=now,
+    )
+
+
+async def test_popular_entity_resolves_without_window_saturation(
     ontology: Ontology,
 ) -> None:
-    """A popular entity crowding the search window emits a saturation warning.
-
-    Per the reviewer's PR #20 follow-up: the ambiguity guard only sees
-    endpoints inside the top-k search window. If the window is saturated
-    by one popular entity, a longer-named sibling could be beyond it and
-    get silently excluded from the candidate set. We now emit an extra
-    "possibly-incomplete" warning on top of the resolution so operators
-    see the risk.
-    """
+    """#82: the fallback searches entities, not facts, so an entity with
+    more than k facts is still one candidate and resolves cleanly."""
     store = NetworkxStore()
-    now = datetime.now(UTC)
-    # 60 facts about "Acme Corp" — well over k=50 so the window saturates.
     for i in range(60):
-        await store.add_fact(
-            Fact(
-                subject_id=f"Person-{i}",
-                predicate="works_at",
-                object_id="Acme Corp",
-                provenance=Provenance(
-                    source_id=f"doc-{i}",
-                    extractor_id="test",
-                    extractor_version="0.0.0",
-                    confidence=Confidence.EXTRACTED,
-                    confidence_score=1.0,
-                ),
-                t_valid=now,
-                ingested_at=now,
-            )
-        )
-
-    # Add one outgoing edge from Acme Corp so expansion has something to
-    # walk — the point of this test is seed resolution, not whether
-    # traversal from Acme Corp finds things.
-    await store.add_fact(
-        Fact(
-            subject_id="Acme Corp",
-            predicate="acquired",
-            object_id="Widget Inc",
-            provenance=Provenance(
-                source_id="doc-outgoing",
-                extractor_id="test",
-                extractor_version="0.0.0",
-                confidence=Confidence.EXTRACTED,
-                confidence_score=1.0,
-            ),
-            t_valid=now,
-            ingested_at=now,
-        )
-    )
+        await store.add_fact(_works_at_fact(f"Person-{i}", "Acme Corp", f"doc-{i}"))
 
     plan = Plan.build(
         seed=SeedByEntity(entity_id="acme corp"),  # lowercase → forces search
@@ -303,19 +277,33 @@ async def test_saturated_search_window_still_resolves_with_warning(
     )
     result = await DeterministicExecutor().execute(plan, store)
 
-    # Resolution still succeeds — only one entity is in the window.
     assert result.hits
-    # But the saturation warning must fire so the operator can see a
-    # longer-named sibling could have been crowded out.
-    saturation_warnings = [
-        w for w in result.warnings if "search window was saturated" in w and "k=50" in w
-    ]
-    assert saturation_warnings, (
-        "a saturated search window must surface a 'possibly-incomplete' "
-        f"warning alongside the resolution; got warnings={result.warnings}"
-    )
-    # And the normal resolution warning still fires.
     assert any("keyword search fallback" in w for w in result.warnings)
+    assert not any("saturated" in w for w in result.warnings)
+
+
+async def test_popular_entity_no_longer_crowds_out_namesake(
+    ontology: Ontology,
+) -> None:
+    """Under the old fact-window search, 60 facts about "Acme Corp" filled
+    the k=50 window and hid "Acme Corp Holdings", so the seed silently
+    resolved to the popular entity. Both are now candidates, so the
+    executor refuses to guess."""
+    store = NetworkxStore()
+    for i in range(60):
+        await store.add_fact(_works_at_fact(f"Person-{i}", "Acme Corp", f"doc-{i}"))
+    await store.add_fact(_works_at_fact("Zed", "Acme Corp Holdings", "doc-z"))
+
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="acme corp"),
+        steps=[TraversalStep(depth=1)],
+        ontology=ontology,
+    )
+    result = await DeterministicExecutor().execute(plan, store)
+
+    assert result.hits == []
+    ambiguity = [w for w in result.warnings if "refusing to guess" in w]
+    assert ambiguity and "'Acme Corp Holdings'" in ambiguity[0]
 
 
 async def test_legitimate_name_with_parens_not_clobbered(
