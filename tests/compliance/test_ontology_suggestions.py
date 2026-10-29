@@ -13,6 +13,7 @@ from ontos.ontology.loader import EntityType, Ontology, Pattern, RelationType
 from ontos.runtime.candidate_inspection import CandidateInspectionDeniedError
 from ontos.runtime.models import ArticleTwelveField
 from ontos.runtime.ontology_suggestions import list_ontology_suggestions
+from ontos.storage.base import candidate_storage_id
 from ontos.storage.networkx_store import NetworkxStore
 
 
@@ -194,8 +195,11 @@ async def test_audit_does_not_contain_raw_candidate_ids() -> None:
     assert len(suggestions) == 1
     assert "secret-document" not in suggestions[0].model_dump_json()
 
+    raw_id = candidate_storage_id(candidate)
     for record in audit._chain:
         assert "secret-document" not in str(record.article12)
+        # The property HMAC references exist for (#72): no raw storage ids.
+        assert raw_id not in str(record.article12)
 
 
 async def test_storage_failure_is_audited(
@@ -310,12 +314,12 @@ async def test_view_revocation_during_retrieval_fails_closed(
 
     monkeypatch.setattr(store, "list_candidate_records", revoke_after_read)
 
-    with pytest.raises(PermissionError, match="Ontology suggestions denied"):
+    with pytest.raises(CandidateInspectionDeniedError, match="Ontology suggestions denied"):
         await _suggest(store, authz, audit)
 
     assert _request_decisions(audit) == [
         "request_started",
-        "authorization_error",
+        "deny",
     ]
     assert audit.verify_chain()
 
@@ -426,12 +430,12 @@ async def test_reviewer_role_revocation_fails_closed(
 
     monkeypatch.setattr(store, "list_candidate_records", revoke_after_read)
 
-    with pytest.raises(PermissionError, match="Ontology suggestions denied"):
+    with pytest.raises(CandidateInspectionDeniedError, match="Ontology suggestions denied"):
         await _suggest(store, authz, audit)
 
     assert _request_decisions(audit) == [
         "request_started",
-        "authorization_error",
+        "deny",
     ]
     assert audit.verify_chain()
 
@@ -462,3 +466,38 @@ async def test_page_audit_failure_is_not_classified_as_storage_error(
         "audit_error",
     ]
     assert audit.verify_chain()
+
+
+async def test_failed_failure_audit_is_logged_and_original_error_raised() -> None:
+    """#85: when the audit sink fails after `request_started`, the trail has
+    no outcome record, so the secondary failure must at least be logged."""
+    from structlog.testing import capture_logs
+
+    from ontos.runtime.candidate_inspection import CandidateInspectionAuditError
+
+    class SinkDownAfterStart(AuditEmitter):
+        def emit(self, **kwargs):  # type: ignore[no-untyped-def]
+            decisions = kwargs["policy_decisions"]
+            if decisions[0]["result"] != "request_started":
+                raise ConnectionError("audit sink down")
+            return super().emit(**kwargs)
+
+    store = NetworkxStore()
+    await store.add_candidates([_candidate("finance-1", "acl:finance")])
+    audit = SinkDownAfterStart(signing_key=b"suggestions-test-key")
+
+    with capture_logs() as logs, pytest.raises(CandidateInspectionAuditError):
+        await _suggest(store, _reviewer("acl:finance"), audit)
+
+    events = [
+        entry for entry in logs if entry["event"] == "ontology-suggestions-failure-audit-failed"
+    ]
+    assert events == [
+        {
+            "event": "ontology-suggestions-failure-audit-failed",
+            "error_type": "ConnectionError",
+            "original_error_type": "CandidateInspectionAuditError",
+            "log_level": "error",
+        }
+    ]
+    assert "audit sink down" not in str(logs)

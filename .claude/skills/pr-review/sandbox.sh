@@ -69,8 +69,10 @@ run "ruff format --check (changed files)" \
   bash -c '[[ $# -eq 0 ]] && echo "no python changes" || uv run ruff format --check "$@"' _ ${changed_py[@]+"${changed_py[@]}"}
 # ^ bash < 4.4 treats "${arr[@]}" on an empty array as unbound under `set -u`.
 run "mypy --strict" uv run mypy ontos
-run "pytest compliance (gate-blocking)" uv run pytest -q tests/compliance
-run "pytest unit" uv run pytest -q -m "not integration and not benchmark" --ignore=tests/compliance
+# GITHUB_ACTIONS=true mirrors CI: rich renders help differently there, and
+# twice (#68, #84) a test passed locally but failed on GitHub (#85).
+run "pytest compliance (gate-blocking)" env GITHUB_ACTIONS=true uv run pytest -q tests/compliance
+run "pytest unit" env GITHUB_ACTIONS=true uv run pytest -q -m "not integration and not benchmark" --ignore=tests/compliance
 
 echo "overall: $([[ $status -eq 0 ]] && echo PASS || echo FAIL)" >> "$report"
 echo "worktree: $wt"

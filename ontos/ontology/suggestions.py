@@ -10,7 +10,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ontos.ontology.loader import Ontology, Pattern
 from ontos.runtime.candidate_inspection import candidate_audit_reference
@@ -32,6 +32,17 @@ class OntologySuggestion(BaseModel):
     generated_at: datetime
 
     model_config = ConfigDict(frozen=True)
+
+    @model_validator(mode="after")
+    def _fields_match_kind(self) -> OntologySuggestion:
+        # Only `add_pattern` exists in M2a. The LLM-assisted kinds land in
+        # M2b with their own fields; until then reject them instead of
+        # letting a half-specified suggestion reach a reviewer (#85).
+        if self.kind != "add_pattern":
+            raise ValueError(f"suggestion kind {self.kind!r} is not supported yet")
+        if self.pattern is None:
+            raise ValueError("add_pattern suggestions require a pattern")
+        return self
 
 
 def suggest_missing_patterns(

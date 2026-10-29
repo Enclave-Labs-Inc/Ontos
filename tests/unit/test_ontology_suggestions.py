@@ -208,3 +208,43 @@ def test_reextracting_same_relationship_does_not_inflate_support() -> None:
     assert len(suggestions) == 1
     assert suggestions[0].support_count == 1
     assert len(suggestions[0].supporting_candidate_refs) == 2
+
+
+def _suggestion_fields(**overrides: object) -> dict[str, object]:
+    fields: dict[str, object] = {
+        "kind": "add_pattern",
+        "pattern": Pattern(subject_type="Person", predicate="works_at", object_type="Company"),
+        "acl_ref": "acl:finance",
+        "support_count": 1,
+        "supporting_candidate_refs": ["ref"],
+        "generator_id": "test",
+        "generator_version": "1",
+        "ontology_id": "o",
+        "ontology_version": "1",
+        "generated_at": datetime(2026, 1, 1, tzinfo=UTC),
+    }
+    fields.update(overrides)
+    return fields
+
+
+def test_add_pattern_suggestion_requires_pattern() -> None:
+    """#85: kind and fields must agree."""
+    import pytest
+    from pydantic import ValidationError
+
+    from ontos.ontology.suggestions import OntologySuggestion
+
+    OntologySuggestion(**_suggestion_fields())  # type: ignore[arg-type]
+    with pytest.raises(ValidationError, match="require a pattern"):
+        OntologySuggestion(**_suggestion_fields(pattern=None))  # type: ignore[arg-type]
+
+
+def test_m2b_suggestion_kinds_are_rejected_until_specified() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from ontos.ontology.suggestions import OntologySuggestion
+
+    for kind in ("map_to_existing", "new_relation_type"):
+        with pytest.raises(ValidationError, match="not supported yet"):
+            OntologySuggestion(**_suggestion_fields(kind=kind))  # type: ignore[arg-type]
