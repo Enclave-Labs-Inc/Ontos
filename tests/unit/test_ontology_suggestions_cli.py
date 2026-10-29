@@ -21,12 +21,17 @@ def test_suggestions_command_registered() -> None:
 
 
 def test_suggestions_list_help() -> None:
-    result = runner.invoke(app, ["ontology", "suggestions", "list", "--help"])
+    # Introspect the parsed command rather than rendered help: under
+    # GITHUB_ACTIONS rich ignores COLUMNS and truncates long option names.
+    import typer
 
-    assert result.exit_code == 0
-    assert "--acting-on-behalf-of" in result.stdout
-    assert "--ontology" in result.stdout
-    assert "--storage-path" in result.stdout
+    root = typer.main.get_command(app)
+    ontology = root.commands["ontology"]  # type: ignore[attr-defined]
+    command = ontology.commands["suggestions"].commands["list"]
+    options = {opt for param in command.params for opt in param.opts}
+
+    assert {"--acting-on-behalf-of", "--ontology", "--storage-path"} <= options
+    assert runner.invoke(app, ["ontology", "suggestions", "list", "--help"]).exit_code == 0
 
 
 def test_suggestions_requires_identity_and_ontology() -> None:
