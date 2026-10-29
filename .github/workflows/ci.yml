@@ -83,6 +83,32 @@ jobs:
             exit 1
           fi
 
+  docker:
+    # The image was only ever built by the release workflow, so a broken
+    # Dockerfile (e.g. missing the neo4j/openfga extras the Helm defaults
+    # need) surfaced only at release time.
+    name: docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image (deploy/Dockerfile)
+        run: docker build -f deploy/Dockerfile -t ontos:ci .
+
+      - name: Smoke-test image
+        run: |
+          # Backends the Helm chart enables by default must be importable.
+          docker run --rm ontos:ci python -c \
+            "import ontos, ontos.storage.neo4j_store, ontos.authz.openfga; print(ontos.__version__)"
+          # Non-root, as the chart's securityContext requires.
+          test "$(docker run --rm ontos:ci id -u)" = "1000"
+          # The default entrypoint must refuse an unauthenticated public bind (#69).
+          if docker run --rm -e ONTOS_AUDIT_SIGNING_KEY=ci ontos:ci; then
+            echo "image served without auth on 0.0.0.0; expected refusal" >&2
+            exit 1
+          fi
+
   test-macos-arm64:
     # Apple Silicon reports platform_machine == "arm64", which several
     # wheels' environment markers miss (e.g. greenlet via SQLAlchemy, #58).

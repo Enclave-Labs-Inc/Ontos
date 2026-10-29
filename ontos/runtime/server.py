@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
@@ -83,6 +85,19 @@ class SnapshotMetadata(BaseModel):
     format: str
     ontology_id: str
     ontology_version: str
+
+
+async def initialize_store(store: object) -> None:
+    """Run the backend's idempotent schema setup, if it has one.
+
+    Neo4j creates its indexes, uniqueness constraints and the candidate
+    migration in `initialize()`. Nothing on the runtime path called it, so
+    production databases ran without them. Call this on the event loop
+    that will use the store: the Neo4j async driver binds its pool to it.
+    """
+    initialize = getattr(store, "initialize", None)
+    if initialize is not None:
+        await initialize()
 
 
 def build_store(config: RuntimeConfig) -> GraphStore:
@@ -190,7 +205,13 @@ def build_server(
         ]
 
     auth_mode = parse_auth_mode(cfg.auth_mode)
-    mcp = FastMCP("ontos", auth=build_token_verifier(cfg))
+
+    @asynccontextmanager
+    async def _lifespan(_: FastMCP[Any]) -> AsyncIterator[dict[str, Any]]:
+        await initialize_store(store)
+        yield {}
+
+    mcp = FastMCP("ontos", auth=build_token_verifier(cfg), lifespan=_lifespan)
 
     def _emit(
         *,

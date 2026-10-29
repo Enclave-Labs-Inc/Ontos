@@ -526,7 +526,10 @@ def ingest(
     )
 
     async def _run_pipeline() -> None:
+        from ontos.runtime.server import initialize_store
+
         try:
+            await initialize_store(store)
             report = await pipeline.run()
             typer.echo(report.model_dump_json(indent=2))
             _echo_llm_usage(llm)
@@ -640,7 +643,10 @@ def query(
     store = build_store(cfg)
 
     async def _run() -> None:
+        from ontos.runtime.server import initialize_store
+
         try:
+            await initialize_store(store)
             plan = await planner.plan(question, ontology)
             result = await executor.execute(plan, store)
             typer.echo(
@@ -799,7 +805,10 @@ def _scan_for_export(
     store = build_store(cfg)
 
     async def _run() -> GraphScan:
+        from ontos.runtime.server import initialize_store
+
         try:
+            await initialize_store(store)
             if include_acl_mask:
                 if authz is None:
                     raise typer.BadParameter(
@@ -1487,7 +1496,7 @@ def ontology_candidates_list(
         audit_inspection_failure,
         inspect_candidates,
     )
-    from ontos.runtime.server import build_authz, build_store
+    from ontos.runtime.server import build_authz, build_store, initialize_store
     from ontos.storage.base import CandidateStore, InvalidCandidateCursorError
 
     storage_url, storage_password_env = _cli_storage_override(ctx)
@@ -1556,6 +1565,7 @@ def ontology_candidates_list(
                 store = build_store(cfg)
                 if not isinstance(store, CandidateStore):
                     raise TypeError("storage backend does not support candidates")
+                await initialize_store(store)
             except Exception as exc:
                 log.error("candidate-inspection-store-setup-failed", error_type=type(exc).__name__)
                 await _audit_setup_failure("storage_error")
@@ -1649,7 +1659,7 @@ def ontology_suggestions_list(
         audit_suggestion_setup_failure,
         list_ontology_suggestions,
     )
-    from ontos.runtime.server import build_authz, build_store
+    from ontos.runtime.server import build_authz, build_store, initialize_store
     from ontos.storage.base import CandidateStore
 
     log = structlog.get_logger()
@@ -1722,6 +1732,7 @@ def ontology_suggestions_list(
                 store = build_store(cfg)
                 if not isinstance(store, CandidateStore):
                     raise TypeError("Storage backend does not support candidates")
+                await initialize_store(store)
             except Exception as exc:
                 log.error(
                     "ontology-suggestions-store-setup-failed",
