@@ -1607,6 +1607,179 @@ def ontology_candidates_list(
     asyncio.run(_run())
 
 
+suggestions_app = typer.Typer(
+    help="Review on-demand ontology suggestions.",
+    no_args_is_help=True,
+)
+ontology_app.add_typer(suggestions_app, name="suggestions")
+
+
+@suggestions_app.command("list")
+def ontology_suggestions_list(
+    ctx: typer.Context,
+    acting_on_behalf_of: Annotated[
+        str,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Operator-asserted subject identity (not authenticated).",
+        ),
+    ],
+    ontology_path: Annotated[
+        Path,
+        typer.Option(
+            "--ontology",
+            help="Current ontology YAML used to validate proposals.",
+        ),
+    ],
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help="Local NetworkX storage path, if not using --storage.",
+        ),
+    ] = None,
+) -> None:
+    """List deterministic M2a proposals for an authorized local reviewer."""
+    import structlog
+
+    from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.ontology import load_ontology
+    from ontos.runtime.candidate_inspection import CandidateInspectionDeniedError
+    from ontos.runtime.ontology_suggestions import (
+        audit_suggestion_setup_failure,
+        list_ontology_suggestions,
+    )
+    from ontos.runtime.server import build_authz, build_store
+    from ontos.storage.base import CandidateStore
+
+    log = structlog.get_logger()
+    storage_url, storage_password_env = _cli_storage_override(ctx)
+
+    if storage_url is not None and storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    try:
+        ontology = load_ontology(ontology_path)
+    except Exception:
+        typer.echo("Unable to load ontology.", err=True)
+        raise typer.Exit(code=2) from None
+
+    resolved_path = None if storage_url is not None else _resolve_storage_path(storage_path)
+
+    cfg = _build_cli_runtime_config(
+        resolved_path,
+        storage_url=storage_url,
+        storage_password_env=storage_password_env,
+    )
+
+    if not cfg.audit_db_url:
+        typer.echo("Persistent audit database is required.", err=True)
+        raise typer.Exit(code=2)
+
+    if not os.environ.get(cfg.audit_signing_key_env):
+        typer.echo("Audit signing key is required.", err=True)
+        raise typer.Exit(code=2)
+
+    audit = PostgresAuditEmitter.from_url(
+        cfg.audit_db_url,
+        signing_key_env=cfg.audit_signing_key_env,
+    )
+
+    async def _run() -> None:
+        store = None
+        try:
+            try:
+                await audit.initialize()
+            except Exception as exc:
+                log.error(
+                    "ontology-suggestions-audit-unavailable",
+                    error_type=type(exc).__name__,
+                )
+                typer.echo(
+                    "Audit store unavailable; no candidates were read.",
+                    err=True,
+                )
+                raise typer.Exit(code=1) from None
+
+            try:
+                authz = build_authz(cfg)
+            except Exception as exc:
+                log.error(
+                    "ontology-suggestions-authz-setup-failed",
+                    error_type=type(exc).__name__,
+                )
+                await audit_suggestion_setup_failure(
+                    audit=audit,
+                    subject=acting_on_behalf_of,
+                    agent_identity="ontos-cli-local-operator",
+                    ontology=ontology,
+                    decision="authorization_error",
+                )
+                typer.echo("Suggestions authorization unavailable.", err=True)
+                raise typer.Exit(code=1) from None
+
+            try:
+                store = build_store(cfg)
+                if not isinstance(store, CandidateStore):
+                    raise TypeError("Storage backend does not support candidates")
+            except Exception as exc:
+                log.error(
+                    "ontology-suggestions-store-setup-failed",
+                    error_type=type(exc).__name__,
+                )
+                await audit_suggestion_setup_failure(
+                    audit=audit,
+                    subject=acting_on_behalf_of,
+                    agent_identity="ontos-cli-local-operator",
+                    ontology=ontology,
+                    decision="storage_error",
+                )
+                typer.echo("Candidate storage unavailable.", err=True)
+                raise typer.Exit(code=1) from None
+
+            suggestions, _ = await list_ontology_suggestions(
+                candidate_store=store,
+                authz=authz,
+                audit=audit,
+                ontology=ontology,
+                subject=acting_on_behalf_of,
+                agent_identity="ontos-cli-local-operator",
+                identity_assurance="operator_asserted",
+            )
+
+            typer.echo(
+                json.dumps(
+                    {
+                        "ontology_id": ontology.id,
+                        "ontology_version": ontology.version,
+                        "suggestions": [
+                            suggestion.model_dump(mode="json") for suggestion in suggestions
+                        ],
+                    },
+                    indent=2,
+                )
+            )
+
+        except typer.Exit:
+            raise
+        except CandidateInspectionDeniedError:
+            typer.echo("Ontology suggestions denied.", err=True)
+            raise typer.Exit(code=1) from None
+        except Exception as exc:
+            log.error(
+                "ontology-suggestions-failed",
+                error_type=type(exc).__name__,
+            )
+            typer.echo("Ontology suggestions failed.", err=True)
+            raise typer.Exit(code=1) from None
+        finally:
+            if store is not None:
+                await _close_store_without_masking(store)
+            await _close_store_without_masking(audit)
+
+    asyncio.run(_run())
+
+
 audit_app = typer.Typer(help="Audit chain commands.")
 app.add_typer(audit_app, name="audit")
 

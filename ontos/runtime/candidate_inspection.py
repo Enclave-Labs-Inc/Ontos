@@ -43,6 +43,10 @@ def candidate_audit_reference(reference_key: bytes, value: str) -> str:
     return hmac.new(reference_key, value.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+class CandidateInspectionAuditError(RuntimeError):
+    """An inspection audit write failed; candidate disclosure is forbidden."""
+
+
 class CandidateInspectionRequestError(ValueError):
     """The inspection request itself is invalid (limit out of range)."""
 
@@ -186,17 +190,20 @@ async def inspect_candidates(
     cursor_reference = _cursor_reference(audit, after)
 
     async def emit(decision: str, disclosed_ids: list[str] | None = None) -> AuditRecord:
-        return await _emit_inspection_record(
-            audit,
-            agent_identity=agent_identity,
-            subject=subject,
-            limit=limit,
-            identity_assurance=identity_assurance,
-            after_ref=cursor_reference,
-            decision=decision,
-            disclosed_refs=disclosed_ids or [],
-            latency_ms=(time.perf_counter() - started) * 1000,
-        )
+        try:
+            return await _emit_inspection_record(
+                audit,
+                agent_identity=agent_identity,
+                subject=subject,
+                limit=limit,
+                identity_assurance=identity_assurance,
+                after_ref=cursor_reference,
+                decision=decision,
+                disclosed_refs=disclosed_ids or [],
+                latency_ms=(time.perf_counter() - started) * 1000,
+            )
+        except Exception as exc:
+            raise CandidateInspectionAuditError(str(exc)) from exc
 
     if not subject or authz is None:
         await emit("deny")
