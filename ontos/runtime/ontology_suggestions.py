@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from typing import Literal
 
+import structlog
+
 from ontos.audit.base import AuditSink
 from ontos.authz import ONTOLOGY_REVIEWER, VIEW, AuthzBackend
 from ontos.authz.base import AuthzError
@@ -21,6 +23,8 @@ from ontos.runtime.candidate_inspection import (
 )
 from ontos.runtime.models import AuditRecord
 from ontos.storage.base import CandidateStore, StoredCandidate, candidate_storage_id
+
+log = structlog.get_logger(__name__)
 
 PAGE_SIZE = 100
 MAX_CANDIDATES = 10_000
@@ -174,8 +178,9 @@ async def list_ontology_suggestions(
         # may have been revoked while candidate pages were retrieved.
         stage = "authorization"
 
+        # A revocation here is a denial, not a backend fault (#85).
         if authz is None or not await authz.check(subject, ONTOLOGY_REVIEWER, "ontology"):
-            raise PermissionError("Ontology suggestions denied")
+            raise CandidateInspectionDeniedError("Ontology suggestions denied")
 
         current_allowed_acls = set(await authz.list_authorized_objects(subject, VIEW))
 
@@ -186,7 +191,7 @@ async def list_ontology_suggestions(
             and item.candidate.acl_ref not in current_allowed_acls
             for item in records
         ):
-            raise PermissionError("Ontology suggestions denied")
+            raise CandidateInspectionDeniedError("Ontology suggestions denied")
 
         stage = "generation"
         reference_key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
@@ -246,9 +251,15 @@ async def list_ontology_suggestions(
                 suggestion_count=0,
                 latency_ms=(time.perf_counter() - started) * 1000,
             )
-        except Exception:
-            # The request must still fail. Preserve the original failure,
-            # rather than replacing it with a secondary audit-write error.
+        except Exception as audit_exc:
+            # The request must still fail with the original error, but the
+            # trail now ends at `request_started` with no outcome; record
+            # why for operators. Types only: messages can carry backend detail.
+            log.error(
+                "ontology-suggestions-failure-audit-failed",
+                error_type=type(audit_exc).__name__,
+                original_error_type=type(exc).__name__,
+            )
             raise exc from None
         raise
 

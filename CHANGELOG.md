@@ -14,6 +14,31 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Added — deterministic ontology suggestions (#66 M2a, #84)
+- `ontos ontology suggestions list --ontology <yaml>` proposes `add_pattern`
+  changes when a rejected candidate's relation and entity types already exist
+  in the ontology but the directed pattern is missing.
+- Suggestions are computed on demand from the caller's VIEW-filtered
+  candidates and are never persisted or written to the trusted graph.
+- Each suggestion comes from a single ACL; there is no cross-ACL aggregation.
+- Support counts unique `(source, subject, object)` evidence. Supporting
+  candidates are referenced only by keyed HMAC references.
+- Candidates stamped with another ontology version are excluded.
+- Access requires `ontology_reviewer` plus source VIEW, as for candidate
+  inspection, and permissions are re-checked before generation. Every request,
+  denial and failure is audited.
+- CLI only, in a trusted local operator context. No model calls in M2a.
+
+### Fixed — M2a follow-ups (#85)
+- **Revocation is a denial.** Revoking the reviewer role or VIEW during a
+  suggestions request is audited as `deny` and reported as "denied" (it was
+  `authorization_error` / "failed").
+- **Secondary audit failures are logged.** When the audit sink fails on the
+  failure path too, the request still fails with its original error, and an
+  `ontology-suggestions-failure-audit-failed` event records both error types.
+- **`OntologySuggestion` validates kind against fields.** `add_pattern`
+  requires a pattern; the M2b kinds are rejected until they are specified.
+
 ## [0.7.0] - 2026-10-27 - MCP authentication and rejected-candidate retention
 
 MCP callers can now be authenticated with JWTs from the customer's own
