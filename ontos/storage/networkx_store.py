@@ -373,8 +373,9 @@ class NetworkxStore:
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
     ) -> list[Fact]:
-        # M0: substring match over predicate + object_id, ranked by naive relevance.
-        # M3 replaces this with vector + BM25 hybrid; ACL is enforced pre-return.
+        # M0: substring match over ids, predicate, and the canonical names and
+        # aliases of endpoint entities the caller can see (#82), ranked by
+        # naive relevance. M3 replaces this with vector + BM25 hybrid.
         needle = query.lower()
         matches: list[tuple[float, Fact]] = []
         allowed_set = set(allowed_acls) if allowed_acls is not None else None
@@ -383,12 +384,88 @@ class NetworkxStore:
                 continue
             if not _acl_allows(fact, acl_subject, allowed_set):
                 continue
-            hay = f"{fact.subject_id} {fact.predicate} {fact.object_id}".lower()
+            fields = [fact.subject_id, fact.predicate, fact.object_id]
+            for endpoint in (fact.subject_id, fact.object_id):
+                fields += self._visible_names(endpoint, acl_subject, allowed_set)
+            lowered = [field.lower() for field in fields]
+            hay = " ".join(lowered)
             if needle in hay:
-                score = 1.0 if needle == hay else 0.5 + (len(needle) / max(len(hay), 1)) * 0.5
+                score = 1.0 if needle in lowered else 0.5 + (len(needle) / max(len(hay), 1)) * 0.5
                 matches.append((score, fact))
         matches.sort(key=lambda pair: pair[0], reverse=True)
         return [fact for _, fact in matches[:k]]
+
+    async def search_entities(
+        self,
+        query: str,
+        *,
+        as_of: datetime | None = None,
+        k: int = 10,
+        acl_subject: str | None = None,
+        allowed_acls: list[str] | None = None,
+    ) -> list[StoredEntity]:
+        needle = query.lower()
+        allowed_set = set(allowed_acls) if allowed_acls is not None else None
+        ranked: list[tuple[int, str]] = []
+        for entity_id, attrs in self._graph.nodes(data=True):
+            if not _entity_attrs_visible(attrs, acl_subject, allowed_set):
+                continue
+            if not self._has_visible_fact(entity_id, as_of, acl_subject, allowed_set):
+                continue
+            names = self._visible_names(entity_id, acl_subject, allowed_set)
+            lowered = [entity_id.lower(), *(name.lower() for name in names)]
+            if any(needle in value for value in lowered):
+                ranked.append((0 if needle in lowered else 1, entity_id))
+        ranked.sort()
+        return [self._stored_entity(entity_id) for _, entity_id in ranked[:k]]
+
+    def _has_visible_fact(
+        self,
+        entity_id: str,
+        as_of: datetime | None,
+        acl_subject: str | None,
+        allowed_acls: set[str] | None,
+    ) -> bool:
+        edges = itertools.chain(
+            self._graph.out_edges(entity_id, data=True),
+            self._graph.in_edges(entity_id, data=True),
+        )
+        return any(
+            _fact_alive_at(data["fact"], as_of)
+            and _acl_allows(data["fact"], acl_subject, allowed_acls)
+            for _, _, data in edges
+        )
+
+    def _visible_names(
+        self,
+        entity_id: str,
+        acl_subject: str | None,
+        allowed_acls: set[str] | None,
+    ) -> list[str]:
+        """Canonical name and aliases, only if the caller may see the entity.
+
+        Names are entity attributes and carry the entity's ACL, not the
+        fact's: a public fact can point at an entity a restricted document
+        later claimed (#48 upgrade). Matching that name would leak it.
+        """
+        attrs = self._graph.nodes.get(entity_id)
+        if attrs is None or not _entity_attrs_visible(attrs, acl_subject, allowed_acls):
+            return []
+        names = [attrs["canonical_name"]] if attrs.get("canonical_name") else []
+        return names + [alias for alias in attrs.get("aliases") or [] if alias]
+
+    def _stored_entity(self, entity_id: str) -> StoredEntity:
+        attrs = self._graph.nodes.get(entity_id, {})
+        return StoredEntity(
+            id=entity_id,
+            type=attrs.get("type"),
+            canonical_name=attrs.get("canonical_name"),
+            aliases=list(attrs.get("aliases") or []),
+            properties=dict(attrs.get("properties") or {}),
+            provenance_source_id=attrs.get("provenance_source_id"),
+            provenance_extractor_id=attrs.get("provenance_extractor_id"),
+            acl_ref=attrs.get("acl_ref"),
+        )
 
     async def traverse(
         self,
@@ -791,6 +868,22 @@ class NetworkxStore:
         self._merges.clear()
         self._candidates.clear()
         self._candidate_order.clear()
+
+
+def _entity_attrs_visible(
+    attrs: dict[str, object],
+    acl_subject: str | None,
+    allowed_acls: set[str] | None,
+) -> bool:
+    """Same deny-by-default rule as `_acl_allows`, applied to an entity node."""
+    acl = attrs.get("acl_ref")
+    if acl is None:
+        return True
+    if allowed_acls is not None:
+        return acl in allowed_acls
+    if acl_subject is not None:
+        return acl == acl_subject
+    return False
 
 
 def _acl_allows(

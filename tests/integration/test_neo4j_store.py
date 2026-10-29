@@ -1823,3 +1823,103 @@ async def test_add_candidates_returns_number_newly_created(store: Neo4jStore) ->
     assert await store.add_candidates([]) == 0
     with pytest.raises(ValueError):
         await store.list_candidate_records(allowed_acls=[], limit=True)
+
+
+async def _neo4j_atlas_graph(store: Neo4jStore, sample_fact: Fact) -> None:
+    from uuid import uuid4
+
+    from ontos.runtime.models import Entity
+
+    def entity(entity_id: str, type_: str, name: str, aliases: list[str]) -> Entity:
+        return Entity(
+            id=entity_id,
+            type=type_,
+            canonical_name=name,
+            aliases=aliases,
+            provenance=sample_fact.provenance,
+        )
+
+    await store.upsert_entity(entity("0", "Person", "Maya Chen", []))
+    await store.upsert_entity(entity("1", "Person", "Daniel Foster", []))
+    await store.upsert_entity(entity("2", "Company", "Atlas Robotics", ["Atlas"]))
+    for person in ("0", "1"):
+        await store.add_fact(
+            sample_fact.model_copy(
+                update={
+                    "id": uuid4(),
+                    "subject_id": person,
+                    "predicate": "works_at",
+                    "object_id": "2",
+                }
+            )
+        )
+
+
+async def test_search_matches_names_aliases_and_ids(
+    store: Neo4jStore,
+    sample_fact: Fact,
+) -> None:
+    """#82: same matching rule as NetworkxStore — ids, predicate, and the
+    names/aliases of visible endpoint entities."""
+    await _neo4j_atlas_graph(store, sample_fact)
+
+    assert sorted(f.subject_id for f in await store.search("Atlas Robotics")) == ["0", "1"]
+    assert len(await store.search("atlas")) == 2
+    assert [f.subject_id for f in await store.search("maya chen")] == ["0"]
+    assert len(await store.search("works_at")) == 2
+    # Ids match too (they did not on Neo4j before #82).
+    assert len(await store.search("2")) == 2
+
+
+async def test_search_does_not_match_names_of_invisible_entities(
+    store: Neo4jStore,
+    sample_fact: Fact,
+) -> None:
+    from uuid import uuid4
+
+    from ontos.runtime.models import Entity
+
+    public_fact = sample_fact.model_copy(
+        update={"id": uuid4(), "subject_id": "p", "predicate": "works_at", "object_id": "c"}
+    )
+    await store.add_fact(public_fact)
+    # The raw public node "c" is then claimed by a restricted document (None -> X).
+    await store.upsert_entity(
+        Entity(
+            id="c",
+            type="Company",
+            canonical_name="Secret Corp",
+            provenance=sample_fact.provenance,
+        ),
+        acl_ref="acl:hr",
+    )
+
+    assert await store.search("Secret Corp", allowed_acls=[]) == []
+    assert len(await store.search("Secret Corp", allowed_acls=["acl:hr"])) == 1
+
+
+async def test_search_entities_requires_a_visible_fact(
+    store: Neo4jStore,
+    sample_fact: Fact,
+) -> None:
+    from uuid import uuid4
+
+    await _neo4j_atlas_graph(store, sample_fact)
+    await store.add_fact(
+        sample_fact.model_copy(
+            update={
+                "id": uuid4(),
+                "subject_id": "Classified Person",
+                "predicate": "works_at",
+                "object_id": "Hidden Lab",
+                "acl_ref": "acl:secret",
+            }
+        )
+    )
+
+    assert [e.id for e in await store.search_entities("Atlas Robotics")] == ["2"]
+    assert [e.id for e in await store.search_entities("ATLAS")] == ["2"]
+    # Raw nodes reachable only through forbidden facts must stay hidden.
+    assert await store.search_entities("Hidden Lab", allowed_acls=["acl:public"]) == []
+    found = await store.search_entities("Hidden Lab", allowed_acls=["acl:secret"])
+    assert [e.id for e in found] == ["Hidden Lab"]

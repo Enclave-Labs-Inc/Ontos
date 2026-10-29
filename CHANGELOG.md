@@ -14,6 +14,32 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Upgrade notes
+- **Custom `GraphStore` implementations must add
+  `search_entities(query, *, as_of, k, acl_subject, allowed_acls)`** (#82).
+  Both bundled stores implement it.
+
+### Fixed — entity lookup by name (#82)
+- **`search` matches canonical names and aliases.** It now also matches the
+  canonical names and aliases of a fact's endpoint entities, not only ids and
+  the predicate. "Who works at Atlas Robotics?" found nothing when the
+  company's id was `"2"`.
+- **Both backends use the same matching rule.** Neo4j matched names but not
+  ids; it now matches ids, the predicate, and names and aliases.
+- **Security: Neo4j search leaked restricted entity names.** It matched the
+  canonical name of an endpoint entity regardless of that entity's ACL, so a
+  caller could probe the name of a restricted entity through a public fact.
+  Names and aliases now match only for entities the caller may see.
+- **New `GraphStore.search_entities` resolves entities by id, name or alias.**
+  It matches only entities the caller can see that have at least one visible
+  fact alive at `as_of`. Raw nodes carry no ACL of their own, so this keeps
+  entities known only through forbidden facts hidden.
+- **The `SeedByEntity` fallback resolves names through `search_entities`.** A
+  popular entity can no longer crowd a namesake out of the 50-fact search
+  window, which used to silently resolve to the wrong entity. The fallback
+  still refuses to guess when several entities match.
+- **The planner prompt no longer says stored ids are "typically" names.**
+
 ### Added — deterministic ontology suggestions (#66 M2a, #84)
 - `ontos ontology suggestions list --ontology <yaml>` proposes `add_pattern`
   changes when a rejected candidate's relation and entity types already exist
