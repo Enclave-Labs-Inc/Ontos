@@ -4,7 +4,7 @@ from typer.testing import CliRunner
 
 from ontos.cli.main import app
 
-runner = CliRunner()
+runner = CliRunner(env={"COLUMNS": "200", "TERM": "dumb", "NO_COLOR": "1"})
 
 
 def test_m2b_llm_model_option_is_available() -> None:
