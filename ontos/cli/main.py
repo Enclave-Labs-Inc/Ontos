@@ -1648,11 +1648,19 @@ def ontology_suggestions_list(
             help="Local NetworkX storage path, if not using --storage.",
         ),
     ] = None,
+    llm_model: Annotated[
+        str | None,
+        typer.Option(
+            "--llm-model",
+            help="Local Ollama model for M2b suggestions; omit for deterministic M2a.",
+        ),
+    ] = None,
 ) -> None:
-    """List deterministic M2a proposals for an authorized local reviewer."""
+    """List audited, on-demand ontology suggestions for a local reviewer."""
     import structlog
 
     from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.llm.ollama import OllamaBackend
     from ontos.ontology import load_ontology
     from ontos.runtime.candidate_inspection import CandidateInspectionDeniedError
     from ontos.runtime.ontology_suggestions import (
@@ -1756,6 +1764,7 @@ def ontology_suggestions_list(
                 subject=acting_on_behalf_of,
                 agent_identity="ontos-cli-local-operator",
                 identity_assurance="operator_asserted",
+                backend=(OllamaBackend(llm_model) if llm_model is not None else None),
             )
 
             typer.echo(

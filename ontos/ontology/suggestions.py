@@ -22,6 +22,10 @@ class OntologySuggestion(BaseModel):
 
     kind: Literal["add_pattern", "map_to_existing", "new_relation_type"]
     pattern: Pattern | None = None
+    mapped_relation_type: str | None = None
+    proposed_relation_type: str | None = None
+    observed_predicate: str | None = None
+    extractor_versions: tuple[tuple[str, str], ...] = ()
     acl_ref: str | None
     support_count: int = Field(ge=1)
     supporting_candidate_refs: list[str] = Field(min_length=1)
@@ -35,13 +39,32 @@ class OntologySuggestion(BaseModel):
 
     @model_validator(mode="after")
     def _fields_match_kind(self) -> OntologySuggestion:
-        # Only `add_pattern` exists in M2a. The LLM-assisted kinds land in
-        # M2b with their own fields; until then reject them instead of
-        # letting a half-specified suggestion reach a reviewer (#85).
-        if self.kind != "add_pattern":
-            raise ValueError(f"suggestion kind {self.kind!r} is not supported yet")
+        """Reject incomplete or contradictory suggestion kinds."""
         if self.pattern is None:
-            raise ValueError("add_pattern suggestions require a pattern")
+            raise ValueError(f"{self.kind} suggestions require a pattern")
+
+        if self.kind == "add_pattern":
+            if self.mapped_relation_type is not None:
+                raise ValueError("add_pattern cannot specify mapped_relation_type")
+            if self.proposed_relation_type is not None:
+                raise ValueError("add_pattern cannot specify proposed_relation_type")
+
+        elif self.kind == "map_to_existing":
+            if not self.mapped_relation_type:
+                raise ValueError("map_to_existing requires mapped_relation_type")
+            if self.proposed_relation_type is not None:
+                raise ValueError("map_to_existing cannot propose a new relation")
+            if self.pattern.predicate != self.mapped_relation_type:
+                raise ValueError("mapped relation must match pattern predicate")
+
+        elif self.kind == "new_relation_type":
+            if not self.proposed_relation_type:
+                raise ValueError("new_relation_type requires proposed_relation_type")
+            if self.mapped_relation_type is not None:
+                raise ValueError("new_relation_type cannot map to an existing relation")
+            if self.pattern.predicate != self.proposed_relation_type:
+                raise ValueError("proposed relation must match pattern predicate")
+
         return self
 
 

@@ -25,6 +25,10 @@ import httpx
 from ontos.extraction import RawTriple
 from ontos.llm.prompts import extraction_prompt, planner_prompt
 from ontos.ontology import Ontology
+from ontos.ontology.suggestion_endpoint import (
+    UntrustedSuggestionEndpointError,
+    require_local_ollama_endpoint,
+)
 from ontos.planner import (
     RawPlan,
     Seed,
@@ -74,6 +78,11 @@ class OllamaBackend:
         self._timeout_s = timeout_s
 
     @property
+    def sovereign(self) -> bool:
+        """Whether this backend is intended for sovereign deployment."""
+        return True
+
+    @property
     def id(self) -> str:
         return f"ollama:{self._model}"
 
@@ -92,7 +101,25 @@ class OllamaBackend:
         response = await self._chat(system, user, _PLANNER_SCHEMA)
         return _reify_plan(response)
 
-    async def _chat(self, system: str, user: str, json_schema: dict[str, Any]) -> dict[str, Any]:
+    async def structured_suggest(
+        self, system: str, user: str, schema: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Use a direct, proxy-free, non-redirecting loopback connection."""
+        endpoint = require_local_ollama_endpoint(self._base_url)
+        if self._client is not None:
+            raise UntrustedSuggestionEndpointError(
+                "Injected HTTP clients are forbidden for ontology suggestions"
+            )
+        return await self._chat(system, user, schema, _trusted_suggestion_endpoint=endpoint)
+
+    async def _chat(
+        self,
+        system: str,
+        user: str,
+        json_schema: dict[str, Any],
+        *,
+        _trusted_suggestion_endpoint: str | None = None,
+    ) -> dict[str, Any]:
         body = {
             "model": self._model,
             "messages": [
@@ -105,7 +132,7 @@ class OllamaBackend:
             # a JSON blob on `message.content` we parse below.
             "format": json_schema,
         }
-        url = f"{self._base_url}/api/chat"
+        url = f"{_trusted_suggestion_endpoint or self._base_url}/api/chat"
         # Translate httpx.ReadTimeout into our typed OllamaTimeoutError so
         # LlmExtractor / LlmPlanner can produce actionable messages
         # (naming --ollama-timeout) instead of leaking an httpx stack
@@ -116,7 +143,20 @@ class OllamaBackend:
         # self._timeout_s — tests use this to simulate a timeout
         # without actually waiting.
         try:
-            if self._client is None:
+            if _trusted_suggestion_endpoint is not None:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout_s,
+                    trust_env=False,
+                    follow_redirects=False,
+                ) as client:
+                    response = await client.post(url, json=body)
+                    response.raise_for_status()
+                    try:
+                        data = response.json()
+                    except ValueError:
+                        # Invalid model output, not a transport failure.
+                        return {"proposals": None}
+            elif self._client is None:
                 async with httpx.AsyncClient(timeout=self._timeout_s) as client:
                     response = await client.post(url, json=body)
                     response.raise_for_status()
@@ -127,6 +167,31 @@ class OllamaBackend:
                 data = response.json()
         except httpx.ReadTimeout as exc:
             raise OllamaTimeoutError(self._timeout_s, url) from exc
+        if _trusted_suggestion_endpoint is not None:
+            # Ollama's structured-output schema is not a trust boundary.
+            # Malformed model content becomes one rejected response.
+            # Transport and HTTP failures still propagate fail-closed.
+            if not isinstance(data, dict):
+                return {"proposals": None}
+
+            message = data.get("message")
+            if not isinstance(message, dict):
+                return {"proposals": None}
+
+            content = message.get("content")
+            if not isinstance(content, str):
+                return {"proposals": None}
+
+            try:
+                parsed_suggestion = json.loads(content)
+            except ValueError:
+                return {"proposals": None}
+
+            if not isinstance(parsed_suggestion, dict):
+                return {"proposals": None}
+
+            return parsed_suggestion
+
         content = data.get("message", {}).get("content", "{}")
         parsed = json.loads(content)
         assert isinstance(parsed, dict)

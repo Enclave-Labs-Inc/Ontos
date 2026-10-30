@@ -11,6 +11,9 @@ from ontos.audit.base import AuditSink
 from ontos.authz import ONTOLOGY_REVIEWER, VIEW, AuthzBackend
 from ontos.authz.base import AuthzError
 from ontos.ontology.loader import Ontology
+from ontos.ontology.suggestion_backend import SuggestionBackend
+from ontos.ontology.suggestion_pipeline import generate_llm_suggestions
+from ontos.ontology.suggestion_trust import require_approved_suggestion_backend
 from ontos.ontology.suggestions import (
     OntologySuggestion,
     suggest_missing_patterns,
@@ -38,6 +41,24 @@ class SuggestionPaginationError(RuntimeError):
     """Candidate pagination cannot safely produce a complete result."""
 
 
+async def _recheck_suggestion_permissions(
+    *,
+    authz: AuthzBackend | None,
+    subject: str,
+    records: list[StoredCandidate],
+) -> None:
+    """Fail closed if reviewer or source VIEW access was revoked."""
+    if authz is None or not await authz.check(subject, ONTOLOGY_REVIEWER, "ontology"):
+        raise CandidateInspectionDeniedError("Ontology suggestions denied")
+
+    allowed_acls = set(await authz.list_authorized_objects(subject, VIEW))
+    if any(
+        item.candidate.acl_ref is not None and item.candidate.acl_ref not in allowed_acls
+        for item in records
+    ):
+        raise CandidateInspectionDeniedError("Ontology suggestions denied")
+
+
 async def _audit_suggestions(
     *,
     audit: AuditSink,
@@ -50,6 +71,10 @@ async def _audit_suggestions(
     candidate_count: int,
     suggestion_count: int,
     latency_ms: float,
+    invalid_count: int = 0,
+    generation_mode: Literal["m2a", "m2b"] = "m2a",
+    generator_id: str | None = None,
+    generator_version: str | None = None,
 ) -> AuditRecord:
     """Record a request without logging candidate text or raw IDs."""
     tool_arguments: dict[str, object] = {
@@ -58,9 +83,19 @@ async def _audit_suggestions(
         "ontology_version": ontology.version,
         "candidate_count": candidate_count,
         "suggestion_count": suggestion_count,
+        "invalid_count": invalid_count,
     }
     policy_decisions = [{"policy": "ontology_suggestions", "result": decision}]
-    model_versions = {"component": "ontology-suggestions-m2a-v1"}
+    model_versions = {"component": f"ontology-suggestions-{generation_mode}-v1"}
+    if generation_mode == "m2b" and generator_id is not None and generator_version is not None:
+        model_versions["generator_id"] = generator_id
+        model_versions["generator_version"] = generator_version
+
+    query_text = (
+        "ontology deterministic suggestions"
+        if generation_mode == "m2a"
+        else "ontology llm-assisted suggestions"
+    )
 
     from ontos.audit.postgres import PostgresAuditEmitter
 
@@ -69,7 +104,7 @@ async def _audit_suggestions(
             query_id=None,
             agent_identity=agent_identity,
             acting_on_behalf_of=subject,
-            query_text="ontology deterministic suggestions",
+            query_text=query_text,
             tool_invoked="ontology_suggestions",
             tool_arguments=tool_arguments,
             result_fact_ids=suggestion_refs,
@@ -82,7 +117,7 @@ async def _audit_suggestions(
         query_id=None,
         agent_identity=agent_identity,
         acting_on_behalf_of=subject,
-        query_text="ontology deterministic suggestions",
+        query_text=query_text,
         tool_invoked="ontology_suggestions",
         tool_arguments=tool_arguments,
         result_fact_ids=suggestion_refs,
@@ -101,6 +136,7 @@ async def list_ontology_suggestions(
     subject: str,
     agent_identity: str,
     identity_assurance: str = "unverified",
+    backend: SuggestionBackend | None = None,
 ) -> tuple[list[OntologySuggestion], AuditRecord]:
     """Generate suggestions solely from the caller's VIEW-filtered candidates.
 
@@ -110,6 +146,9 @@ async def list_ontology_suggestions(
     """
     started = time.perf_counter()
     records: list[StoredCandidate] = []
+    invalid_count = 0
+    audited_generator_id: str | None = None
+    audited_generator_version: str | None = None
     cursor: str | None = None
     seen_cursors: set[str] = set()
     stage = "inspection"
@@ -133,12 +172,21 @@ async def list_ontology_suggestions(
             agent_identity=agent_identity,
             identity_assurance=identity_assurance,
             ontology=ontology,
+            generation_mode="m2b" if backend is not None else "m2a",
             decision="request_started",
             suggestion_refs=[],
             candidate_count=0,
             suggestion_count=0,
             latency_ms=(time.perf_counter() - started) * 1000,
         )
+
+        # Reject unapproved backends before accessing candidate storage.
+        if backend is not None:
+            stage = "generation"
+            approved = require_approved_suggestion_backend(backend)
+            audited_generator_id = approved.id
+            audited_generator_version = approved.version
+            stage = "inspection"
 
         while True:
             page = await inspect_candidates(
@@ -173,33 +221,39 @@ async def list_ontology_suggestions(
             seen_cursors.add(page.next_cursor)
             cursor = page.next_cursor
 
-        # Revalidate permissions before using the collected evidence.
-        # Rechecking the reviewer role alone is insufficient: VIEW access
-        # may have been revoked while candidate pages were retrieved.
         stage = "authorization"
-
-        # A revocation here is a denial, not a backend fault (#85).
-        if authz is None or not await authz.check(subject, ONTOLOGY_REVIEWER, "ontology"):
-            raise CandidateInspectionDeniedError("Ontology suggestions denied")
-
-        current_allowed_acls = set(await authz.list_authorized_objects(subject, VIEW))
-
-        # Re-check each previously visible restricted candidate against
-        # the caller's current VIEW permissions.
-        if any(
-            item.candidate.acl_ref is not None
-            and item.candidate.acl_ref not in current_allowed_acls
-            for item in records
-        ):
-            raise CandidateInspectionDeniedError("Ontology suggestions denied")
+        await _recheck_suggestion_permissions(
+            authz=authz,
+            subject=subject,
+            records=records,
+        )
 
         stage = "generation"
         reference_key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
 
-        suggestions = suggest_missing_patterns(
-            candidates=records,
-            ontology=ontology,
-            reference_key=reference_key,
+        if backend is None:
+            suggestions = suggest_missing_patterns(
+                candidates=records,
+                ontology=ontology,
+                reference_key=reference_key,
+            )
+        else:
+            generated = await generate_llm_suggestions(
+                authorized_candidates=records,
+                ontology=ontology,
+                backend=backend,
+                reference_key=reference_key,
+            )
+            suggestions = list(generated.suggestions)
+            invalid_count = generated.invalid_count
+
+        # LLM generation can be slow; permissions may change meanwhile.
+        # Recheck before auditing and returning any suggestion.
+        stage = "authorization"
+        await _recheck_suggestion_permissions(
+            authz=authz,
+            subject=subject,
+            records=records,
         )
 
         refs = [ref for suggestion in suggestions for ref in suggestion.supporting_candidate_refs]
@@ -211,10 +265,14 @@ async def list_ontology_suggestions(
             agent_identity=agent_identity,
             identity_assurance=identity_assurance,
             ontology=ontology,
+            generation_mode="m2b" if backend is not None else "m2a",
             decision="allow",
+            generator_id=audited_generator_id,
+            generator_version=audited_generator_version,
             suggestion_refs=refs,
             candidate_count=len(records),
             suggestion_count=len(suggestions),
+            invalid_count=invalid_count,
             latency_ms=(time.perf_counter() - started) * 1000,
         )
 
@@ -245,10 +303,14 @@ async def list_ontology_suggestions(
                 agent_identity=agent_identity,
                 identity_assurance=identity_assurance,
                 ontology=ontology,
+                generation_mode="m2b" if backend is not None else "m2a",
                 decision=decision,
+                generator_id=audited_generator_id,
+                generator_version=audited_generator_version,
                 suggestion_refs=[],
                 candidate_count=len(records),
                 suggestion_count=0,
+                invalid_count=invalid_count,
                 latency_ms=(time.perf_counter() - started) * 1000,
             )
         except Exception as audit_exc:

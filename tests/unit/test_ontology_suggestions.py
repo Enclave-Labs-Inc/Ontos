@@ -239,12 +239,29 @@ def test_add_pattern_suggestion_requires_pattern() -> None:
         OntologySuggestion(**_suggestion_fields(pattern=None))  # type: ignore[arg-type]
 
 
-def test_m2b_suggestion_kinds_are_rejected_until_specified() -> None:
+def test_m2b_suggestion_kinds_require_specific_fields() -> None:
     import pytest
     from pydantic import ValidationError
 
     from ontos.ontology.suggestions import OntologySuggestion
 
     for kind in ("map_to_existing", "new_relation_type"):
-        with pytest.raises(ValidationError, match="not supported yet"):
-            OntologySuggestion(**_suggestion_fields(kind=kind))  # type: ignore[arg-type]
+        with pytest.raises(ValidationError, match="requires"):
+            OntologySuggestion.model_validate(
+                {
+                    "kind": kind,
+                    "pattern": Pattern(
+                        subject_type="Person",
+                        predicate="works_at",
+                        object_type="Company",
+                    ),
+                    "acl_ref": "acl:finance",
+                    "support_count": 1,
+                    "supporting_candidate_refs": ["protected-reference"],
+                    "generator_id": "scripted:local",
+                    "generator_version": "test-v1",
+                    "ontology_id": "ontos.starter",
+                    "ontology_version": "0.1",
+                    "generated_at": NOW,
+                }
+            )
