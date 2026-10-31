@@ -6,11 +6,14 @@ Every tool call emits an Article-12 audit record before returning.
 
 from __future__ import annotations
 
+import functools
 import os
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from contextvars import ContextVar
+from datetime import datetime
+from typing import Any, NoReturn
 from uuid import UUID
 
 import structlog
@@ -23,6 +26,7 @@ from starlette.middleware import Middleware
 from ontos.audit.base import AuditSink
 from ontos.audit.emitter import AuditEmitter
 from ontos.authz import AUDIT_EXPORTER, VIEW, AuthzBackend, InMemoryAuthz
+from ontos.authz.base import AuthzError
 from ontos.executor import DeterministicExecutor, Executor
 from ontos.planner import Planner, PlannerError
 from ontos.runtime.auth import (
@@ -85,6 +89,37 @@ class SnapshotMetadata(BaseModel):
     format: str
     ontology_id: str
     ontology_version: str
+
+
+MAX_SEARCH_K = 100
+MAX_TRAVERSE_DEPTH = 10
+
+
+class InvalidToolArgumentError(ValueError):
+    """A tool argument is malformed; the message is safe to return."""
+
+
+def _parse_as_of_arg(as_of: str | None) -> datetime | None:
+    if not as_of:
+        return None
+    try:
+        return parse_as_of(as_of)
+    except ValueError:
+        raise InvalidToolArgumentError("as_of must be an ISO-8601 timestamp") from None
+
+
+def _parse_uuid_arg(name: str, value: str) -> UUID:
+    try:
+        return UUID(value)
+    except ValueError:
+        raise InvalidToolArgumentError(f"{name} must be a UUID") from None
+
+
+def _bounded_arg(name: str, value: int, low: int, high: int) -> int:
+    # bool is an int subclass; reject it like any other non-integer.
+    if isinstance(value, bool) or not low <= value <= high:
+        raise InvalidToolArgumentError(f"{name} must be between {low} and {high}")
+    return value
 
 
 async def initialize_store(store: object) -> None:
@@ -236,6 +271,71 @@ def build_server(
             policy_decisions=[caller.policy_decision(), *policy_decisions],
         )
 
+    # The verified caller and query text of the current tool call, set by
+    # `_authenticate` so `_audited` can audit a failure after it.
+    current_call: ContextVar[tuple[CallerIdentity, str] | None] = ContextVar(
+        "ontos_current_call", default=None
+    )
+
+    def _audited(
+        tool: str,
+    ) -> Callable[[Callable[..., Awaitable[ToolResponse]]], Callable[..., Awaitable[ToolResponse]]]:
+        """Audit-first for every failure after authentication.
+
+        Without this, a malformed argument, an authz backend outage or a store
+        error escaped the tool with no Article-12 record. Callers get a safe,
+        generic ToolError; only the error type is logged.
+        """
+
+        def decorate(
+            fn: Callable[..., Awaitable[ToolResponse]],
+        ) -> Callable[..., Awaitable[ToolResponse]]:
+            @functools.wraps(fn)
+            async def wrapper(*args: Any, **kwargs: Any) -> ToolResponse:
+                started = time.perf_counter()
+                token = current_call.set(None)
+                try:
+                    return await fn(*args, **kwargs)
+                except ToolError:
+                    raise
+                except Exception as exc:
+                    call = current_call.get()
+                    if call is None:
+                        raise
+                    _fail(tool=tool, call=call, started=started, exc=exc)
+                finally:
+                    current_call.reset(token)
+
+            return wrapper
+
+        return decorate
+
+    def _fail(
+        *,
+        tool: str,
+        call: tuple[CallerIdentity, str],
+        started: float,
+        exc: Exception,
+    ) -> NoReturn:
+        caller, query_text = call
+        if isinstance(exc, InvalidToolArgumentError):
+            decision, message = "invalid_request", str(exc)
+        elif isinstance(exc, AuthzError):
+            decision, message = "authorization_error", "authorization backend unavailable"
+        else:
+            decision, message = "error", "internal error"
+        log.error("mcp-tool-failed", tool=tool, error_type=type(exc).__name__)
+        _emit(
+            tool=tool,
+            caller=caller,
+            query_text=query_text,
+            tool_arguments={},
+            result_fact_ids=[],
+            latency_ms=(time.perf_counter() - started) * 1000,
+            policy_decisions=[{"policy": "request", "result": decision}],
+        )
+        raise ToolError(message) from None
+
     def _authenticate(
         *,
         tool: str,
@@ -250,12 +350,14 @@ def build_server(
         """
         started = time.perf_counter()
         try:
-            return resolve_caller(
+            caller = resolve_caller(
                 mode=auth_mode,
                 claimed_agent_identity=agent_identity,
                 claimed_principal=acting_on_behalf_of,
                 token=get_access_token(),
             )
+            current_call.set((caller, query_text))
+            return caller
         except CallerRejectedError as exc:
             decision = {
                 "policy": "authn",
@@ -280,6 +382,7 @@ def build_server(
             raise ToolError("authentication failed") from None
 
     @mcp.tool()
+    @_audited("search")
     async def search(
         query: str,
         agent_identity: str,
@@ -295,7 +398,8 @@ def build_server(
             acting_on_behalf_of=acting_on_behalf_of,
             query_text=query,
         )
-        ts = parse_as_of(as_of) if as_of else None
+        ts = _parse_as_of_arg(as_of)
+        k = _bounded_arg("k", k, 1, MAX_SEARCH_K)
         allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
         facts = await store.search(
             query,
@@ -321,6 +425,7 @@ def build_server(
         )
 
     @mcp.tool()
+    @_audited("traverse")
     async def traverse(
         start: str,
         agent_identity: str,
@@ -337,7 +442,8 @@ def build_server(
             acting_on_behalf_of=acting_on_behalf_of,
             query_text=start,
         )
-        ts = parse_as_of(as_of) if as_of else None
+        ts = _parse_as_of_arg(as_of)
+        depth = _bounded_arg("depth", depth, 1, MAX_TRAVERSE_DEPTH)
         allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
         facts = list(
             await store.traverse(
@@ -366,6 +472,7 @@ def build_server(
         )
 
     @mcp.tool()
+    @_audited("explain")
     async def explain(
         entity_id: str,
         agent_identity: str,
@@ -380,7 +487,7 @@ def build_server(
             acting_on_behalf_of=acting_on_behalf_of,
             query_text=entity_id,
         )
-        ts = parse_as_of(as_of) if as_of else None
+        ts = _parse_as_of_arg(as_of)
         allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
         facts = await store.facts_for_entity(
             entity_id,
@@ -405,6 +512,7 @@ def build_server(
         )
 
     @mcp.tool()
+    @_audited("provenance")
     async def provenance(
         fact_id: str,
         agent_identity: str,
@@ -424,7 +532,7 @@ def build_server(
         )
         allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
         fact = await store.get_visible_fact(
-            UUID(fact_id),
+            _parse_uuid_arg("fact_id", fact_id),
             acl_subject=caller.principal,
             allowed_acls=allowed_acls,
         )
@@ -446,6 +554,7 @@ def build_server(
         )
 
     @mcp.tool()
+    @_audited("audit")
     async def audit_lookup(
         query_id: str,
         agent_identity: str,
@@ -465,7 +574,7 @@ def build_server(
             acting_on_behalf_of=acting_on_behalf_of,
             query_text=query_id,
         )
-        record = audit.by_query_id(UUID(query_id))
+        record = audit.by_query_id(_parse_uuid_arg("query_id", query_id))
         readable = False
         if record is not None and caller.principal is not None:
             owner = record.article12.get(ArticleTwelveField.ACTING_ON_BEHALF_OF)
@@ -493,6 +602,7 @@ def build_server(
         )
 
     @mcp.tool()
+    @_audited("ask")
     async def ask(
         question: str,
         agent_identity: str,
@@ -625,6 +735,7 @@ def build_server(
         metadata_payload = snapshot_metadata.model_dump(mode="json")
 
         @mcp.tool()
+        @_audited("snapshot_info")
         async def snapshot_info(agent_identity: str) -> ToolResponse:
             """Load-time metadata about the frozen snapshot bound to this server.
 
