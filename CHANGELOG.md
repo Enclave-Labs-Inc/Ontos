@@ -14,6 +14,22 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — every MCP tool failure is audited
+- **Some tool failures left no Article-12 record.** After authentication, a
+  malformed `as_of`, a malformed `fact_id`/`query_id`, an authz backend outage
+  or a store error escaped the tool with no audit record, against the
+  audit-first rule. Every tool failure now writes one record with the decision
+  `invalid_request`, `authorization_error` or `error`.
+- **Callers get a safe message.** Errors return a generic `ToolError` and never
+  echo backend text; only the error type is logged (`mcp-tool-failed`).
+- **`search` `k` is bounded to 1–100 and `traverse` `depth` to 1–10.**
+  Previously NetworkX had no depth cap, a huge `k` returned everything, and a
+  negative `k` silently dropped results. Out-of-range values are rejected and
+  audited.
+- **Gate-blocking test.** It reads the tool list from the server, so any new
+  tool must either be covered or be explicitly listed as having no validated
+  arguments.
+
 ### Fixed — security: facts exposing restricted endpoint entities
 - **Read paths checked only the fact's own ACL.** `search`, `traverse`,
   `explain` (`facts_for_entity`), `provenance` (`get_visible_fact`) and
