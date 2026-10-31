@@ -274,3 +274,37 @@ async def test_schemas_hold_independent_chains(postgres_container) -> None:
         assert await b.verify_chain_async()
     finally:
         await engine.dispose()
+
+
+async def test_serve_persists_tool_records_to_postgres(
+    postgres_container, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#93: `ONTOS_AUDIT_DB_URL` wires `ontos serve` to Postgres end to end."""
+    from fastmcp import Client
+
+    from ontos.runtime.config import RuntimeConfig
+    from ontos.runtime.server import build_audit_sink, build_server
+    from ontos.storage.networkx_store import NetworkxStore
+
+    monkeypatch.setenv("ONTOS_AUDIT_DB_URL", postgres_container.get_connection_url())
+    monkeypatch.setenv("ONTOS_AUDIT_SIGNING_KEY", "serve-postgres-test-key")
+    monkeypatch.setenv("ONTOS_ENV", "prod")
+    cfg = RuntimeConfig.from_env()
+
+    audit = build_audit_sink(cfg)
+    assert isinstance(audit, PostgresAuditEmitter)
+    await audit.initialize()
+    async with audit._engine.begin() as conn:
+        from ontos.audit.postgres import _audit_table
+
+        await conn.execute(_audit_table.delete())
+    async with Client(build_server(cfg, store=NetworkxStore(), audit=audit)) as client:
+        result = await client.call_tool("search", {"query": "x", "agent_identity": "a"})
+
+    restarted = build_audit_sink(cfg)
+    assert isinstance(restarted, PostgresAuditEmitter)
+    try:
+        assert await restarted.by_query_id_async(result.data.query_id) is not None
+        assert await restarted.verify_chain_async()
+    finally:
+        await restarted.close()

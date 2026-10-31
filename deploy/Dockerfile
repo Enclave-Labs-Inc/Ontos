@@ -13,9 +13,9 @@ COPY pyproject.toml uv.lock README.md ./
 COPY ontos ./ontos
 
 # Install from the lockfile CI tests against, with the extras the Helm
-# chart's defaults need (Neo4j storage, OpenFGA authz). Without them a
-# default chart install fails at startup with ImportError.
-RUN uv sync --frozen --no-dev --no-editable --extra neo4j --extra authz
+# chart's defaults need (Neo4j storage, OpenFGA authz, Postgres audit).
+# Without them a default chart install fails at startup with ImportError.
+RUN uv sync --frozen --no-dev --no-editable --extra neo4j --extra authz --extra postgres
 
 FROM python:3.12-slim AS runtime
 

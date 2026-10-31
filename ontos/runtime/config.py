@@ -116,6 +116,9 @@ class RuntimeConfig:
     auth_algorithm: str = "RS256"
     auth_required_scopes: tuple[str, ...] = ()
     allow_unauthenticated_bind: bool = False
+    # #93: true when ONTOS_AUDIT_DB_URL is set explicitly. `audit_db_url`
+    # always has a SQLite default, so it can't tell the two apart.
+    audit_persistent: bool = False
 
     def with_storage_override(self, storage: StorageConfig) -> RuntimeConfig:
         """Return this runtime config with only storage settings overridden.
@@ -188,4 +191,5 @@ class RuntimeConfig:
                 if s.strip()
             ),
             allow_unauthenticated_bind=os.getenv("ONTOS_ALLOW_UNAUTHENTICATED_BIND") == "1",
+            audit_persistent=bool(os.getenv("ONTOS_AUDIT_DB_URL")),
         )

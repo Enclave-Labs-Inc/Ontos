@@ -14,6 +14,25 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — `ontos serve` persists its audit trail (#93)
+- **Article-12 records no longer vanish on restart.** `ontos serve` (live and
+  `--snapshot`) always used the in-memory audit sink and never read
+  `ONTOS_AUDIT_DB_URL`, though the Helm chart sets it. With the variable set,
+  the server now writes to the persistent hash-chained sink
+  (`PostgresAuditEmitter`) and creates its table at startup. Without it,
+  records stay in memory (dev only), and `ONTOS_ENV=prod` refuses to boot.
+- **Tool calls, transport rejections (401/403) and the `audit` tool all use
+  the persistent sink.** The request path now awaits the async sink.
+- **Fail closed.** If an audit record cannot be written, the call fails with
+  `audit unavailable` and returns no data. A transport rejection becomes a
+  500. Sink error text is never returned or logged.
+- **Records carry the real version.** `model_versions.runtime` is now the
+  package version, replacing the hard-coded `0.0.1`.
+- **New `postgres` extra (`asyncpg`), included in the container image.**
+  Before this the image could not connect to a Postgres audit DB.
+  `.env.example` now uses async drivers (`sqlite+aiosqlite://`,
+  `postgresql+asyncpg://`); the sync URLs it listed were always rejected.
+
 ### Fixed — every MCP tool failure is audited
 - **Some tool failures left no Article-12 record.** After authentication, a
   malformed `as_of`, a malformed `fact_id`/`query_id`, an authz backend outage

@@ -958,12 +958,16 @@ openai = [
 pdf = [
     { name = "pypdf" },
 ]
+postgres = [
+    { name = "asyncpg" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=1.11" },
     { name = "asyncpg", marker = "extra == 'dev'", specifier = ">=0.30" },
+    { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30" },
     { name = "cryptography", specifier = ">=43.0" },
     { name = "fastmcp", specifier = ">=2.0" },
     { name = "httpx", specifier = ">=0.27" },
@@ -993,7 +997,7 @@ requires-dist = [
     { name = "types-networkx", marker = "extra == 'dev'", specifier = ">=3.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
-provides-extras = ["anthropic", "authz", "dev", "langchain", "llama", "neo4j", "openai", "pdf"]
+provides-extras = ["anthropic", "authz", "dev", "langchain", "llama", "neo4j", "openai", "pdf", "postgres"]
 
 [[package]]
 name = "exceptiongroup"
