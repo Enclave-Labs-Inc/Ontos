@@ -14,6 +14,21 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — security: facts exposing restricted endpoint entities
+- **Read paths checked only the fact's own ACL.** `search`, `traverse`,
+  `explain` (`facts_for_entity`), `provenance` (`get_visible_fact`) and
+  `search_entities` ignored the ACL of the fact's endpoint entities.
+- **Effect:** a public fact pointing at an entity that a restricted document
+  later claimed (the #48 None → X upgrade) was returned to callers without
+  access, revealing the restricted entity's id. `scan()` and exports already
+  hid such facts; this happened on both backends, and through the executor
+  and `ask`.
+- **Now:** a fact is visible only if the caller may see the fact **and** both
+  endpoint entities. Neo4j traversal also requires every node on the path to
+  be visible.
+- **Compatibility:** callers without access to an endpoint entity no longer
+  receive facts touching it. That is the intended behaviour.
+
 ### Added — sovereign ontology suggestions (#66 M2b, #89)
 - `ontos ontology suggestions list --llm-model MODEL` enables
   LLM-assisted ontology suggestions using a local Ollama model.

@@ -360,7 +360,7 @@ class NetworkxStore:
     ) -> Fact | None:
         fact = self._facts.get(fact_id)
         allowed_set = set(allowed_acls) if allowed_acls is not None else None
-        if fact is None or not _acl_allows(fact, acl_subject, allowed_set):
+        if fact is None or not self._fact_visible(fact, acl_subject, allowed_set):
             return None
         return fact
 
@@ -382,7 +382,7 @@ class NetworkxStore:
         for fact in self._facts.values():
             if not _fact_alive_at(fact, as_of):
                 continue
-            if not _acl_allows(fact, acl_subject, allowed_set):
+            if not self._fact_visible(fact, acl_subject, allowed_set):
                 continue
             fields = [fact.subject_id, fact.predicate, fact.object_id]
             for endpoint in (fact.subject_id, fact.object_id):
@@ -432,8 +432,31 @@ class NetworkxStore:
         )
         return any(
             _fact_alive_at(data["fact"], as_of)
-            and _acl_allows(data["fact"], acl_subject, allowed_acls)
+            and self._fact_visible(data["fact"], acl_subject, allowed_acls)
             for _, _, data in edges
+        )
+
+    def _fact_visible(
+        self,
+        fact: Fact,
+        acl_subject: str | None,
+        allowed_acls: set[str] | None,
+    ) -> bool:
+        """A fact is visible only with its own ACL AND both endpoint entities.
+
+        Entities carry their own ACL: a public fact can point at an entity
+        a restricted document later claimed (#48 None -> X upgrade). `scan()`
+        already hides such facts; every read path must agree, or the fact
+        leaks the restricted entity's id.
+        """
+        return (
+            _acl_allows(fact, acl_subject, allowed_acls)
+            and _entity_attrs_visible(
+                self._graph.nodes.get(fact.subject_id, {}), acl_subject, allowed_acls
+            )
+            and _entity_attrs_visible(
+                self._graph.nodes.get(fact.object_id, {}), acl_subject, allowed_acls
+            )
         )
 
     def _visible_names(
@@ -496,7 +519,7 @@ class NetworkxStore:
                             continue
                         if relation and fact.predicate != relation:
                             continue
-                        if not _acl_allows(fact, acl_subject, allowed_set):
+                        if not self._fact_visible(fact, acl_subject, allowed_set):
                             continue
 
                         collected.append(fact)
@@ -512,7 +535,7 @@ class NetworkxStore:
                             continue
                         if relation and fact.predicate != relation:
                             continue
-                        if not _acl_allows(fact, acl_subject, allowed_set):
+                        if not self._fact_visible(fact, acl_subject, allowed_set):
                             continue
 
                         collected.append(fact)
@@ -541,11 +564,11 @@ class NetworkxStore:
         allowed_set = set(allowed_acls) if allowed_acls is not None else None
         for _, _, _, data in self._graph.out_edges(entity_id, keys=True, data=True):
             fact: Fact = data["fact"]
-            if _fact_alive_at(fact, as_of) and _acl_allows(fact, acl_subject, allowed_set):
+            if _fact_alive_at(fact, as_of) and self._fact_visible(fact, acl_subject, allowed_set):
                 out.append(fact)
         for _, _, _, data in self._graph.in_edges(entity_id, keys=True, data=True):
             fact = data["fact"]
-            if _fact_alive_at(fact, as_of) and _acl_allows(fact, acl_subject, allowed_set):
+            if _fact_alive_at(fact, as_of) and self._fact_visible(fact, acl_subject, allowed_set):
                 out.append(fact)
         return out
 
