@@ -117,3 +117,126 @@ backups and replicas as well.
 Do not enable candidate retention for production data unless the deployment
 has an appropriate deletion and retention procedure. TTL expiry and
 source-deletion propagation remain future work.
+
+
+## M2 ontology suggestions — deterministic and LLM-assisted
+
+The local operator CLI supports two modes:
+
+- **M2a (default):** deterministic `add_pattern` suggestions for
+  existing relationship types used with missing ontology patterns.
+- **M2b (`--llm-model MODEL`):** first includes deterministic M2a
+  results, then asks an approved local Ollama model to classify
+  remaining unknown relationship types as `map_to_existing` or
+  `new_relation_type` suggestions.
+
+Example:
+
+```bash
+ontos ontology suggestions list \
+  --acting-on-behalf-of user:reviewer \
+  --ontology path/to/ontology.yaml \
+  --llm-model gemma3:12b \
+  --ollama-timeout 180
+```
+
+Omit `--llm-model` to use only deterministic M2a suggestions.
+The default Ollama request timeout is 180 seconds; a supplied
+timeout must be positive and finite.
+
+### Authorization and identity boundary
+
+Suggestions require `ontology_reviewer` on `ontology` and source
+VIEW authorization, just like rejected-candidate inspection.
+The subject supplied through `--acting-on-behalf-of` is asserted
+by a trusted local operator, not independently authenticated
+by the CLI. Only trusted operators should have access to the
+command, storage credentials and audit credentials.
+
+Candidates are inspected through the audited inspection service.
+Authorization is checked again before generation and after
+generation, before results can be returned.
+
+A reviewer without VIEW access must not learn about hidden
+candidates through suggestions, counts, model requests or audits.
+
+### Model input and ACL isolation
+
+M2b sends only these fields to the model for each eligible
+relationship pattern:
+
+- A request-local integer `candidate_id`.
+- The subject entity-type label and object entity-type label.
+- The observed safe relationship predicate.
+- The existing relationship types permitted for that pair,
+  as `allowed_mappings`.
+
+Model requests never include raw entity IDs, canonical names,
+source IDs, document text, ACL identifiers, support counts,
+storage IDs or supporting-candidate references.
+
+Public evidence (`acl_ref=None`) is processed separately from
+restricted ACLs. Different restricted ACLs never share a model
+request. When a single ACL contains over 100 distinct patterns,
+its evidence is split into batches of at most 100 patterns.
+Candidate indexes are local to each batch.
+
+M2b does not send patterns already handled by deterministic M2a.
+Untrusted model output is validated against the current ontology.
+Support counts, extractor provenance, source ACL and HMAC
+support references are computed from authorized evidence, not
+accepted from model output. Invalid responses are dropped and
+counted. A later generation failure aborts the request rather
+than returning partially generated suggestions.
+
+### Sovereign deployment boundary — M2b
+
+**M2b deliberately supports loopback-only Ollama for this PR.**
+The operator must have an approved Ollama service available
+through the local loopback endpoint, normally port 11434.
+
+Direct connections to shared GPU hosts, Kubernetes Services,
+private VPC addresses and arbitrary remote Ollama URLs are
+not supported by this CLI. There is no `--ollama-url` option
+for M2b.
+
+An operator-controlled Ollama sidecar on the same host is one
+supported deployment approach. An appropriately secured SSH
+local-port tunnel may also expose a separately hosted Ollama
+service through loopback, but the deployment operator is
+responsible for securing both ends and validating the actual
+destination and transport.
+
+**Loopback is not authentication.** On a shared host, another
+local process may be able to listen on port 11434 when the
+expected Ollama service is unavailable. Restrict local host
+access and verify the ownership of the Ollama service.
+
+M2b disables environment-proxy inheritance and HTTP redirects.
+Injected HTTP clients are forbidden. OpenAI, Anthropic,
+arbitrary spoofed backends and subclasses are not allowed,
+even when bridge-backend opt-in is enabled.
+
+A future separately reviewed change may support explicitly
+approved in-VPC endpoints or an additional sovereign Scribe
+adapter. Neither is enabled by the current M2b CLI.
+
+### Audits, review and changes to the trusted graph
+
+Suggestion requests, denials and failures are audited using
+the Article-12 audit infrastructure. The outcome audit records
+the generation mode; for approved M2b backends it also records
+the generator ID/version and invalid proposal count.
+Candidate evidence and raw model output are not logged.
+
+`OntologySuggestion` output includes its kind, ontology ID and
+version, generation timestamp, supporting HMAC references,
+support count and applicable extractor provenance. It also
+includes optional mapping/new-relationship fields. M2a results
+carry null and empty defaults for the new M2b fields.
+
+Suggestions are **review proposals only**. Neither M2a nor M2b
+changes ontology YAML, creates a new ontology version, promotes
+rejected candidates, or inserts suggestions into the trusted
+graph. Administrator approval, migrations and re-ingestion of
+affected source documents belong to M3.

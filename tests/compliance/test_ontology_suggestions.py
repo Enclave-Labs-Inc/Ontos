@@ -547,9 +547,9 @@ async def test_m2b_runtime_isolates_acls_and_audits(
     store = NetworkxStore()
     await store.add_candidates(
         [
-            _candidate("finance", "acl:finance"),
-            _candidate("legal", "acl:legal"),
-            _candidate("hidden", "acl:hidden"),
+            _m2b_candidate("finance", "acl:finance"),
+            _m2b_candidate("legal", "acl:legal"),
+            _m2b_candidate("hidden", "acl:hidden"),
         ]
     )
 
@@ -590,14 +590,14 @@ async def test_m2b_runtime_isolates_acls_and_audits(
     assert len(suggestions) == 2
     assert {s.acl_ref for s in suggestions} == {"acl:finance", "acl:legal"}
     assert all(s.kind == "map_to_existing" for s in suggestions)
-    assert all(s.observed_predicate == "acquired" for s in suggestions)
+    assert all(s.observed_predicate == "advises" for s in suggestions)
     assert all(s.mapped_relation_type == "works_at" for s in suggestions)
     assert all(s.support_count == 1 for s in suggestions)
 
     for call in calls:
         evidence = call["evidence"]
         assert len(evidence) == 1
-        assert evidence[0]["predicate"] == "acquired"
+        assert evidence[0]["predicate"] == "advises"
         assert "hidden" not in str(call)
         assert "acl:" not in str(call)
 
@@ -681,7 +681,7 @@ async def test_m2b_audit_counts_invalid_proposals(
     monkeypatch.setattr(OllamaBackend, "structured_suggest", scripted)
 
     store = NetworkxStore()
-    await store.add_candidates([_candidate("finance-secret", "acl:finance")])
+    await store.add_candidates([_m2b_candidate("finance-secret", "acl:finance")])
     audit = _audit()
 
     suggestions, final_audit = await list_ontology_suggestions(
@@ -728,7 +728,7 @@ async def test_m2b_view_revoked_during_llm_call_fails_closed(
     from ontos.llm.ollama import OllamaBackend
 
     store = NetworkxStore()
-    await store.add_candidates([_candidate("revoked-private-source", "acl:finance")])
+    await store.add_candidates([_m2b_candidate("revoked-private-source", "acl:finance")])
 
     authz = _reviewer("acl:finance")
     audit = _audit()
@@ -797,8 +797,8 @@ async def test_m2b_failure_on_second_acl_aborts_entire_request(
     store = NetworkxStore()
     await store.add_candidates(
         [
-            _candidate("finance-secret", "acl:finance"),
-            _candidate("legal-secret", "acl:legal"),
+            _m2b_candidate("finance-secret", "acl:finance"),
+            _m2b_candidate("legal-secret", "acl:legal"),
         ]
     )
 
@@ -866,7 +866,7 @@ async def test_m2b_final_audit_failure_prevents_return(
     from ontos.llm.ollama import OllamaBackend
 
     store = NetworkxStore()
-    await store.add_candidates([_candidate("finance-secret", "acl:finance")])
+    await store.add_candidates([_m2b_candidate("finance-secret", "acl:finance")])
     audit = _audit()
     original_emit = audit.emit
     model_calls = 0
@@ -1162,7 +1162,7 @@ async def test_m2b_generation_failure_audits_approved_generator_identity(
     monkeypatch.setattr(OllamaBackend, "structured_suggest", failing)
 
     store = NetworkxStore()
-    await store.add_candidates([_candidate("failure-private-source", "acl:finance")])
+    await store.add_candidates([_m2b_candidate("failure-private-source", "acl:finance")])
 
     audit = _audit()
 
@@ -1188,3 +1188,119 @@ async def test_m2b_generation_failure_audits_approved_generator_identity(
     assert "failure-private-source" not in outcome
     assert "Scripted generation failure" not in outcome
     assert audit.verify_chain()
+
+
+async def test_m2b_combines_deterministic_and_llm_suggestions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Known relations use M2a; only unknown relations reach Ollama."""
+    from ontos.llm.ollama import OllamaBackend
+
+    deterministic = _candidate("known", "acl:finance")
+    novel = _candidate("novel", "acl:finance")
+    novel = novel.model_copy(
+        update={"raw_triple": novel.raw_triple.model_copy(update={"predicate": "advises"})}
+    )
+
+    store = NetworkxStore()
+    await store.add_candidates([deterministic, novel])
+
+    calls: list[list[dict[str, object]]] = []
+
+    async def scripted(
+        self: OllamaBackend,
+        system: str,
+        user: str,
+        schema: dict[str, object],
+    ) -> dict[str, object]:
+        evidence = json.loads(user)["evidence"]
+        calls.append(evidence)
+        return {
+            "proposals": [
+                {
+                    "candidate_id": 0,
+                    "kind": "new_relation_type",
+                    "relation_type": "advises",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(OllamaBackend, "structured_suggest", scripted)
+
+    audit = _audit()
+    suggestions, _ = await list_ontology_suggestions(
+        candidate_store=store,
+        authz=_reviewer("acl:finance"),
+        audit=audit,
+        ontology=_ontology(),
+        subject="user:reviewer",
+        agent_identity="agent:test",
+        backend=OllamaBackend("scripted"),
+    )
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 1
+    assert calls[0][0]["predicate"] == "advises"
+    assert "acquired" not in str(calls)
+
+    assert {
+        (suggestion.kind, suggestion.pattern.predicate)
+        for suggestion in suggestions
+        if suggestion.pattern is not None
+    } == {
+        ("add_pattern", "acquired"),
+        ("new_relation_type", "advises"),
+    }
+
+    assert _request_decisions(audit) == [
+        "request_started",
+        "allow",
+    ]
+    assert audit.verify_chain()
+
+
+async def test_m2b_skips_model_when_m2a_handles_all_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deterministic-only batch must never invoke the LLM."""
+    from ontos.llm.ollama import OllamaBackend
+
+    store = NetworkxStore()
+    await store.add_candidates([_candidate("known-only", "acl:finance")])
+
+    async def forbidden_model(
+        self: OllamaBackend,
+        system: str,
+        user: str,
+        schema: dict[str, object],
+    ) -> dict[str, object]:
+        pytest.fail("M2a candidate unexpectedly sent to Ollama")
+
+    monkeypatch.setattr(
+        OllamaBackend,
+        "structured_suggest",
+        forbidden_model,
+    )
+
+    audit = _audit()
+    suggestions, _ = await list_ontology_suggestions(
+        candidate_store=store,
+        authz=_reviewer("acl:finance"),
+        audit=audit,
+        ontology=_ontology(),
+        subject="user:reviewer",
+        agent_identity="agent:test",
+        backend=OllamaBackend("scripted"),
+    )
+
+    assert len(suggestions) == 1
+    assert suggestions[0].kind == "add_pattern"
+    assert audit.verify_chain()
+
+
+def _m2b_candidate(source: str, acl: str | None):
+    """An unknown relation that must reach the M2b model."""
+    candidate = _candidate(source, acl)
+    return candidate.model_copy(
+        update={"raw_triple": candidate.raw_triple.model_copy(update={"predicate": "advises"})}
+    )

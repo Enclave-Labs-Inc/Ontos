@@ -15,6 +15,7 @@ def test_m2b_llm_model_option_is_available() -> None:
 
     assert result.exit_code == 0
     assert "--llm-model" in result.output
+    assert "--ollama-timeout" in result.output
     assert "--acting-on-behalf-of" in result.output
     assert "--ontology" in result.output
 

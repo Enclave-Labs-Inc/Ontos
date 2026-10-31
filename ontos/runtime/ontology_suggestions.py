@@ -231,20 +231,29 @@ async def list_ontology_suggestions(
         stage = "generation"
         reference_key = audit.derive_key(CANDIDATE_REFERENCE_KEY_LABEL)
 
-        if backend is None:
-            suggestions = suggest_missing_patterns(
-                candidates=records,
-                ontology=ontology,
-                reference_key=reference_key,
-            )
-        else:
+        # M2a always runs first, including when M2b is enabled.
+        suggestions = suggest_missing_patterns(
+            candidates=records,
+            ontology=ontology,
+            reference_key=reference_key,
+        )
+
+        if backend is not None:
+            # Existing relation types are handled by M2a. Do not expose
+            # those patterns to the model unnecessarily.
+            llm_candidates = [
+                record
+                for record in records
+                if ontology.relation_type(record.candidate.raw_triple.predicate) is None
+            ]
+
             generated = await generate_llm_suggestions(
-                authorized_candidates=records,
+                authorized_candidates=llm_candidates,
                 ontology=ontology,
                 backend=backend,
                 reference_key=reference_key,
             )
-            suggestions = list(generated.suggestions)
+            suggestions.extend(generated.suggestions)
             invalid_count = generated.invalid_count
 
         # LLM generation can be slow; permissions may change meanwhile.

@@ -118,8 +118,9 @@ def _seed_suggestion_candidates(
     path: Path,
     *,
     acl: str = "acl:finance",
+    predicate_override: str | None = None,
 ) -> tuple[str, str, str]:
-    """Persist two candidates for an existing relation but missing pattern."""
+    """Persist two same-ACL candidates; deterministic by default."""
     import asyncio
 
     from ontos.extraction import (
@@ -145,6 +146,9 @@ def _seed_suggestion_candidates(
     assert missing is not None
 
     subject_type, predicate, object_type = missing
+    if predicate_override is not None:
+        assert ontology.relation_type(predicate_override) is None
+        predicate = predicate_override
 
     def candidate(source: str) -> RejectedCandidate:
         return RejectedCandidate(
@@ -178,7 +182,7 @@ def _seed_suggestion_candidates(
             await store.close()
 
     asyncio.run(seed())
-    return missing
+    return (subject_type, predicate, object_type)
 
 
 def _suggestions_cli_args(path: Path, subject: str) -> list[str]:
@@ -335,7 +339,10 @@ def test_m2b_cli_invokes_model_only_with_view(
     from ontos.llm.ollama import OllamaBackend
 
     path = tmp_path / "m2b-candidates.pkl"
-    expected_pattern = _seed_suggestion_candidates(path)
+    expected_pattern = _seed_suggestion_candidates(
+        path,
+        predicate_override="m2b_scripted_relation",
+    )
 
     monkeypatch.setenv(
         "ONTOS_AUDIT_DB_URL",
@@ -355,7 +362,7 @@ def test_m2b_cli_invokes_model_only_with_view(
         lambda cfg: authz,
     )
 
-    calls: list[tuple[str, dict[str, object]]] = []
+    calls: list[tuple[str, dict[str, object], float]] = []
 
     async def scripted(
         self: OllamaBackend,
@@ -365,7 +372,7 @@ def test_m2b_cli_invokes_model_only_with_view(
         schema: dict[str, object],
     ) -> dict[str, object]:
         payload = json.loads(user)
-        calls.append((self.id, payload))
+        calls.append((self.id, payload, self._timeout_s))
 
         assert schema["type"] == "object"
         assert "SECRET" not in user
@@ -374,7 +381,12 @@ def test_m2b_cli_invokes_model_only_with_view(
 
     monkeypatch.setattr(OllamaBackend, "structured_suggest", scripted)
 
-    args = _suggestions_cli_args(path, "user:reviewer") + ["--llm-model", "scripted-m2b"]
+    args = _suggestions_cli_args(path, "user:reviewer") + [
+        "--llm-model",
+        "scripted-m2b",
+        "--ollama-timeout",
+        "135",
+    ]
 
     allowed = runner.invoke(app, args)
     assert allowed.exit_code == 0, allowed.output
@@ -385,6 +397,7 @@ def test_m2b_cli_invokes_model_only_with_view(
     # Two candidates with the same pattern and ACL produce one request.
     assert len(calls) == 1
     assert calls[0][0] == "ollama:scripted-m2b"
+    assert calls[0][2] == 135.0
 
     evidence = calls[0][1]["evidence"]
     assert len(evidence) == 1

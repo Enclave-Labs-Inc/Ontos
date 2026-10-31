@@ -191,3 +191,89 @@ async def test_non_sovereign_backend_refused_before_call() -> None:
         )
 
     assert backend.calls == []
+
+
+def test_new_relation_type_prompt_matches_validation_rule() -> None:
+    """The model must not invent a renamed relation type."""
+    from ontos.ontology.suggestion_requests import _SYSTEM
+
+    assert (
+        "For new_relation_type, use the observed predicate unchanged; do not rename it."
+    ) in _SYSTEM
+    assert "propose a lower_snake_case label" not in _SYSTEM
+
+
+@pytest.mark.asyncio
+async def test_large_acl_is_split_without_mixing_evidence() -> None:
+    """101 distinct patterns require two independent model requests."""
+    backend = ScriptedBackend()
+
+    candidates = [_candidate(f"finance-{i}", "finance", f"rel_{i:03d}") for i in range(101)] + [
+        _candidate("legal", "legal", "legal_relation"),
+        _candidate("public", None, "public_relation"),
+    ]
+
+    responses = await request_acl_isolated_suggestions(
+        authorized_candidates=candidates,
+        ontology=_ontology(),
+        backend=backend,
+    )
+
+    assert len(backend.calls) == 4
+    assert len(responses) == 4
+
+    finance = [r for r in responses if r.acl_ref == "finance"]
+    assert [len(r.evidence_patterns) for r in finance] == [100, 1]
+
+    seen: set[str] = set()
+
+    for response, (_, user, schema) in zip(responses, backend.calls, strict=True):
+        evidence = json.loads(user)["evidence"]
+
+        assert len(evidence) == len(response.evidence_patterns)
+        assert 1 <= len(evidence) <= 100
+        assert [item["candidate_id"] for item in evidence] == list(range(len(evidence)))
+
+        allowed_ids = schema["properties"]["proposals"]["items"]["properties"]["candidate_id"][
+            "enum"
+        ]
+        assert allowed_ids == list(range(len(evidence)))
+
+        predicates = {item["predicate"] for item in evidence}
+        assert not (seen & predicates)
+        seen.update(predicates)
+
+        assert "SECRET-" not in user
+        assert "finance" not in user
+        assert "legal_relation" not in user or response.acl_ref == "legal"
+        assert "public_relation" not in user or response.acl_ref is None
+
+    assert len(seen) == 103
+    assert {r.acl_ref for r in responses} == {"finance", "legal", None}
+
+
+@pytest.mark.asyncio
+async def test_second_acl_batch_failure_aborts_generation() -> None:
+    """A later batch failure must not return earlier batch results."""
+
+    class FailingSecondBatch(ScriptedBackend):
+        async def structured_suggest(
+            self, system: str, user: str, schema: dict[str, Any]
+        ) -> dict[str, Any]:
+            response = await super().structured_suggest(system, user, schema)
+            if len(self.calls) == 2:
+                raise RuntimeError("second batch unavailable")
+            return response
+
+    backend = FailingSecondBatch()
+
+    candidates = [_candidate(f"source-{i}", "finance", f"rel_{i:03d}") for i in range(101)]
+
+    with pytest.raises(RuntimeError, match="second batch unavailable"):
+        await request_acl_isolated_suggestions(
+            authorized_candidates=candidates,
+            ontology=_ontology(),
+            backend=backend,
+        )
+
+    assert len(backend.calls) == 2
