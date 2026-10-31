@@ -118,8 +118,9 @@ def _seed_suggestion_candidates(
     path: Path,
     *,
     acl: str = "acl:finance",
+    predicate_override: str | None = None,
 ) -> tuple[str, str, str]:
-    """Persist two candidates for an existing relation but missing pattern."""
+    """Persist two same-ACL candidates; deterministic by default."""
     import asyncio
 
     from ontos.extraction import (
@@ -145,6 +146,9 @@ def _seed_suggestion_candidates(
     assert missing is not None
 
     subject_type, predicate, object_type = missing
+    if predicate_override is not None:
+        assert ontology.relation_type(predicate_override) is None
+        predicate = predicate_override
 
     def candidate(source: str) -> RejectedCandidate:
         return RejectedCandidate(
@@ -178,7 +182,7 @@ def _seed_suggestion_candidates(
             await store.close()
 
     asyncio.run(seed())
-    return missing
+    return (subject_type, predicate, object_type)
 
 
 def _suggestions_cli_args(path: Path, subject: str) -> list[str]:
@@ -322,3 +326,169 @@ def test_suggestions_cli_non_reviewer_denial_persistently_audited(
             await audit.close()
 
     asyncio.run(verify())
+
+
+def test_m2b_cli_invokes_model_only_with_view(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI selects M2b; VIEW-less evidence never reaches the model."""
+    import json
+
+    from ontos.authz import ONTOLOGY_REVIEWER, VIEW, InMemoryAuthz
+    from ontos.llm.ollama import OllamaBackend
+
+    path = tmp_path / "m2b-candidates.pkl"
+    expected_pattern = _seed_suggestion_candidates(
+        path,
+        predicate_override="m2b_scripted_relation",
+    )
+
+    monkeypatch.setenv(
+        "ONTOS_AUDIT_DB_URL",
+        f"sqlite+aiosqlite:///{tmp_path / 'm2b-audit.sqlite'}",
+    )
+    monkeypatch.setenv(
+        "ONTOS_AUDIT_SIGNING_KEY",
+        "m2b-cli-scripted-signing-key",
+    )
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    authz.grant("user:reviewer", VIEW, "acl:finance")
+
+    monkeypatch.setattr(
+        "ontos.runtime.server.build_authz",
+        lambda cfg: authz,
+    )
+
+    calls: list[tuple[str, dict[str, object], float]] = []
+
+    async def scripted(
+        self: OllamaBackend,
+        *,
+        system: str,
+        user: str,
+        schema: dict[str, object],
+    ) -> dict[str, object]:
+        payload = json.loads(user)
+        calls.append((self.id, payload, self._timeout_s))
+
+        assert schema["type"] == "object"
+        assert "SECRET" not in user
+
+        return {"proposals": []}
+
+    monkeypatch.setattr(OllamaBackend, "structured_suggest", scripted)
+
+    args = _suggestions_cli_args(path, "user:reviewer") + [
+        "--llm-model",
+        "scripted-m2b",
+        "--ollama-timeout",
+        "135",
+    ]
+
+    allowed = runner.invoke(app, args)
+    assert allowed.exit_code == 0, allowed.output
+
+    payload = json.loads(allowed.stdout)
+    assert payload["suggestions"] == []
+
+    # Two candidates with the same pattern and ACL produce one request.
+    assert len(calls) == 1
+    assert calls[0][0] == "ollama:scripted-m2b"
+    assert calls[0][2] == 135.0
+
+    evidence = calls[0][1]["evidence"]
+    assert len(evidence) == 1
+    assert (
+        evidence[0]["subject_type"],
+        evidence[0]["predicate"],
+        evidence[0]["object_type"],
+    ) == expected_pattern
+
+    assert "finance-one" not in str(calls)
+    assert "finance-two" not in str(calls)
+    assert "acl:finance" not in str(calls)
+    assert "finance-one" not in allowed.stdout
+    assert "finance-two" not in allowed.stdout
+
+    # Reviewer role remains, but source VIEW is revoked.
+    authz.revoke("user:reviewer", VIEW, "acl:finance")
+
+    no_view = runner.invoke(app, args)
+    assert no_view.exit_code == 0, no_view.output
+    assert json.loads(no_view.stdout)["suggestions"] == []
+
+    # No additional model request is permitted.
+    assert len(calls) == 1
+
+
+def test_m2b_cli_refuses_remote_endpoint_before_inspection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Untrusted Ollama configuration fails closed through the CLI."""
+    from ontos.authz import ONTOLOGY_REVIEWER, VIEW, InMemoryAuthz
+    from ontos.llm.ollama import OllamaBackend
+
+    storage_path = tmp_path / "remote-test.pkl"
+    _seed_suggestion_candidates(storage_path)
+
+    monkeypatch.setenv(
+        "ONTOS_AUDIT_DB_URL",
+        f"sqlite+aiosqlite:///{tmp_path / 'remote-audit.sqlite'}",
+    )
+    monkeypatch.setenv(
+        "ONTOS_AUDIT_SIGNING_KEY",
+        "remote-endpoint-scripted-signing-key",
+    )
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reviewer", ONTOLOGY_REVIEWER, "ontology")
+    authz.grant("user:reviewer", VIEW, "acl:finance")
+
+    monkeypatch.setattr(
+        "ontos.runtime.server.build_authz",
+        lambda cfg: authz,
+    )
+
+    remote_backend = OllamaBackend(
+        "scripted-m2b",
+        base_url="http://10.0.0.5:11434",
+    )
+
+    async def forbidden_inspection(*args: object, **kwargs: object) -> None:
+        pytest.fail("Candidate inspection started for remote backend")
+
+    async def forbidden_model(
+        *,
+        system: str,
+        user: str,
+        schema: dict[str, object],
+    ) -> dict[str, object]:
+        pytest.fail("Remote backend received evidence")
+
+    monkeypatch.setattr(
+        "ontos.runtime.ontology_suggestions.inspect_candidates",
+        forbidden_inspection,
+    )
+    monkeypatch.setattr(remote_backend, "structured_suggest", forbidden_model)
+
+    # Replace only the CLI's backend factory. The production trust
+    # module still holds the real OllamaBackend class and checks the
+    # actual returned instance.
+    monkeypatch.setattr(
+        "ontos.llm.ollama.OllamaBackend",
+        lambda model: remote_backend,
+    )
+
+    args = _suggestions_cli_args(storage_path, "user:reviewer") + ["--llm-model", "scripted-m2b"]
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 1
+    assert "Ontology suggestions failed." in result.output
+    assert "10.0.0.5" not in result.output
+    assert "remote-test.pkl" not in result.output
+    assert "Traceback" not in result.output

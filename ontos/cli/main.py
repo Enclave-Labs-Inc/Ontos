@@ -1648,11 +1648,28 @@ def ontology_suggestions_list(
             help="Local NetworkX storage path, if not using --storage.",
         ),
     ] = None,
+    llm_model: Annotated[
+        str | None,
+        typer.Option(
+            "--llm-model",
+            help="Local Ollama model for M2b suggestions; omit for deterministic M2a.",
+        ),
+    ] = None,
+    ollama_timeout: Annotated[
+        float,
+        typer.Option(
+            "--ollama-timeout",
+            help="Ollama request timeout in seconds (default: 180).",
+        ),
+    ] = 180.0,
 ) -> None:
-    """List deterministic M2a proposals for an authorized local reviewer."""
+    """List audited, on-demand ontology suggestions for a local reviewer."""
+    import math
+
     import structlog
 
     from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.llm.ollama import OllamaBackend
     from ontos.ontology import load_ontology
     from ontos.runtime.candidate_inspection import CandidateInspectionDeniedError
     from ontos.runtime.ontology_suggestions import (
@@ -1664,6 +1681,9 @@ def ontology_suggestions_list(
 
     log = structlog.get_logger()
     storage_url, storage_password_env = _cli_storage_override(ctx)
+
+    if not math.isfinite(ollama_timeout) or ollama_timeout <= 0:
+        raise typer.BadParameter("--ollama-timeout must be a positive, finite number.")
 
     if storage_url is not None and storage_path is not None:
         raise typer.BadParameter("--storage and --storage-path cannot be used together.")
@@ -1756,6 +1776,11 @@ def ontology_suggestions_list(
                 subject=acting_on_behalf_of,
                 agent_identity="ontos-cli-local-operator",
                 identity_assurance="operator_asserted",
+                backend=(
+                    OllamaBackend(llm_model, timeout_s=ollama_timeout)
+                    if llm_model is not None
+                    else None
+                ),
             )
 
             typer.echo(

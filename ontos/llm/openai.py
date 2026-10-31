@@ -61,6 +61,11 @@ class OpenAIBackend:
         self._api_key = api_key
 
     @property
+    def sovereign(self) -> bool:
+        """Whether this backend is intended for sovereign deployment."""
+        return False
+
+    @property
     def id(self) -> str:
         return f"openai:{self._model}"
 

@@ -73,6 +73,11 @@ class AnthropicBackend:
         self.usage = LLMUsage()
 
     @property
+    def sovereign(self) -> bool:
+        """Whether this backend is intended for sovereign deployment."""
+        return False
+
+    @property
     def id(self) -> str:
         return f"anthropic:{self._model}"
 

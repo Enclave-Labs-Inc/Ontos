@@ -14,6 +14,52 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Added — sovereign ontology suggestions (#66 M2b, #89)
+- `ontos ontology suggestions list --llm-model MODEL` enables
+  LLM-assisted ontology suggestions using a local Ollama model.
+  Omitting the flag preserves deterministic M2a behavior.
+- M2a `add_pattern` suggestions run first. Only unresolved
+  unknown relationship types reach Ollama. The result combines
+  deterministic and validated LLM suggestions.
+- M2b supports `map_to_existing` and `new_relation_type`.
+  New relationship names must match the observed predicate.
+- Model requests are separated by source ACL and split into
+  batches of at most 100 distinct patterns per request.
+- The model receives only entity-type labels, safe predicates,
+  permitted mappings and request-local candidate indexes.
+  Candidate identities, source IDs and ACL values are excluded.
+- Suggestions are validated against the active ontology, with
+  supporting evidence and HMAC references computed server-side.
+- `--ollama-timeout SECONDS` sets the request timeout, defaulting
+  to 180 seconds. The value must be positive and finite.
+- M2b accepts only the approved local Ollama adapter through
+  an HTTP loopback endpoint. Remote Ollama endpoints, injected
+  HTTP clients, redirects, proxies and bridge LLMs are refused.
+- All requests remain authorized and audited, with generation
+  mode, approved generator identity/version and invalid proposal
+  counts in audit metadata. Suggestions are not persisted or
+  written into the trusted graph.
+
+### Compatibility notes — ontology suggestion consumers
+- The serialized `OntologySuggestion` shape now includes
+  `mapped_relation_type`, `proposed_relation_type`,
+  `observed_predicate` and `extractor_versions`. Existing M2a
+  `add_pattern` results include null values for the first three
+  fields and an empty list for `extractor_versions`.
+- M2a suggestion audit arguments now include `invalid_count: 0`.
+- M2b audit records identify LLM-assisted generation separately
+  from deterministic M2a generation. Approved generator ID and
+  version are recorded in M2b outcome audit metadata.
+- Consumers using a strict JSON schema or exact audit-field
+  matching must account for these additional fields.
+- `--llm-model` does not replace deterministic suggestions;
+  it adds eligible LLM-generated suggestions.
+- M2b uses the existing trusted-local-operator identity boundary.
+  No remotely callable ontology suggestion tool is introduced.
+- Approval, ontology migration and document re-ingestion remain
+  outside M2b and are planned for M3.
+
+
 ## [0.7.0] - 2026-10-29 - MCP authentication, rejected-candidate retention and ontology suggestions
 
 MCP callers can now be authenticated with JWTs from the customer's own
