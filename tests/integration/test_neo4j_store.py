@@ -1923,3 +1923,50 @@ async def test_search_entities_requires_a_visible_fact(
     assert await store.search_entities("Hidden Lab", allowed_acls=["acl:public"]) == []
     found = await store.search_entities("Hidden Lab", allowed_acls=["acl:secret"])
     assert [e.id for e in found] == ["Hidden Lab"]
+
+
+async def test_read_paths_hide_facts_with_invisible_endpoint_entities(
+    store: Neo4jStore,
+    sample_fact: Fact,
+) -> None:
+    """A public fact pointing at an entity a restricted document later claimed
+    must be hidden from every read path, as scan() already does."""
+    from uuid import uuid4
+
+    from ontos.runtime.models import Entity
+
+    await store.upsert_entity(
+        Entity(id="p", type="Person", canonical_name="Pat", provenance=sample_fact.provenance)
+    )
+    public = sample_fact.model_copy(
+        update={"id": uuid4(), "subject_id": "p", "predicate": "works_at", "object_id": "sc"}
+    )
+    await store.add_fact(public)
+    await store.upsert_entity(
+        Entity(
+            id="sc", type="Company", canonical_name="Secret Co", provenance=sample_fact.provenance
+        ),
+        acl_ref="acl:hr",
+    )
+
+    for allowed, visible in (([], False), (["acl:hr"], True)):
+        got = {
+            "search": [f.object_id for f in await store.search("works_at", allowed_acls=allowed)],
+            "traverse": [f.object_id for f in await store.traverse("p", allowed_acls=allowed)],
+            "facts_for_entity": [
+                f.object_id for f in await store.facts_for_entity("p", allowed_acls=allowed)
+            ],
+            "get_visible_fact": [
+                f.object_id
+                for f in [await store.get_visible_fact(public.id, allowed_acls=allowed)]
+                if f is not None
+            ],
+            "search_entities": [
+                e.id for e in await store.search_entities("Pat", allowed_acls=allowed)
+            ],
+        }
+        for name, ids in got.items():
+            expected = (["p"] if name == "search_entities" else ["sc"]) if visible else []
+            assert ids == expected, (allowed, name, ids)
+
+    assert (await store.scan(allowed_acls=[])).facts == []

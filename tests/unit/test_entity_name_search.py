@@ -88,8 +88,10 @@ async def test_search_does_not_match_names_of_invisible_entities() -> None:
     assert await store.search("Secret Corp") == []
     assert await store.search("Secret Corp", allowed_acls=[]) == []
     assert len(await store.search("Secret Corp", allowed_acls=["acl:hr"])) == 1
-    # The visible endpoint's own name still matches.
-    assert len(await store.search("Public Person")) == 1
+    # The whole fact is hidden, not just the restricted name: its other
+    # endpoint is invisible, and the fact would otherwise expose "c".
+    assert await store.search("Public Person") == []
+    assert len(await store.search("Public Person", allowed_acls=["acl:hr"])) == 1
 
 
 async def test_search_entities_resolves_names_with_acl() -> None:

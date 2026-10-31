@@ -533,10 +533,19 @@ class Neo4jStore:
         query = """
         MATCH (a:Entity)-[r:RELATES {fact_id: $fact_id}]->(b:Entity)
         WHERE
-            r.acl_ref IS NULL
-            OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
-            OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
-                AND r.acl_ref = $acl_subject)
+            (r.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND r.acl_ref = $acl_subject))
+            // Endpoint entities carry their own ACL (#48 None -> X upgrade).
+            AND (a.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND a.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND a.acl_ref = $acl_subject))
+            AND (b.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND b.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND b.acl_ref = $acl_subject))
         RETURN a.id AS subject_id, b.id AS object_id, properties(r) AS props
         LIMIT 1
         """
@@ -603,6 +612,16 @@ class Neo4jStore:
                                 WHERE toLower(alias) CONTAINS $needle))
                 )
             )
+            // A visible fact must not expose an endpoint entity the caller
+            // can't see; same rule as scan().
+            AND (a.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND a.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND a.acl_ref = $acl_subject))
+            AND (b.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND b.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND b.acl_ref = $acl_subject))
         RETURN a.id AS subject_id, b.id AS object_id, properties(r) AS props
         LIMIT $k
         """
@@ -640,7 +659,7 @@ class Neo4jStore:
             // Raw nodes carry no ACL of their own: require a fact the caller
             // can see, or an entity known only via forbidden facts would leak.
             AND EXISTS {
-                MATCH (n)-[r:RELATES]-(:Entity)
+                MATCH (n)-[r:RELATES]-(m:Entity)
                 WHERE ((($as_of IS NULL AND r.t_invalid IS NULL)
                         OR ($as_of IS NOT NULL AND r.t_valid <= $as_of
                             AND (r.t_invalid IS NULL OR r.t_invalid > $as_of))))
@@ -648,6 +667,10 @@ class Neo4jStore:
                        OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
                        OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
                            AND r.acl_ref = $acl_subject))
+                  AND (m.acl_ref IS NULL
+                   OR ($allowed_acls IS NOT NULL AND m.acl_ref IN $allowed_acls)
+                   OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                       AND m.acl_ref = $acl_subject))
             }
         WITH n,
              CASE WHEN toLower(n.id) = $needle
@@ -712,6 +735,12 @@ class Neo4jStore:
             )
             AND ($relation IS NULL OR r.predicate = $relation)
         )
+        // Every node on the path must be visible: entities carry their own
+        // ACL, and a hidden node must not be traversed into or through.
+        AND ALL(node IN nodes(path) WHERE (node.acl_ref IS NULL
+                 OR ($allowed_acls IS NOT NULL AND node.acl_ref IN $allowed_acls)
+                 OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                     AND node.acl_ref = $acl_subject)))
         UNWIND rels AS r
         WITH DISTINCT r, startNode(r) AS a, endNode(r) AS b
         RETURN a.id AS subject_id, b.id AS object_id, properties(r) AS props
@@ -753,6 +782,14 @@ class Neo4jStore:
                 OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
                     AND r.acl_ref = $acl_subject)
             )
+            AND (n.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND n.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND n.acl_ref = $acl_subject))
+            AND (other.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND other.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND other.acl_ref = $acl_subject))
         RETURN startNode(r).id AS subject_id,
                endNode(r).id AS object_id,
                properties(r) AS props
