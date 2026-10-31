@@ -115,7 +115,9 @@ jobs:
     # Linux-only CI stayed green while every export broke on M-series Macs.
     # No Docker on macOS runners, so integration + Helm stay on ubuntu.
     name: test (macOS arm64)
-    runs-on: macos-14
+    # macos-14 images retire 2026-11-02 (actions/runner-images#13518);
+    # macos-15 is still Apple Silicon (arm64).
+    runs-on: macos-15
     timeout-minutes: 15
 
     steps:
