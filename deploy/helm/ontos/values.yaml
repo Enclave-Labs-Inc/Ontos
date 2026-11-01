@@ -26,6 +26,10 @@ runtime:
     ONTOS_AUTHZ_BACKEND: openfga
     # ONTOS_ONTOLOGY_PATH is set via configMap by default; override
     # here to point at a mounted per-tenant ontology.
+    # Enable the `ask` tool with an in-VPC Ollama (needs the ontology):
+    # ONTOS_PLANNER_BACKEND: ollama
+    # ONTOS_PLANNER_MODEL: llama3.1:8b
+    # ONTOS_PLANNER_URL: http://ollama.ontos.svc:11434
 
   # Secret ref for the audit signing key. In production this Secret
   # is populated by an external-secrets ExternalSecret sourced from

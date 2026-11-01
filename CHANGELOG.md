@@ -14,6 +14,19 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — `ask` works under `ontos serve` and hides planner errors (#101)
+- **`ask` can now be enabled.** Nothing ever built a planner for the server,
+  so `ask` always answered "no planner configured". Set
+  `ONTOS_PLANNER_BACKEND=ollama` with `ONTOS_PLANNER_MODEL`,
+  `ONTOS_PLANNER_URL`, `ONTOS_PLANNER_TIMEOUT` and `ONTOS_ONTOLOGY_PATH`.
+  Only the local Ollama backend is offered, so planning stays inside the
+  customer's VPC. An unknown backend, or a missing ontology, stops the server
+  at boot.
+- **Planner errors are no longer echoed.** A failed plan used to return
+  `str(exc)` to the caller and write it into the audit record; that text comes
+  from the model or provider. Callers now get "the question could not be
+  planned". The audit record and logs carry only the error type.
+
 ### Security — exports no longer reveal entities named only by forbidden facts (#100)
 - **The leak.** `add_fact` creates an untyped endpoint node for every id it
   references. `scan()`, which every `ontos export` format uses, treated those
