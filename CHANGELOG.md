@@ -14,6 +14,16 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — storage reads are deterministic and match across backends (#102)
+- **Neo4j `search`** applied `LIMIT k` to an unordered match, so the top-k set
+  could change between calls. It now scores matches exactly like NetworkX
+  (exact field match 1.0, otherwise by match length). Ties go to the oldest
+  `ingested_at`, then `fact_id`. A raw node's placeholder name no longer
+  affects the score.
+- **NetworkX `traverse(direction="both")`** returned an edge once from each
+  end. It now returns each fact once.
+- **Ordering.** Both backends return traversals in the same ingest order.
+
 ### Fixed — `ontos query` and `ontos ingest` are audited (#94)
 - **One Article-12 record per invocation.** Both commands touched the graph
   without writing any record. They now write one each, success or failure, to
