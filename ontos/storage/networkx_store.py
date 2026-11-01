@@ -700,6 +700,21 @@ class NetworkxStore:
                 continue
             facts.append(fact)
 
+        # #100: `add_fact` creates untyped nodes for its endpoints. One is
+        # exported only alongside a fact that names it; otherwise an id that
+        # appears only in forbidden facts would reveal those facts exist.
+        exported_entity_ids = (
+            visible_entity_ids
+            if include_all_acls
+            else {
+                entity_id
+                for entity_id in visible_entity_ids
+                if self._graph.nodes[entity_id].get("type") is not None
+            }
+            | {fact.subject_id for fact in facts}
+            | {fact.object_id for fact in facts}
+        )
+
         # Merge records are user-visible export data, so unlike the legacy
         # merges_for_entity(None) path they are always ACL-filtered here.
         merge_allowed_set = (
@@ -731,11 +746,11 @@ class NetworkxStore:
             # Older stores may contain merge audit endpoints that were never
             # explicitly upserted. Preserve those raw IDs as minimal nodes so
             # exporters never emit dangling MERGED_WITH relationships.
-            visible_entity_ids.add(record.canonical_id)
-            visible_entity_ids.update(record.merged_ids)
+            exported_entity_ids.add(record.canonical_id)
+            exported_entity_ids.update(record.merged_ids)
 
         entities: list[StoredEntity] = []
-        for entity_id in visible_entity_ids:
+        for entity_id in exported_entity_ids:
             attrs = self._graph.nodes.get(entity_id, {})
             entities.append(
                 StoredEntity(
