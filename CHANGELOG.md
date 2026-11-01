@@ -14,6 +14,17 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Security — exports no longer reveal entities named only by forbidden facts (#100)
+- **The leak.** `add_fact` creates an untyped endpoint node for every id it
+  references. `scan()`, which every `ontos export` format uses, treated those
+  ACL-less nodes as public. An export therefore dropped a restricted fact but
+  still listed its endpoint, which proves the hidden fact exists. This was the
+  same leak #82 and #91 fixed for search, traversal and entity search.
+- **The fix, in NetworkX and Neo4j.** An untyped node is now exported only
+  when a fact or merge record in the same scan names it. Typed entities follow
+  their own ACL as before. The privileged `--include-acl-mask` export is
+  unchanged.
+
 ### Fixed — `ontos query` and `ontos ingest` are audited (#94)
 - **One Article-12 record per invocation.** Both commands touched the graph
   without writing any record. They now write one each, success or failure, to
