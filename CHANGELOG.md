@@ -27,6 +27,50 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 - **Benchmark.** On a 40-node clique at depth 4 the traversal takes 2.6s.
   Before this change the run didn't finish within the 4-minute limit.
 
+### Fixed — executor reports each fact's real hop distance (#103)
+- **Wrong distances.** `DeterministicExecutor` stamped every fact a traversal
+  step returned with one hop. With `TraversalStep(depth=3)`, a fact three
+  hops from the seed scored like a direct neighbour, and `hops_from_seed`
+  was wrong.
+- **The fix.** Each fact's distance from the step's start is now computed
+  over the step's results, following the step's direction, and adds up across
+  steps. Distances are computed before migration translation, so a fact the
+  migration drops can't make the facts beyond it look unreachable.
+
+### Fixed — storage reads are deterministic and match across backends (#102)
+- **Neo4j `search`** applied `LIMIT k` to an unordered match, so the top-k set
+  could change between calls. It now scores matches exactly like NetworkX
+  (exact field match 1.0, otherwise by match length). Ties go to the oldest
+  `ingested_at`, then `fact_id`. A raw node's placeholder name no longer
+  affects the score.
+- **NetworkX `traverse(direction="both")`** returned an edge once from each
+  end. It now returns each fact once.
+- **Ordering.** Both backends return traversals in the same ingest order.
+
+### Fixed — `ask` works under `ontos serve` and hides planner errors (#101)
+- **`ask` can now be enabled.** Nothing ever built a planner for the server,
+  so `ask` always answered "no planner configured". Set
+  `ONTOS_PLANNER_BACKEND=ollama` with `ONTOS_PLANNER_MODEL`,
+  `ONTOS_PLANNER_URL`, `ONTOS_PLANNER_TIMEOUT` and `ONTOS_ONTOLOGY_PATH`.
+  Only the local Ollama backend is offered, so planning stays inside the
+  customer's VPC. An unknown backend, or a missing ontology, stops the server
+  at boot.
+- **Planner errors are no longer echoed.** A failed plan used to return
+  `str(exc)` to the caller and write it into the audit record; that text comes
+  from the model or provider. Callers now get "the question could not be
+  planned". The audit record and logs carry only the error type.
+
+### Security — exports no longer reveal entities named only by forbidden facts (#100)
+- **The leak.** `add_fact` creates an untyped endpoint node for every id it
+  references. `scan()`, which every `ontos export` format uses, treated those
+  ACL-less nodes as public. An export therefore dropped a restricted fact but
+  still listed its endpoint, which proves the hidden fact exists. This was the
+  same leak #82 and #91 fixed for search, traversal and entity search.
+- **The fix, in NetworkX and Neo4j.** An untyped node is now exported only
+  when a fact or merge record in the same scan names it. Typed entities follow
+  their own ACL as before. The privileged `--include-acl-mask` export is
+  unchanged.
+
 ### Fixed — `ontos query` and `ontos ingest` are audited (#94)
 - **One Article-12 record per invocation.** Both commands touched the graph
   without writing any record. They now write one each, success or failure, to

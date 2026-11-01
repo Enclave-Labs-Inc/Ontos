@@ -423,7 +423,8 @@ class NetworkxStore:
             if needle in hay:
                 score = 1.0 if needle in lowered else 0.5 + (len(needle) / max(len(hay), 1)) * 0.5
                 matches.append((score, fact))
-        matches.sort(key=lambda pair: pair[0], reverse=True)
+        # Same order as Neo4jStore.search (#102).
+        matches.sort(key=lambda pair: (-pair[0], *_read_order(pair[1])))
         return [fact for _, fact in matches[:k]]
 
     async def search_entities(
@@ -534,7 +535,8 @@ class NetworkxStore:
     ) -> Iterable[Fact]:
         if start not in self._graph:
             return []
-        collected: list[Fact] = []
+        # Keyed by id: with direction="both" an edge is reached from each end.
+        collected: dict[UUID, Fact] = {}
         frontier: set[str] = {start}
         seen: set[str] = {start}
         allowed_set = set(allowed_acls) if allowed_acls is not None else None
@@ -553,7 +555,7 @@ class NetworkxStore:
                         if not self._fact_visible(fact, acl_subject, allowed_set):
                             continue
 
-                        collected.append(fact)
+                        collected.setdefault(fact.id, fact)
 
                         if target not in seen:
                             seen.add(target)
@@ -569,7 +571,7 @@ class NetworkxStore:
                         if not self._fact_visible(fact, acl_subject, allowed_set):
                             continue
 
-                        collected.append(fact)
+                        collected.setdefault(fact.id, fact)
 
                         if source not in seen:
                             seen.add(source)
@@ -579,7 +581,8 @@ class NetworkxStore:
             if not frontier:
                 break
 
-        return collected
+        # Same order as Neo4jStore.traverse (#102).
+        return sorted(collected.values(), key=_read_order)
 
     async def facts_for_entity(
         self,
@@ -697,6 +700,21 @@ class NetworkxStore:
                 continue
             facts.append(fact)
 
+        # #100: `add_fact` creates untyped nodes for its endpoints. One is
+        # exported only alongside a fact that names it; otherwise an id that
+        # appears only in forbidden facts would reveal those facts exist.
+        exported_entity_ids = (
+            visible_entity_ids
+            if include_all_acls
+            else {
+                entity_id
+                for entity_id in visible_entity_ids
+                if self._graph.nodes[entity_id].get("type") is not None
+            }
+            | {fact.subject_id for fact in facts}
+            | {fact.object_id for fact in facts}
+        )
+
         # Merge records are user-visible export data, so unlike the legacy
         # merges_for_entity(None) path they are always ACL-filtered here.
         merge_allowed_set = (
@@ -728,11 +746,11 @@ class NetworkxStore:
             # Older stores may contain merge audit endpoints that were never
             # explicitly upserted. Preserve those raw IDs as minimal nodes so
             # exporters never emit dangling MERGED_WITH relationships.
-            visible_entity_ids.add(record.canonical_id)
-            visible_entity_ids.update(record.merged_ids)
+            exported_entity_ids.add(record.canonical_id)
+            exported_entity_ids.update(record.merged_ids)
 
         entities: list[StoredEntity] = []
-        for entity_id in visible_entity_ids:
+        for entity_id in exported_entity_ids:
             attrs = self._graph.nodes.get(entity_id, {})
             entities.append(
                 StoredEntity(
@@ -922,6 +940,15 @@ class NetworkxStore:
         self._merges.clear()
         self._candidates.clear()
         self._candidate_order.clear()
+
+
+def _read_order(fact: Fact) -> tuple[float, str]:
+    """Tie-break shared with Neo4jStore: oldest ingest first, then fact id.
+
+    `timestamp()` because `Fact` doesn't require timezone-aware datetimes, and
+    naive and aware values can't be compared directly.
+    """
+    return fact.ingested_at.timestamp(), str(fact.id)
 
 
 def _entity_attrs_visible(

@@ -19,6 +19,8 @@ import pytest
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.neo4j_store import Neo4jStore
 from tests.compliance.test_bitemporal_integrity import CHECKS as BITEMPORAL_CHECKS
+from tests.compliance.test_scan_raw_endpoint_leak import CHECKS as SCAN_LEAK_CHECKS
+from tests.unit.test_storage_read_determinism import CHECKS as DETERMINISM_CHECKS
 
 pytestmark = pytest.mark.integration
 
@@ -1980,4 +1982,18 @@ async def test_read_paths_hide_facts_with_invisible_endpoint_entities(
 )
 async def test_bitemporal_write_integrity(store: Neo4jStore, check) -> None:  # type: ignore[no-untyped-def]
     """#95: the Neo4j backend meets the same write contract as NetworkX."""
+    await check(store)
+
+
+@pytest.mark.parametrize(
+    "check", DETERMINISM_CHECKS, ids=lambda c: c.__name__.removeprefix("check_")
+)
+async def test_read_determinism(store: Neo4jStore, check) -> None:  # type: ignore[no-untyped-def]
+    """#102: Neo4j orders search and traverse exactly like NetworkX."""
+    await check(store)
+
+
+@pytest.mark.parametrize("check", SCAN_LEAK_CHECKS, ids=lambda c: c.__name__.removeprefix("check_"))
+async def test_scan_raw_endpoint_leak(store: Neo4jStore, check) -> None:  # type: ignore[no-untyped-def]
+    """#100: Neo4j scan hides untyped nodes named only by forbidden facts."""
     await check(store)

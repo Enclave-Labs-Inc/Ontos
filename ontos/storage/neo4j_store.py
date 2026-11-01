@@ -621,9 +621,11 @@ class Neo4jStore:
         allowed_acls: list[str] | None = None,
     ) -> list[Fact]:
         # Substring match over ids, predicate, and names/aliases of endpoint
-        # entities the caller can see — same rule as NetworkxStore (#82).
-        # Entity names carry the entity's ACL, not the fact's. M3 upgrades
-        # to full-text + vector hybrid.
+        # entities the caller can see, scored and ordered exactly like
+        # NetworkxStore (#82, #102). Endpoints are visible by the WHERE
+        # below, so their names are too; only typed (upserted) nodes have
+        # names, as `add_fact` sets canonical_name = id on raw nodes.
+        # M3 upgrades to full-text + vector hybrid.
         cypher = """
         MATCH (a:Entity)-[r:RELATES]->(b:Entity)
         WHERE
@@ -641,27 +643,6 @@ class Neo4jStore:
                 OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
                     AND r.acl_ref = $acl_subject)
             )
-            AND (
-                toLower(a.id + " " + r.predicate + " " + b.id) CONTAINS $needle
-                OR (
-                    (a.acl_ref IS NULL
-                     OR ($allowed_acls IS NOT NULL AND a.acl_ref IN $allowed_acls)
-                     OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
-                         AND a.acl_ref = $acl_subject))
-                    AND (toLower(coalesce(a.canonical_name, "")) CONTAINS $needle
-                         OR any(alias IN coalesce(a.aliases, [])
-                                WHERE toLower(alias) CONTAINS $needle))
-                )
-                OR (
-                    (b.acl_ref IS NULL
-                     OR ($allowed_acls IS NOT NULL AND b.acl_ref IN $allowed_acls)
-                     OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
-                         AND b.acl_ref = $acl_subject))
-                    AND (toLower(coalesce(b.canonical_name, "")) CONTAINS $needle
-                         OR any(alias IN coalesce(b.aliases, [])
-                                WHERE toLower(alias) CONTAINS $needle))
-                )
-            )
             // A visible fact must not expose an endpoint entity the caller
             // can't see; same rule as scan().
             AND (a.acl_ref IS NULL
@@ -672,7 +653,22 @@ class Neo4jStore:
              OR ($allowed_acls IS NOT NULL AND b.acl_ref IN $allowed_acls)
              OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
                  AND b.acl_ref = $acl_subject))
+        WITH a, r, b,
+             [f IN
+                 [a.id, r.predicate, b.id]
+                 + CASE WHEN a.type IS NULL THEN []
+                        ELSE [a.canonical_name] + coalesce(a.aliases, []) END
+                 + CASE WHEN b.type IS NULL THEN []
+                        ELSE [b.canonical_name] + coalesce(b.aliases, []) END
+              WHERE f IS NOT NULL AND f <> "" | toLower(f)] AS lowered
+        WITH a, r, b, lowered,
+             reduce(hay = head(lowered), f IN tail(lowered) | hay + " " + f) AS hay
+        WHERE hay CONTAINS $needle
+        WITH a, r, b,
+             CASE WHEN $needle IN lowered THEN 1.0
+                  ELSE 0.5 + (toFloat(size($needle)) / size(hay)) * 0.5 END AS score
         RETURN a.id AS subject_id, b.id AS object_id, properties(r) AS props
+        ORDER BY score DESC, r.ingested_at, r.fact_id
         LIMIT $k
         """
         async with self._driver.session(database=self._database) as session:
@@ -1060,10 +1056,6 @@ class Neo4jStore:
             )
             merge_rows = await merge_result.data()
 
-        entities: list[StoredEntity] = []
-        for row in entity_rows:
-            entities.append(_stored_entity_from_props(row["id"], row["props"]))
-
         facts = [
             _edge_props_to_fact(
                 row["subject_id"],
@@ -1071,6 +1063,19 @@ class Neo4jStore:
                 row["props"],
             )
             for row in fact_rows
+        ]
+
+        # #100: `add_fact` MERGEs untyped endpoint nodes. One is exported only
+        # alongside a fact or merge record that names it; otherwise an id that
+        # appears only in forbidden facts would reveal those facts exist.
+        named = {fact.subject_id for fact in facts} | {fact.object_id for fact in facts}
+        for row in merge_rows:
+            named.add(row["canonical_id"])
+            named.update(row["merged_ids"])
+        entities = [
+            _stored_entity_from_props(row["id"], row["props"])
+            for row in entity_rows
+            if include_all_acls or row["props"].get("type") is not None or row["id"] in named
         ]
 
         merges: list[MergeRecord] = []

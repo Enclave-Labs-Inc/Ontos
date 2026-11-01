@@ -119,6 +119,12 @@ class RuntimeConfig:
     # #93: true when ONTOS_AUDIT_DB_URL is set explicitly. `audit_db_url`
     # always has a SQLite default, so it can't tell the two apart.
     audit_persistent: bool = False
+    # #101: the `ask` tool's planner. "none" leaves `ask` disabled. Only the
+    # local Ollama backend is offered, so planning prompts stay in the VPC.
+    planner_backend: str = "none"
+    planner_model: str = "llama3.1:8b"
+    planner_url: str = "http://localhost:11434"
+    planner_timeout_s: float = 60.0
 
     def with_storage_override(self, storage: StorageConfig) -> RuntimeConfig:
         """Return this runtime config with only storage settings overridden.
@@ -192,4 +198,8 @@ class RuntimeConfig:
             ),
             allow_unauthenticated_bind=os.getenv("ONTOS_ALLOW_UNAUTHENTICATED_BIND") == "1",
             audit_persistent=bool(os.getenv("ONTOS_AUDIT_DB_URL")),
+            planner_backend=os.getenv("ONTOS_PLANNER_BACKEND", "none").lower(),
+            planner_model=os.getenv("ONTOS_PLANNER_MODEL", "llama3.1:8b"),
+            planner_url=os.getenv("ONTOS_PLANNER_URL", "http://localhost:11434"),
+            planner_timeout_s=float(os.getenv("ONTOS_PLANNER_TIMEOUT", "60")),
         )

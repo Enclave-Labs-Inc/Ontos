@@ -195,6 +195,32 @@ def build_authz(config: RuntimeConfig) -> AuthzBackend | None:
     )
 
 
+def build_planner(config: RuntimeConfig) -> Planner | None:
+    """The `ask` tool's planner from `ONTOS_PLANNER_*`, or None when disabled.
+
+    Planning needs the ontology, so `ONTOS_ONTOLOGY_PATH` is required with it.
+    """
+    if config.planner_backend in ("", "none"):
+        return None
+    if config.planner_backend != "ollama":
+        raise RuntimeError(
+            f"ONTOS_PLANNER_BACKEND={config.planner_backend!r} not supported. "
+            "Use 'none' or 'ollama'."
+        )
+    if config.ontology_path is None:
+        raise RuntimeError("ONTOS_PLANNER_BACKEND requires ONTOS_ONTOLOGY_PATH")
+    from ontos.llm import OllamaBackend
+    from ontos.ontology import load_ontology
+    from ontos.planner import LlmPlanner
+
+    llm = OllamaBackend(
+        config.planner_model,
+        base_url=config.planner_url,
+        timeout_s=config.planner_timeout_s,
+    )
+    return LlmPlanner(llm, load_ontology(config.ontology_path))
+
+
 def build_audit_sink(config: RuntimeConfig) -> AuditSink:
     """The Article-12 sink for a serving runtime.
 
@@ -245,7 +271,7 @@ def build_server(
     # store tools still work). This lets M0/M1 deployments run without
     # an LLM planner backend.
     resolved_executor: Executor = executor if executor is not None else DeterministicExecutor()
-    resolved_planner: Planner | None = planner
+    resolved_planner: Planner | None = planner if planner is not None else build_planner(cfg)
 
     async def _resolve_allowed_acls(
         subject: str | None,
@@ -712,6 +738,9 @@ def build_server(
         try:
             plan = await resolved_planner.plan(question, ontology)
         except PlannerError as exc:
+            # The message is model- or provider-derived; like every other
+            # tool failure (#92), only its type leaves this function.
+            log.warning("ask-planner-failed", error_type=type(exc).__name__)
             latency_ms = (time.perf_counter() - started) * 1000
             record = await _emit(
                 tool="ask",
@@ -722,13 +751,13 @@ def build_server(
                 latency_ms=latency_ms,
                 policy_decisions=[
                     *policy_decisions,
-                    {"policy": "planner", "result": f"error:{exc}"},
+                    {"policy": "planner", "result": "error", "error_type": type(exc).__name__},
                 ],
             )
             return ToolResponse(
                 query_id=record.query_id,
                 audit_hash=record.hash,
-                payload={"error": str(exc)},
+                payload={"error": "the question could not be planned"},
             )
 
         execution = await resolved_executor.execute(
