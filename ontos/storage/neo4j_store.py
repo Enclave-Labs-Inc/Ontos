@@ -1037,10 +1037,6 @@ class Neo4jStore:
             )
             merge_rows = await merge_result.data()
 
-        entities: list[StoredEntity] = []
-        for row in entity_rows:
-            entities.append(_stored_entity_from_props(row["id"], row["props"]))
-
         facts = [
             _edge_props_to_fact(
                 row["subject_id"],
@@ -1048,6 +1044,19 @@ class Neo4jStore:
                 row["props"],
             )
             for row in fact_rows
+        ]
+
+        # #100: `add_fact` MERGEs untyped endpoint nodes. One is exported only
+        # alongside a fact or merge record that names it; otherwise an id that
+        # appears only in forbidden facts would reveal those facts exist.
+        named = {fact.subject_id for fact in facts} | {fact.object_id for fact in facts}
+        for row in merge_rows:
+            named.add(row["canonical_id"])
+            named.update(row["merged_ids"])
+        entities = [
+            _stored_entity_from_props(row["id"], row["props"])
+            for row in entity_rows
+            if include_all_acls or row["props"].get("type") is not None or row["id"] in named
         ]
 
         merges: list[MergeRecord] = []
