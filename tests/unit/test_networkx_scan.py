@@ -317,6 +317,7 @@ async def test_from_scan_preserves_minimal_raw_entity() -> None:
     )
 
     store = NetworkxStore.from_scan(original)
-    loaded = await store.scan()
 
-    assert loaded == original
+    assert await store.scan(include_all_acls=True) == original
+    # #100: an untyped node no visible fact names is not exported.
+    assert (await store.scan()).entities == []
