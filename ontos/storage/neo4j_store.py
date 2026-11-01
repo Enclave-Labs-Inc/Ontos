@@ -754,21 +754,22 @@ class Neo4jStore:
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
     ) -> Iterable[Fact]:
-        # Depth is interpolated (not parameterized) because Cypher's
-        # variable-length pattern syntax requires literal bounds. We
-        # cap it defensively before interpolation.
         depth = max(1, min(depth, _MAX_TRAVERSAL_DEPTH))
-
-        path_patterns = {
-            "out": f"(start:Entity {{id: $start_id}})-[rels:RELATES*1..{depth}]->(end:Entity)",
-            "in": f"(start:Entity {{id: $start_id}})<-[rels:RELATES*1..{depth}]-(end:Entity)",
-            "both": f"(start:Entity {{id: $start_id}})-[rels:RELATES*1..{depth}]-(end:Entity)",
+        patterns = {
+            "out": "(n:Entity {id: node_id})-[r:RELATES]->(m:Entity)",
+            "in": "(n:Entity {id: node_id})<-[r:RELATES]-(m:Entity)",
+            "both": "(n:Entity {id: node_id})-[r:RELATES]-(m:Entity)",
         }
-        path_pattern = path_patterns[direction]
-
+        # One hop per query, breadth-first like NetworkxStore (#104). A
+        # variable-length pattern enumerated every path, which is exponential
+        # in depth on dense graphs; this visits each relationship once per
+        # level. A fact is reachable through some visible path within `depth`
+        # hops iff one of its endpoints is reached within `depth - 1`, so the
+        # result set is unchanged.
         cypher = f"""
-        MATCH path = {path_pattern}
-        WHERE ALL(r IN rels WHERE
+        UNWIND $frontier AS node_id
+        MATCH {patterns[direction]}
+        WHERE
             (
                 ($as_of IS NULL AND r.t_invalid IS NULL)
                 OR (
@@ -784,28 +785,50 @@ class Neo4jStore:
                     AND r.acl_ref = $acl_subject)
             )
             AND ($relation IS NULL OR r.predicate = $relation)
-        )
-        // Every node on the path must be visible: entities carry their own
-        // ACL, and a hidden node must not be traversed into or through.
-        AND ALL(node IN nodes(path) WHERE (node.acl_ref IS NULL
+            // Entities carry their own ACL: a hidden node is never traversed
+            // into or through.
+            AND ALL(node IN [n, m] WHERE (node.acl_ref IS NULL
                  OR ($allowed_acls IS NOT NULL AND node.acl_ref IN $allowed_acls)
                  OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
                      AND node.acl_ref = $acl_subject)))
-        UNWIND rels AS r
-        WITH DISTINCT r, startNode(r) AS a, endNode(r) AS b
-        RETURN a.id AS subject_id, b.id AS object_id, properties(r) AS props
+        RETURN DISTINCT startNode(r).id AS subject_id, endNode(r).id AS object_id,
+               properties(r) AS props, m.id AS neighbour
         """
-        async with self._driver.session(database=self._database) as session:
-            result = await session.run(
-                cypher,
-                start_id=start,
-                as_of=as_of,
-                acl_subject=acl_subject,
-                allowed_acls=allowed_acls,
-                relation=relation,
+
+        async def _bfs(tx: Any) -> list[Fact]:
+            facts: dict[str, Fact] = {}
+            seen = {start}
+            frontier = [start]
+            for _ in range(depth):
+                result = await tx.run(
+                    cypher,
+                    frontier=frontier,
+                    as_of=as_of,
+                    acl_subject=acl_subject,
+                    allowed_acls=allowed_acls,
+                    relation=relation,
+                )
+                next_frontier: list[str] = []
+                for row in await result.data():
+                    fact_id = row["props"]["fact_id"]
+                    if fact_id not in facts:
+                        facts[fact_id] = _edge_props_to_fact(
+                            row["subject_id"], row["object_id"], row["props"]
+                        )
+                    if row["neighbour"] not in seen:
+                        seen.add(row["neighbour"])
+                        next_frontier.append(row["neighbour"])
+                frontier = next_frontier
+                if not frontier:
+                    break
+            # Same order as NetworkxStore.traverse (#102).
+            return sorted(
+                facts.values(), key=lambda fact: (fact.ingested_at.timestamp(), str(fact.id))
             )
-            records = await result.data()
-        return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]
+
+        # One read transaction: every level sees the same snapshot.
+        async with self._driver.session(database=self._database) as session:
+            return await session.execute_read(_bfs)
 
     async def facts_for_entity(
         self,
