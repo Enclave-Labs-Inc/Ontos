@@ -72,6 +72,8 @@ async def _seed_graph(uri: str, password: str) -> None:
 
 
 class _StubPlanner:
+    id = "stub"
+
     def __init__(self, llm: object, ontology: object) -> None:
         self._ontology = ontology
 
@@ -86,8 +88,11 @@ class _StubPlanner:
 def test_storage_url_matches_environment_invocation_byte_for_byte(
     neo4j_container,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     """The same query must behave identically via env config and --storage."""
+    monkeypatch.setenv("ONTOS_AUDIT_DB_URL", f"sqlite+aiosqlite:///{tmp_path / 'audit.sqlite'}")
+    monkeypatch.setenv("ONTOS_AUDIT_SIGNING_KEY", "issue-37-test-key")
     connection_url = neo4j_container.get_connection_url()
     password = neo4j_container.password
 

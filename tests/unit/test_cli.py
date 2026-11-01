@@ -78,6 +78,8 @@ def test_ingest_threads_ollama_timeout_into_backend(
             captured_kwargs.update(kwargs)
 
     class _StubExtractor:
+        id = "stub"
+
         def __init__(self, llm: object, ontology: object) -> None:
             pass
 
@@ -129,6 +131,8 @@ def test_query_threads_ollama_timeout_into_backend(
             captured_kwargs.update(kwargs)
 
     class _StubPlanner:
+        id = "stub"
+
         def __init__(self, llm: object, ontology: object) -> None:
             pass
 
@@ -613,6 +617,8 @@ def test_cli_ingest_persists_facts_through_full_pipeline(
             pass
 
     class _StubExtractor:
+        id = "stub"
+
         def __init__(self, llm: object, ontology: object) -> None:
             pass
 
@@ -724,6 +730,8 @@ def test_cli_query_does_not_rewrite_the_store_file(
             pass
 
     class _StubPlanner:
+        id = "stub"
+
         def __init__(self, llm: object, ontology: object) -> None:
             pass
 
@@ -821,6 +829,8 @@ def test_query_threads_anthropic_model_and_key_into_backend(
             captured_kwargs.update(kwargs)
 
     class _StubPlanner:
+        id = "stub"
+
         def __init__(self, llm: object, ontology: object) -> None:
             pass
 
@@ -2044,6 +2054,8 @@ def test_ingest_candidate_retention_flag(
             pass
 
     class StubExtractor:
+        id = "stub"
+
         def __init__(self, llm: object, ontology: object) -> None:
             pass
 
