@@ -14,6 +14,16 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — executor reports each fact's real hop distance (#103)
+- **Wrong distances.** `DeterministicExecutor` stamped every fact a traversal
+  step returned with one hop. With `TraversalStep(depth=3)`, a fact three
+  hops from the seed scored like a direct neighbour, and `hops_from_seed`
+  was wrong.
+- **The fix.** Each fact's distance from the step's start is now computed
+  over the step's results, following the step's direction, and adds up across
+  steps. Distances are computed before migration translation, so a fact the
+  migration drops can't make the facts beyond it look unreachable.
+
 ### Fixed — `ontos query` and `ontos ingest` are audited (#94)
 - **One Article-12 record per invocation.** Both commands touched the graph
   without writing any record. They now write one each, success or failure, to
