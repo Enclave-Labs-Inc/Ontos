@@ -41,7 +41,7 @@ class SupersessionDecision(BaseModel):
     """What a SupersessionPolicy returns per new fact.
 
     - `facts_to_close`: pre-existing active facts the pipeline must
-      close via `store.close_fact(...)` AFTER adding the new fact.
+      close atomically with the new fact via `store.supersede(...)`.
     - `skip_add`: if True, the new fact is an idempotent re-ingest
       from the same source and must NOT be written again.
     - `new_fact_t_invalid` / `new_fact_superseded_by`: when a newer

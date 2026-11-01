@@ -18,6 +18,7 @@ import pytest
 
 from ontos.runtime.models import Confidence, Fact, Provenance
 from ontos.storage.neo4j_store import Neo4jStore
+from tests.compliance.test_bitemporal_integrity import CHECKS as BITEMPORAL_CHECKS
 
 pytestmark = pytest.mark.integration
 
@@ -1970,3 +1971,13 @@ async def test_read_paths_hide_facts_with_invisible_endpoint_entities(
             assert ids == expected, (allowed, name, ids)
 
     assert (await store.scan(allowed_acls=[])).facts == []
+
+
+@pytest.mark.parametrize(
+    "check",
+    BITEMPORAL_CHECKS,
+    ids=lambda c: c.__name__.removeprefix("check_"),
+)
+async def test_bitemporal_write_integrity(store: Neo4jStore, check) -> None:  # type: ignore[no-untyped-def]
+    """#95: the Neo4j backend meets the same write contract as NetworkX."""
+    await check(store)

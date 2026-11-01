@@ -488,31 +488,14 @@ class IngestPipeline:
                         reason=decision.record.reason if decision.record else "",
                     )
 
-                await self._store.add_fact(write_fact)
+                if decision.facts_to_close:
+                    await self._store.supersede(
+                        write_fact, [old.id for old in decision.facts_to_close]
+                    )
+                else:
+                    await self._store.add_fact(write_fact)
                 facts_written += 1
-
-                for old in decision.facts_to_close:
-                    try:
-                        await self._store.close_fact(
-                            old.id,
-                            t_invalid=write_fact.ingested_at,
-                            superseded_by=write_fact.id,
-                        )
-                    except Exception as exc:
-                        # Non-atomic add+close (deferred follow-up: a
-                        # supersede() atomic store method). Make partial
-                        # failure loud so operators can repair state.
-                        log.error(
-                            "close_fact failed after add_fact — "
-                            "store may be in double-active state for this scope",
-                            new_fact_id=str(write_fact.id),
-                            old_fact_id=str(old.id),
-                            subject_id=write_fact.subject_id,
-                            predicate=write_fact.predicate,
-                            error=str(exc),
-                        )
-                        raise
-                    facts_superseded += 1
+                facts_superseded += len(decision.facts_to_close)
 
                 if decision.facts_to_close:
                     log.warning(

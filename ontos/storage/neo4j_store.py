@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -36,7 +36,12 @@ from neo4j.time import DateTime as Neo4jDateTime
 from ontos.extraction.base import RejectedCandidate
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
-from ontos.storage.base import CrossAclUpsertError, StoredCandidate
+from ontos.storage.base import (
+    CrossAclUpsertError,
+    FactAlreadyExistsError,
+    FactNotOpenError,
+    StoredCandidate,
+)
 from ontos.storage.models import GraphScan, StoredEntity
 
 log = structlog.get_logger(__name__)
@@ -44,6 +49,52 @@ log = structlog.get_logger(__name__)
 # Cap traversal depth at the store boundary so a malformed caller can't
 # ask Neo4j for a billion-hop expansion. Callers may still cap lower.
 _MAX_TRAVERSAL_DEPTH = 10
+
+
+async def _create_fact_tx(tx: Any, fact: Fact) -> None:
+    # No relationship uniqueness constraint: creating one fails at boot on
+    # databases that already hold duplicates. The check and the CREATE share
+    # a transaction instead.
+    result = await tx.run(
+        """
+        OPTIONAL MATCH ()-[existing:RELATES {fact_id: $fact_id}]->()
+        WITH count(existing) AS duplicates
+        WHERE duplicates = 0
+        MERGE (a:Entity {id: $subject_id})
+          ON CREATE SET a.canonical_name = $subject_id
+        MERGE (b:Entity {id: $object_id})
+          ON CREATE SET b.canonical_name = $object_id
+        CREATE (a)-[r:RELATES $props]->(b)
+        RETURN count(r) AS created
+        """,
+        fact_id=str(fact.id),
+        subject_id=fact.subject_id,
+        object_id=fact.object_id,
+        props=_fact_to_edge_props(fact),
+    )
+    record = await result.single()
+    if record is None or record["created"] == 0:
+        raise FactAlreadyExistsError(f"fact {fact.id} is already stored")
+
+
+async def _close_fact_tx(
+    tx: Any, fact_id: UUID, t_invalid: datetime, superseded_by: UUID | None
+) -> bool:
+    """Close the fact if it is open; False if it is missing or already closed."""
+    result = await tx.run(
+        """
+        MATCH ()-[r:RELATES {fact_id: $fact_id}]->()
+        WHERE r.t_invalid IS NULL
+        SET r.t_invalid = $t_invalid,
+            r.superseded_by = $superseded_by
+        RETURN count(r) AS closed
+        """,
+        fact_id=str(fact_id),
+        t_invalid=t_invalid,
+        superseded_by=str(superseded_by) if superseded_by else None,
+    )
+    record = await result.single()
+    return record is not None and record["closed"] > 0
 
 
 def _fact_to_edge_props(fact: Fact) -> dict[str, Any]:
@@ -372,20 +423,19 @@ class Neo4jStore:
         ]
 
     async def add_fact(self, fact: Fact) -> None:
-        query = """
-        MERGE (a:Entity {id: $subject_id})
-          ON CREATE SET a.canonical_name = $subject_id
-        MERGE (b:Entity {id: $object_id})
-          ON CREATE SET b.canonical_name = $object_id
-        CREATE (a)-[r:RELATES $props]->(b)
-        """
         async with self._driver.session(database=self._database) as session:
-            await session.run(
-                query,
-                subject_id=fact.subject_id,
-                object_id=fact.object_id,
-                props=_fact_to_edge_props(fact),
-            )
+            await session.execute_write(_create_fact_tx, fact)
+
+    async def supersede(self, new_fact: Fact, closes: Sequence[UUID]) -> None:
+        async def _supersede_tx(tx: Any) -> None:
+            # Raising inside the transaction function rolls back every write.
+            await _create_fact_tx(tx, new_fact)
+            for fact_id in dict.fromkeys(closes):
+                if not await _close_fact_tx(tx, fact_id, new_fact.ingested_at, new_fact.id):
+                    raise FactNotOpenError(f"fact {fact_id} is missing or already closed")
+
+        async with self._driver.session(database=self._database) as session:
+            await session.execute_write(_supersede_tx)
 
     async def upsert_entity(self, entity: Entity, *, acl_ref: str | None = None) -> None:
         # #38: idempotent MERGE on (:Entity {id}). Last-write-wins on
@@ -497,18 +547,18 @@ class Neo4jStore:
         t_invalid: datetime,
         superseded_by: UUID | None = None,
     ) -> None:
-        query = """
-        MATCH ()-[r:RELATES {fact_id: $fact_id}]->()
-        SET r.t_invalid = $t_invalid,
-            r.superseded_by = $superseded_by
-        """
+        async def _tx(tx: Any) -> None:
+            if not await _close_fact_tx(tx, fact_id, t_invalid, superseded_by):
+                result = await tx.run(
+                    "MATCH ()-[r:RELATES {fact_id: $fact_id}]->() RETURN count(r) AS n",
+                    fact_id=str(fact_id),
+                )
+                record = await result.single()
+                if record is not None and record["n"] > 0:
+                    raise FactNotOpenError(f"fact {fact_id} is already closed")
+
         async with self._driver.session(database=self._database) as session:
-            await session.run(
-                query,
-                fact_id=str(fact_id),
-                t_invalid=t_invalid,
-                superseded_by=str(superseded_by) if superseded_by else None,
-            )
+            await session.execute_write(_tx)
 
     async def get_fact(self, fact_id: UUID) -> Fact | None:
         query = """
