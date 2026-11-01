@@ -14,6 +14,16 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — executor reports each fact's real hop distance (#103)
+- **Wrong distances.** `DeterministicExecutor` stamped every fact a traversal
+  step returned with one hop. With `TraversalStep(depth=3)`, a fact three
+  hops from the seed scored like a direct neighbour, and `hops_from_seed`
+  was wrong.
+- **The fix.** Each fact's distance from the step's start is now computed
+  over the step's results, following the step's direction, and adds up across
+  steps. Distances are computed before migration translation, so a fact the
+  migration drops can't make the facts beyond it look unreachable.
+
 ### Fixed — storage reads are deterministic and match across backends (#102)
 - **Neo4j `search`** applied `LIMIT k` to an unordered match, so the top-k set
   could change between calls. It now scores matches exactly like NetworkX

@@ -314,12 +314,14 @@ class DeterministicExecutor:
                                 allowed_acls=allowed_acls,
                             )
                         )
+                        distances = _hop_distances(start, facts, step.direction)
                         facts = await self._translate(facts, warnings)
                         _absorb(
                             facts,
                             collected,
                             hops_by_fact,
-                            current_hop + 1,
+                            current_hop,
+                            distances,
                             next_frontier,
                             step.direction,
                         )
@@ -334,12 +336,14 @@ class DeterministicExecutor:
                             allowed_acls=allowed_acls,
                         )
                     )
+                    distances = _hop_distances(start, facts, step.direction)
                     facts = await self._translate(facts, warnings)
                     _absorb(
                         facts,
                         collected,
                         hops_by_fact,
-                        current_hop + 1,
+                        current_hop,
+                        distances,
                         next_frontier,
                         step.direction,
                     )
@@ -422,16 +426,54 @@ class DeterministicExecutor:
         return scores
 
 
+def _hop_distances(
+    start: str,
+    facts: list[Fact],
+    direction: Literal["out", "in", "both"],
+) -> dict[Any, int]:
+    """Hops from `start` to each fact a step's traversal returned.
+
+    A multi-depth step returns facts up to `depth` hops out; stamping them
+    all with one hop scored a distant fact like a direct neighbour (#103).
+    Computed before migration translation, so a dropped fact can't make
+    later ones look unreachable.
+    """
+    neighbours: dict[str, list[tuple[Any, str]]] = {}
+    for f in facts:
+        if direction in ("out", "both"):
+            neighbours.setdefault(f.subject_id, []).append((f.id, f.object_id))
+        if direction in ("in", "both"):
+            neighbours.setdefault(f.object_id, []).append((f.id, f.subject_id))
+
+    distances: dict[Any, int] = {}
+    reached = {start}
+    level = [start]
+    hop = 0
+    while level:
+        hop += 1
+        next_level: list[str] = []
+        for node in level:
+            for fact_id, neighbour in neighbours.get(node, []):
+                distances.setdefault(fact_id, hop)
+                if neighbour not in reached:
+                    reached.add(neighbour)
+                    next_level.append(neighbour)
+        level = next_level
+    return distances
+
+
 def _absorb(
     facts: list[Fact],
     collected: dict[Any, Fact],
     hops_by_fact: dict[Any, int],
-    hop_distance: int,
+    current_hop: int,
+    distances: dict[Any, int],
     next_frontier: set[str],
     direction: Literal["out", "in", "both"],
 ) -> None:
     """Merge traversal facts and advance the frontier in traversal direction."""
     for f in facts:
+        hop_distance = current_hop + distances.get(f.id, 1)
         if f.id not in collected:
             collected[f.id] = f
             hops_by_fact[f.id] = hop_distance
