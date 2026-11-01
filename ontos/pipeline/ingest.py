@@ -223,6 +223,9 @@ class IngestReport(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     errors: list[IngestError] = Field(default_factory=list)
     supersession_records: list[SupersessionRecord] = Field(default_factory=list)
+    # For the run's Article-12 record (#94); left out of the printed report,
+    # which would otherwise grow with every fact.
+    written_fact_ids: list[str] = Field(default_factory=list, exclude=True)
 
     model_config = ConfigDict(frozen=True)
 
@@ -268,6 +271,7 @@ class IngestPipeline:
         documents_seen = 0
         documents_extracted = 0
         facts_written = 0
+        written_fact_ids: list[str] = []
         candidates_retained = 0
         facts_superseded = 0
         facts_reaffirmed = 0
@@ -495,6 +499,7 @@ class IngestPipeline:
                 else:
                     await self._store.add_fact(write_fact)
                 facts_written += 1
+                written_fact_ids.append(str(write_fact.id))
                 facts_superseded += len(decision.facts_to_close)
 
                 if decision.facts_to_close:
@@ -521,4 +526,5 @@ class IngestPipeline:
             warnings=warnings,
             errors=errors,
             supersession_records=supersession_records,
+            written_fact_ids=written_fact_ids,
         )

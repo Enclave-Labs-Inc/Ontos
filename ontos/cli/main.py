@@ -28,7 +28,10 @@ from urllib.parse import urlsplit
 
 import typer
 
+from ontos import __version__
+
 if TYPE_CHECKING:
+    from ontos.audit.postgres import PostgresAuditEmitter
     from ontos.ingest import Connector, MultiConnector
     from ontos.runtime.config import RuntimeConfig
     from ontos.storage.models import GraphScan
@@ -338,6 +341,44 @@ def _serve_snapshot(path: Path) -> None:
     )
 
 
+async def _open_cli_audit(cfg: RuntimeConfig) -> PostgresAuditEmitter:
+    """Open the persistent Article-12 sink before any graph access (#94).
+
+    Exits if the sink is unavailable: nothing runs unaudited.
+    """
+    from ontos.audit.postgres import PostgresAuditEmitter
+
+    if os.environ.get("ONTOS_ENV") != "prod" and not os.environ.get(cfg.audit_signing_key_env):
+        # stderr, not structlog: stdout carries the command's JSON output.
+        os.environ[cfg.audit_signing_key_env] = "dev-only-signing-key-do-not-use"
+        typer.echo("warning: using the dev audit signing key; never do this in prod", err=True)
+    audit: PostgresAuditEmitter | None = None
+    try:
+        audit = PostgresAuditEmitter.from_url(
+            cfg.audit_db_url, signing_key_env=cfg.audit_signing_key_env
+        )
+        await audit.initialize()
+    except Exception as exc:
+        if audit is not None:
+            await _close_store_without_masking(audit)
+        # Type only: sink errors can carry connection details. stderr, since
+        # structlog writes to stdout.
+        typer.echo(f"Audit store unavailable ({type(exc).__name__}); nothing was run.", err=True)
+        raise typer.Exit(code=1) from None
+    return audit
+
+
+def _cli_failure_decision(exc: Exception) -> str:
+    from ontos.authz.base import AuthzError
+    from ontos.planner import PlannerError
+
+    if isinstance(exc, AuthzError):
+        return "authorization_error"
+    if isinstance(exc, PlannerError):
+        return "planner_error"
+    return "error"
+
+
 @app.command()
 def ingest(
     ctx: typer.Context,
@@ -525,15 +566,74 @@ def ingest(
         error_policy=ErrorPolicy(error_policy),
     )
 
+    tool_arguments: dict[str, object] = {
+        "error_policy": error_policy,
+        "llm_backend": llm_backend,
+        "pdf_backend": pdf_backend,
+        "retain_rejected_candidates": retain_rejected_candidates,
+        "ontology_id": ontology.id,
+        "ontology_version": ontology.version,
+    }
+    model_versions = {
+        "runtime": __version__,
+        "backend": cfg.storage_backend,
+        "extractor": extractor.id,
+    }
+
     async def _run_pipeline() -> None:
+        import time
+
         from ontos.runtime.server import initialize_store
 
         try:
-            await initialize_store(store)
-            report = await pipeline.run()
+            audit = await _open_cli_audit(cfg)
+        except typer.Exit:
+            await _close_store_without_masking(store)
+            raise
+        started = time.perf_counter()
+
+        async def _audit(
+            result_fact_ids: list[str], outcome: dict[str, object], decision: str
+        ) -> None:
+            await audit.emit_async(
+                query_id=None,
+                agent_identity="ontos-cli",
+                acting_on_behalf_of=None,
+                query_text="ontos ingest",
+                tool_invoked="ontos.ingest",
+                tool_arguments={**tool_arguments, **outcome},
+                result_fact_ids=result_fact_ids,
+                latency_ms=(time.perf_counter() - started) * 1000,
+                model_versions=model_versions,
+                policy_decisions=[{"policy": "request", "result": decision}],
+            )
+
+        try:
+            try:
+                await initialize_store(store)
+                report = await pipeline.run()
+            except Exception as exc:
+                await _audit([], {}, _cli_failure_decision(exc))
+                raise
+            # Counts only: warnings and errors can quote document content.
+            await _audit(
+                report.written_fact_ids,
+                {
+                    "documents_seen": report.documents_seen,
+                    "documents_extracted": report.documents_extracted,
+                    "facts_written": report.facts_written,
+                    "facts_superseded": report.facts_superseded,
+                    "facts_reaffirmed": report.facts_reaffirmed,
+                    "facts_historical": report.facts_historical,
+                    "candidates_retained": report.candidates_retained,
+                    "errors": len(report.errors),
+                },
+                "completed",
+            )
             typer.echo(report.model_dump_json(indent=2))
             _echo_llm_usage(llm)
         finally:
+            await _close_store_without_masking(audit)
             # Explicit close so NetworkxStore(path=...) flushes the
             # pickle to disk. #29: pre-fix, process exit happened
             # before any save and new ingest/query processes started
@@ -607,6 +707,17 @@ def query(
             ),
         ),
     ] = None,
+    acting_on_behalf_of: Annotated[
+        str | None,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help=(
+                "Run the query as SUBJECT: only facts SUBJECT may view are "
+                "returned. Asserted by the local operator, not authenticated. "
+                "Without it only public facts are visible."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run one NL question through planner + executor locally; print ranked hits."""
     from ontos.executor import DeterministicExecutor
@@ -643,12 +754,64 @@ def query(
     store = build_store(cfg)
 
     async def _run() -> None:
-        from ontos.runtime.server import initialize_store
+        import time
+
+        from ontos.authz import VIEW
+        from ontos.runtime.server import build_authz, initialize_store
 
         try:
-            await initialize_store(store)
-            plan = await planner.plan(question, ontology)
-            result = await executor.execute(plan, store)
+            audit = await _open_cli_audit(cfg)
+        except typer.Exit:
+            await _close_store_without_masking(store)
+            raise
+        started = time.perf_counter()
+        policy_decisions: list[dict[str, str]] = []
+        tool_arguments: dict[str, object] = {"planner_id": planner.id, "executor_id": executor.id}
+        if acting_on_behalf_of is not None:
+            tool_arguments["identity_assurance"] = "operator_asserted"
+
+        async def _audit(result_fact_ids: list[str], decision: str) -> None:
+            await audit.emit_async(
+                query_id=None,
+                agent_identity="ontos-cli",
+                acting_on_behalf_of=acting_on_behalf_of,
+                query_text=question,
+                tool_invoked="ontos.query",
+                tool_arguments=tool_arguments,
+                result_fact_ids=result_fact_ids,
+                latency_ms=(time.perf_counter() - started) * 1000,
+                model_versions={"runtime": __version__, "backend": cfg.storage_backend},
+                policy_decisions=[*policy_decisions, {"policy": "request", "result": decision}],
+            )
+
+        try:
+            try:
+                await initialize_store(store)
+                allowed_acls: list[str] | None = None
+                authz = build_authz(cfg) if acting_on_behalf_of is not None else None
+                if authz is not None and acting_on_behalf_of is not None:
+                    allowed_acls = await authz.list_authorized_objects(acting_on_behalf_of, VIEW)
+                    policy_decisions.append(
+                        {
+                            "policy": authz.id,
+                            "subject": acting_on_behalf_of,
+                            "relation": VIEW,
+                            "result": ",".join(allowed_acls) if allowed_acls else "(none)",
+                        }
+                    )
+                plan = await planner.plan(question, ontology)
+                tool_arguments["plan"] = plan.model_dump(mode="json")
+                result = await executor.execute(
+                    plan,
+                    store,
+                    acl_subject=acting_on_behalf_of,
+                    allowed_acls=allowed_acls,
+                )
+            except Exception as exc:
+                await _audit([], _cli_failure_decision(exc))
+                raise
+            # Audited before anything is printed.
+            await _audit([str(h.fact.id) for h in result.hits], "completed")
             typer.echo(
                 json.dumps(
                     {
@@ -668,6 +831,7 @@ def query(
             # concurrent `ontos ingest` with this process's stale
             # snapshot.
             await _close_store_without_masking(store)
+            await _close_store_without_masking(audit)
 
     asyncio.run(_run())
 

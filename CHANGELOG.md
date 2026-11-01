@@ -14,6 +14,25 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — `ontos query` and `ontos ingest` are audited (#94)
+- **One Article-12 record per invocation.** Both commands touched the graph
+  without writing any record. They now write one each, success or failure, to
+  `ONTOS_AUDIT_DB_URL` (the default is the local SQLite chain, as with
+  `ontos export`). The record is written before results are printed.
+  - `ontos query` records the plan, the returned fact ids and the
+    authorization decisions.
+  - `ontos ingest` records the ids of the facts it wrote, plus counts,
+    extractor and ontology versions. Warnings and errors are left out because
+    they can quote document text.
+- **Fail closed.** If the audit store is unavailable, neither command plans,
+  extracts or reads anything.
+- **`ontos query --acting-on-behalf-of SUBJECT`.** Returns only the facts
+  SUBJECT may view, resolved through the configured authz backend. The subject
+  is asserted by the local operator, recorded as `operator_asserted`, and is
+  not authenticated. Without the flag, queries still see public facts only.
+- **The dev signing-key warning goes to stderr**, so the JSON on stdout stays
+  parseable.
+
 ### Fixed — store writes never rewrite history (#95)
 - **`close_fact` no longer rewrites a closed fact.** Closing an already-closed
   fact used to move its `t_invalid` and replace `superseded_by` in both

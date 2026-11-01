@@ -57,6 +57,7 @@ def test_ingest_initializes_store_before_pipeline_writes(tmp_path, monkeypatch) 
     import ontos.runtime.server
     from ontos.cli import app
 
+    monkeypatch.setenv("ONTOS_AUDIT_DB_URL", f"sqlite+aiosqlite:///{tmp_path / 'audit.sqlite'}")
     store = _InitTrackingStore()
     seen: dict[str, int] = {}
 
@@ -67,6 +68,8 @@ def test_ingest_initializes_store_before_pipeline_writes(tmp_path, monkeypatch) 
             pass
 
     class StubExtractor:
+        id = "stub"
+
         def __init__(self, llm: object, ontology: object) -> None:
             pass
 
