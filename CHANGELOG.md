@@ -14,6 +14,19 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Performance — Neo4j traverse no longer enumerates every path (#104)
+- **The problem.** `traverse` matched `(start)-[:RELATES*1..depth]-(end)` and
+  deduplicated relationships afterwards. Variable-length matching enumerates
+  every path, which grows exponentially with depth on dense graphs.
+- **The fix.** It now expands one hop per query, breadth-first like NetworkX,
+  inside a single read transaction. Each relationship is visited once per
+  level, and the ACL, validity and relation filters apply at every hop.
+- **Same results.** A fact is reachable through a visible path within `depth`
+  hops exactly when one of its endpoints is reached within `depth - 1`, so the
+  result set is unchanged.
+- **Benchmark.** On a 40-node clique at depth 4 the traversal takes 2.6s.
+  Before this change the run didn't finish within the 4-minute limit.
+
 ### Fixed — executor reports each fact's real hop distance (#103)
 - **Wrong distances.** `DeterministicExecutor` stamped every fact a traversal
   step returned with one hop. With `TraversalStep(depth=3)`, a fact three
