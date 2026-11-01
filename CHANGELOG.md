@@ -29,6 +29,7 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   close used to leave two active facts in one scope.
 - **Shared tests.** The NetworkX compliance tests and the Neo4j integration
   tests run the same checks.
+
 ### Fixed — `ontos serve` persists its audit trail (#93)
 - **Article-12 records no longer vanish on restart.** `ontos serve` (live and
   `--snapshot`) always used the in-memory audit sink and never read
