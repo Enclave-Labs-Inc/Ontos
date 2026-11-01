@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from ontos.runtime.models import AuditRecord
@@ -52,3 +52,29 @@ def derive_subkey(signing_key: bytes, label: bytes) -> bytes:
     chain hashes, and vice versa.
     """
     return hmac.new(signing_key, b"ontos.audit.subkey.v1:" + label, hashlib.sha256).digest()
+
+
+class AuditUnavailableError(RuntimeError):
+    """The audit sink could not record or read an Article-12 record."""
+
+
+async def emit_record(audit: AuditSink, **fields: Any) -> AuditRecord:
+    """Emit through `audit`, awaiting persistent (async-only) sinks.
+
+    `PostgresAuditEmitter.emit` raises by design, so request paths call
+    this instead of `audit.emit` to work with either sink.
+    """
+    emit_async = getattr(audit, "emit_async", None)
+    if emit_async is not None:
+        record: AuditRecord = await emit_async(**fields)
+        return record
+    return audit.emit(**fields)
+
+
+async def lookup_record(audit: AuditSink, query_id: UUID) -> AuditRecord | None:
+    """`by_query_id` for either sink; see `emit_record`."""
+    by_query_id_async = getattr(audit, "by_query_id_async", None)
+    if by_query_id_async is not None:
+        record: AuditRecord | None = await by_query_id_async(query_id)
+        return record
+    return audit.by_query_id(query_id)

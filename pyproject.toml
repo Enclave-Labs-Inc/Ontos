@@ -36,6 +36,9 @@ pdf = ["pypdf>=4.0"]
 llama = ["llama-cloud-services>=0.2"]
 langchain = ["langchain>=0.3", "langchain-experimental>=0.3"]
 authz = ["openfga-sdk>=0.6"]
+# `postgres` pulls the async driver for the persistent Article-12 audit
+# sink (`ONTOS_AUDIT_DB_URL=postgresql+asyncpg://...`, #93).
+postgres = ["asyncpg>=0.30"]
 # `openai` pulls the OpenAI SDK used by `OpenAIBackend`. BRIDGE —
 # prompts and document text leave the customer VPC on their way to
 # api.openai.com. Use Ollama for in-VPC deploys. In ONTOS_ENV=prod

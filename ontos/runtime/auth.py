@@ -31,6 +31,8 @@ from urllib.parse import urlparse
 
 import structlog
 
+from ontos.audit.base import emit_record
+
 if TYPE_CHECKING:
     from fastmcp.server.auth import AccessToken
     from fastmcp.server.auth.providers.jwt import JWTVerifier
@@ -259,18 +261,21 @@ class AuthRejectionAuditMiddleware:
             if message["type"] == "http.response.start":
                 status = message["status"]
                 if status in (401, 403):
-                    self._emit_rejection(scope, status, started)
+                    await self._emit_rejection(scope, status, started)
             await send(message)
 
         await self.app(scope, receive, capture)
 
-    def _emit_rejection(self, scope: Scope, status: int, started: float) -> None:
+    async def _emit_rejection(self, scope: Scope, status: int, started: float) -> None:
         has_token = any(name.lower() == b"authorization" for name, _ in scope.get("headers", []))
         if status == 403:
             reason = "insufficient_scope"
         else:
             reason = "invalid_token" if has_token else "missing_token"
-        self.audit.emit(
+        # Awaited before the 401/403 is sent: if the sink is down the
+        # request fails as a 500 instead of being refused unaudited.
+        await emit_record(
+            self.audit,
             query_id=None,
             agent_identity="(unauthenticated)",
             acting_on_behalf_of=None,

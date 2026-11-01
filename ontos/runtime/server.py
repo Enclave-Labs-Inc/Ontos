@@ -23,7 +23,8 @@ from fastmcp.server.dependencies import get_access_token
 from pydantic import BaseModel
 from starlette.middleware import Middleware
 
-from ontos.audit.base import AuditSink
+from ontos import __version__
+from ontos.audit.base import AuditSink, AuditUnavailableError, emit_record, lookup_record
 from ontos.audit.emitter import AuditEmitter
 from ontos.authz import AUDIT_EXPORTER, VIEW, AuthzBackend, InMemoryAuthz
 from ontos.authz.base import AuthzError
@@ -194,11 +195,40 @@ def build_authz(config: RuntimeConfig) -> AuthzBackend | None:
     )
 
 
+def build_audit_sink(config: RuntimeConfig) -> AuditSink:
+    """The Article-12 sink for a serving runtime.
+
+    `ONTOS_AUDIT_DB_URL` selects the persistent hash-chained sink. Without
+    it records live in memory and are lost on restart, which `ONTOS_ENV=prod`
+    refuses (#93). Call `initialize()` on the serving event loop.
+    """
+    if config.audit_persistent:
+        from ontos.audit.postgres import PostgresAuditEmitter
+
+        return PostgresAuditEmitter.from_url(
+            config.audit_db_url, signing_key_env=config.audit_signing_key_env
+        )
+    if os.environ.get("ONTOS_ENV") == "prod":
+        raise RuntimeError(
+            "ONTOS_ENV=prod requires ONTOS_AUDIT_DB_URL — the in-memory audit "
+            "sink loses every Article-12 record on restart"
+        )
+    log.warning("audit-sink-in-memory", reason="ONTOS_AUDIT_DB_URL not set; dev only")
+    return AuditEmitter.from_env(config.audit_signing_key_env)
+
+
+async def initialize_audit(audit: object) -> None:
+    """Create the persistent sink's table, if it has one; see `initialize_store`."""
+    initialize = getattr(audit, "initialize", None)
+    if initialize is not None:
+        await initialize()
+
+
 def build_server(
     config: RuntimeConfig | None = None,
     *,
     store: GraphStore | None = None,
-    audit: AuditEmitter | None = None,
+    audit: AuditSink | None = None,
     authz: AuthzBackend | None = None,
     planner: Planner | None = None,
     executor: Executor | None = None,
@@ -206,7 +236,7 @@ def build_server(
 ) -> FastMCP:
     cfg = config if config is not None else RuntimeConfig.from_env()
     store = store if store is not None else build_store(cfg)
-    audit = audit if audit is not None else AuditEmitter.from_env(cfg.audit_signing_key_env)
+    audit = audit if audit is not None else build_audit_sink(cfg)
     # Note: authz is opt-in — passing None disables authz and falls back
     # to the M1 `acl_subject == fact.acl_ref` shim in the store.
     resolved_authz: AuthzBackend | None = authz if authz is not None else build_authz(cfg)
@@ -244,11 +274,21 @@ def build_server(
     @asynccontextmanager
     async def _lifespan(_: FastMCP[Any]) -> AsyncIterator[dict[str, Any]]:
         await initialize_store(store)
+        await initialize_audit(audit)
         yield {}
 
     mcp = FastMCP("ontos", auth=build_token_verifier(cfg), lifespan=_lifespan)
 
-    def _emit(
+    async def _write(**fields: Any) -> AuditRecord:
+        # Fail closed: no record, no response. Only the error type is logged,
+        # since sink errors can carry connection details.
+        try:
+            return await emit_record(audit, **fields)
+        except Exception as exc:
+            log.error("audit-emit-failed", error_type=type(exc).__name__)
+            raise AuditUnavailableError from None
+
+    async def _emit(
         *,
         tool: str,
         caller: CallerIdentity,
@@ -258,7 +298,7 @@ def build_server(
         latency_ms: float,
         policy_decisions: list[dict[str, str]],
     ) -> AuditRecord:
-        return audit.emit(
+        return await _write(
             query_id=None,
             agent_identity=caller.agent_identity,
             acting_on_behalf_of=caller.principal,
@@ -298,11 +338,13 @@ def build_server(
                     return await fn(*args, **kwargs)
                 except ToolError:
                     raise
+                except AuditUnavailableError:
+                    raise ToolError("audit unavailable") from None
                 except Exception as exc:
                     call = current_call.get()
                     if call is None:
                         raise
-                    _fail(tool=tool, call=call, started=started, exc=exc)
+                    await _fail(tool=tool, call=call, started=started, exc=exc)
                 finally:
                     current_call.reset(token)
 
@@ -310,7 +352,7 @@ def build_server(
 
         return decorate
 
-    def _fail(
+    async def _fail(
         *,
         tool: str,
         call: tuple[CallerIdentity, str],
@@ -325,18 +367,21 @@ def build_server(
         else:
             decision, message = "error", "internal error"
         log.error("mcp-tool-failed", tool=tool, error_type=type(exc).__name__)
-        _emit(
-            tool=tool,
-            caller=caller,
-            query_text=query_text,
-            tool_arguments={},
-            result_fact_ids=[],
-            latency_ms=(time.perf_counter() - started) * 1000,
-            policy_decisions=[{"policy": "request", "result": decision}],
-        )
+        try:
+            await _emit(
+                tool=tool,
+                caller=caller,
+                query_text=query_text,
+                tool_arguments={},
+                result_fact_ids=[],
+                latency_ms=(time.perf_counter() - started) * 1000,
+                policy_decisions=[{"policy": "request", "result": decision}],
+            )
+        except AuditUnavailableError:
+            raise ToolError("audit unavailable") from None
         raise ToolError(message) from None
 
-    def _authenticate(
+    async def _authenticate(
         *,
         tool: str,
         agent_identity: str,
@@ -367,7 +412,7 @@ def build_server(
             }
             if acting_on_behalf_of is not None:
                 decision["claimed_principal"] = acting_on_behalf_of
-            audit.emit(
+            await _write(
                 query_id=None,
                 agent_identity=agent_identity,
                 acting_on_behalf_of=None,
@@ -392,7 +437,7 @@ def build_server(
     ) -> ToolResponse:
         """Semantic + graph retrieval. Returns facts with per-fact provenance."""
         started = time.perf_counter()
-        caller = _authenticate(
+        caller = await _authenticate(
             tool="search",
             agent_identity=agent_identity,
             acting_on_behalf_of=acting_on_behalf_of,
@@ -409,7 +454,7 @@ def build_server(
             allowed_acls=allowed_acls,
         )
         latency_ms = (time.perf_counter() - started) * 1000
-        record = _emit(
+        record = await _emit(
             tool="search",
             caller=caller,
             query_text=query,
@@ -436,7 +481,7 @@ def build_server(
     ) -> ToolResponse:
         """Multi-hop traversal from an entity. Permission-aware during traversal."""
         started = time.perf_counter()
-        caller = _authenticate(
+        caller = await _authenticate(
             tool="traverse",
             agent_identity=agent_identity,
             acting_on_behalf_of=acting_on_behalf_of,
@@ -456,7 +501,7 @@ def build_server(
             )
         )
         latency_ms = (time.perf_counter() - started) * 1000
-        record = _emit(
+        record = await _emit(
             tool="traverse",
             caller=caller,
             query_text=start,
@@ -481,7 +526,7 @@ def build_server(
     ) -> ToolResponse:
         """Entity dossier: definition, sources, related entities, validity ranges."""
         started = time.perf_counter()
-        caller = _authenticate(
+        caller = await _authenticate(
             tool="explain",
             agent_identity=agent_identity,
             acting_on_behalf_of=acting_on_behalf_of,
@@ -496,7 +541,7 @@ def build_server(
             allowed_acls=allowed_acls,
         )
         latency_ms = (time.perf_counter() - started) * 1000
-        record = _emit(
+        record = await _emit(
             tool="explain",
             caller=caller,
             query_text=entity_id,
@@ -524,7 +569,7 @@ def build_server(
         a nonexistent id, so the response never reveals that it exists.
         """
         started = time.perf_counter()
-        caller = _authenticate(
+        caller = await _authenticate(
             tool="provenance",
             agent_identity=agent_identity,
             acting_on_behalf_of=acting_on_behalf_of,
@@ -538,7 +583,7 @@ def build_server(
         )
         latency_ms = (time.perf_counter() - started) * 1000
         payload: Fact | None = fact
-        record = _emit(
+        record = await _emit(
             tool="provenance",
             caller=caller,
             query_text=fact_id,
@@ -568,13 +613,13 @@ def build_server(
         nonexistent one.
         """
         started = time.perf_counter()
-        caller = _authenticate(
+        caller = await _authenticate(
             tool="audit",
             agent_identity=agent_identity,
             acting_on_behalf_of=acting_on_behalf_of,
             query_text=query_id,
         )
-        record = audit.by_query_id(_parse_uuid_arg("query_id", query_id))
+        record = await lookup_record(audit, _parse_uuid_arg("query_id", query_id))
         readable = False
         if record is not None and caller.principal is not None:
             owner = record.article12.get(ArticleTwelveField.ACTING_ON_BEHALF_OF)
@@ -582,7 +627,7 @@ def build_server(
                 resolved_authz is not None
                 and await resolved_authz.check(caller.principal, AUDIT_EXPORTER, "audit")
             )
-        emitted = _emit(
+        emitted = await _emit(
             tool="audit",
             caller=caller,
             query_text=query_id,
@@ -617,14 +662,14 @@ def build_server(
         schema-constrained contract.
         """
         started = time.perf_counter()
-        caller = _authenticate(
+        caller = await _authenticate(
             tool="ask",
             agent_identity=agent_identity,
             acting_on_behalf_of=acting_on_behalf_of,
             query_text=question,
         )
         if resolved_planner is None:
-            record = _emit(
+            record = await _emit(
                 tool="ask",
                 caller=caller,
                 query_text=question,
@@ -642,7 +687,7 @@ def build_server(
         # Ontology is required to build a Plan. If none is loaded, we
         # can't run the planner. Same fail-loud posture.
         if cfg.ontology_path is None:
-            record = _emit(
+            record = await _emit(
                 tool="ask",
                 caller=caller,
                 query_text=question,
@@ -668,7 +713,7 @@ def build_server(
             plan = await resolved_planner.plan(question, ontology)
         except PlannerError as exc:
             latency_ms = (time.perf_counter() - started) * 1000
-            record = _emit(
+            record = await _emit(
                 tool="ask",
                 caller=caller,
                 query_text=question,
@@ -693,7 +738,7 @@ def build_server(
             allowed_acls=allowed_acls,
         )
         latency_ms = (time.perf_counter() - started) * 1000
-        record = _emit(
+        record = await _emit(
             tool="ask",
             caller=caller,
             query_text=question,
@@ -744,14 +789,14 @@ def build_server(
             no absolute path (would leak server filesystem layout).
             """
             started = time.perf_counter()
-            caller = _authenticate(
+            caller = await _authenticate(
                 tool="snapshot_info",
                 agent_identity=agent_identity,
                 acting_on_behalf_of=None,
                 query_text="",
             )
             latency_ms = (time.perf_counter() - started) * 1000
-            record = _emit(
+            record = await _emit(
                 tool="snapshot_info",
                 caller=caller,
                 query_text="",
@@ -781,7 +826,7 @@ def _default_dev_signing_key_if_missing() -> None:
 
 
 def _model_versions(config: RuntimeConfig) -> dict[str, str]:
-    return {"runtime": "0.0.1", "backend": config.storage_backend}
+    return {"runtime": __version__, "backend": config.storage_backend}
 
 
 def run_server(
@@ -820,7 +865,7 @@ def run_server(
             Middleware(
                 AuthRejectionAuditMiddleware,
                 audit=audit,
-                model_versions={"runtime": "0.0.1", "backend": backend},
+                model_versions={"runtime": __version__, "backend": backend},
             )
         )
     log.info("ontos starting", host=host, port=port, mode=mode, backend=backend, auth=auth_mode)
@@ -831,7 +876,7 @@ def main(config: RuntimeConfig | None = None) -> None:
     """CLI entry — boots the live server with streamable-HTTP transport."""
     _default_dev_signing_key_if_missing()
     cfg = config or RuntimeConfig.from_env()
-    audit = AuditEmitter.from_env(cfg.audit_signing_key_env)
+    audit = build_audit_sink(cfg)
     server = build_server(cfg, audit=audit)
     run_server(
         server,

@@ -100,7 +100,7 @@ jobs:
         run: |
           # Backends the Helm chart enables by default must be importable.
           docker run --rm ontos:ci python -c \
-            "import ontos, ontos.storage.neo4j_store, ontos.authz.openfga; print(ontos.__version__)"
+            "import asyncpg, ontos, ontos.storage.neo4j_store, ontos.authz.openfga; print(ontos.__version__)"
           # Non-root, as the chart's securityContext requires.
           test "$(docker run --rm ontos:ci id -u)" = "1000"
           # The default entrypoint must refuse an unauthenticated public bind (#69).

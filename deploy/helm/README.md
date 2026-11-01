@@ -42,7 +42,7 @@ Before pointing customer traffic at an Ontos deploy:
 - [ ] Every `Secret` populated via external-secrets, NOT kubectl imperative (leaves the plaintext in shell history).
 - [ ] `NetworkPolicy` present and enforced (some managed K8s distros ignore NetworkPolicy without a CNI that supports it — Calico / Cilium do; the default AWS VPC CNI does not until you install a policy engine).
 - [ ] `ONTOS_ENV=prod` — the runtime refuses to boot without a real signing key when this is set.
-- [ ] Audit `ONTOS_AUDIT_DB_URL` uses an async driver (`postgresql+asyncpg://`); the runtime hard-fails on sync drivers.
+- [ ] Audit `ONTOS_AUDIT_DB_URL` uses an async driver (`postgresql+asyncpg://`); the runtime hard-fails on sync drivers. The server writes every Article-12 record there and fails a call it cannot audit; with `ONTOS_ENV=prod` it refuses to boot without the URL.
 - [ ] Backup + retention policy for the Postgres audit DB matches the customer's regulatory obligation (Article 12 = ≥6 months for high-risk AI systems).
 
 ## What's NOT in the chart
