@@ -19,7 +19,7 @@ ACL semantics on read methods:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, runtime_checkable
@@ -196,7 +196,9 @@ class GraphStore(Protocol):
     (`close_fact`). No in-place mutation.
     """
 
-    async def add_fact(self, fact: Fact) -> None: ...
+    async def add_fact(self, fact: Fact) -> None:
+        """Append a fact. Raises `FactAlreadyExistsError` if its id is stored."""
+        ...
 
     async def upsert_entity(self, entity: Entity, *, acl_ref: str | None = None) -> None:
         """Idempotent entity write with cross-ACL protection.
@@ -250,7 +252,25 @@ class GraphStore(Protocol):
         fact_id: UUID,
         t_invalid: datetime,
         superseded_by: UUID | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Close an open fact's validity window.
+
+        A missing `fact_id` is a no-op. Raises `FactNotOpenError` if the fact
+        is already closed: rewriting `t_invalid` or `superseded_by` would
+        erase history.
+        """
+        ...
+
+    async def supersede(self, new_fact: Fact, closes: Sequence[UUID]) -> None:
+        """Atomically add `new_fact` and close every fact in `closes`.
+
+        Each closed fact gets `t_invalid = new_fact.ingested_at` and
+        `superseded_by = new_fact.id`. Raises `FactAlreadyExistsError` or
+        `FactNotOpenError` (a listed fact is missing or already closed)
+        and then leaves the store unchanged, so a scope is never left with
+        two active facts.
+        """
+        ...
 
     async def get_fact(self, fact_id: UUID) -> Fact | None:
         """Unfiltered lookup for the write path (supersession, ingest).
@@ -474,6 +494,14 @@ class StorageError(RuntimeError):
     right posture here: silent reset of persisted facts would quietly
     violate the provenance invariant.
     """
+
+
+class FactAlreadyExistsError(StorageError):
+    """A fact with this id is already stored; facts are never replaced."""
+
+
+class FactNotOpenError(StorageError):
+    """The fact to close is missing or its validity window is already closed."""
 
 
 class CrossAclUpsertError(StorageError):

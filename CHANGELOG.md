@@ -14,6 +14,22 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — store writes never rewrite history (#95)
+- **`close_fact` no longer rewrites a closed fact.** Closing an already-closed
+  fact used to move its `t_invalid` and replace `superseded_by` in both
+  backends. It now raises `FactNotOpenError`. Closing a missing fact is still
+  a no-op.
+- **A duplicate `add_fact` is rejected in both backends** with
+  `FactAlreadyExistsError`. Before this, NetworkX replaced the fact in place
+  and Neo4j created a second edge with the same `fact_id`.
+- **Supersession is atomic.** The new `GraphStore.supersede(new_fact, closes)`
+  adds the new fact and closes the old ones together; ingest now uses it.
+  Neo4j runs it in one transaction. NetworkX validates everything before
+  writing. A failed supersede leaves the store unchanged, where a failed
+  close used to leave two active facts in one scope.
+- **Shared tests.** The NetworkX compliance tests and the Neo4j integration
+  tests run the same checks.
+
 ### Fixed — `ontos serve` persists its audit trail (#93)
 - **Article-12 records no longer vanish on restart.** `ontos serve` (live and
   `--snapshot`) always used the in-memory audit sink and never read

@@ -34,7 +34,7 @@ import bisect
 import contextlib
 import itertools
 import pickle
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -46,7 +46,13 @@ import structlog
 from ontos.extraction.base import RejectedCandidate
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
-from ontos.storage.base import CrossAclUpsertError, StorageError, StoredCandidate
+from ontos.storage.base import (
+    CrossAclUpsertError,
+    FactAlreadyExistsError,
+    FactNotOpenError,
+    StorageError,
+    StoredCandidate,
+)
 from ontos.storage.models import GraphScan, StoredEntity
 
 log = structlog.get_logger(__name__)
@@ -265,11 +271,9 @@ class NetworkxStore:
         return self._path
 
     async def add_fact(self, fact: Fact) -> None:
-        self._graph.add_node(fact.subject_id)
-        self._graph.add_node(fact.object_id)
-        self._graph.add_edge(fact.subject_id, fact.object_id, key=fact.id, fact=fact)
-        self._facts[fact.id] = fact
-        self._dirty = True
+        if fact.id in self._facts:
+            raise FactAlreadyExistsError(f"fact {fact.id} is already stored")
+        self._insert_fact(fact)
 
     async def close_fact(
         self, fact_id: UUID, t_invalid: datetime, superseded_by: UUID | None = None
@@ -277,6 +281,33 @@ class NetworkxStore:
         current = self._facts.get(fact_id)
         if current is None:
             return
+        if current.t_invalid is not None:
+            raise FactNotOpenError(f"fact {fact_id} is already closed")
+        self._close(current, t_invalid, superseded_by)
+
+    async def supersede(self, new_fact: Fact, closes: Sequence[UUID]) -> None:
+        # Validate everything first; the writes below cannot fail midway.
+        if new_fact.id in self._facts:
+            raise FactAlreadyExistsError(f"fact {new_fact.id} is already stored")
+        to_close = []
+        for fact_id in dict.fromkeys(closes):
+            current = self._facts.get(fact_id)
+            if current is None or current.t_invalid is not None:
+                raise FactNotOpenError(f"fact {fact_id} is missing or already closed")
+            to_close.append(current)
+        self._insert_fact(new_fact)
+        for current in to_close:
+            self._close(current, new_fact.ingested_at, new_fact.id)
+
+    def _insert_fact(self, fact: Fact) -> None:
+        self._graph.add_node(fact.subject_id)
+        self._graph.add_node(fact.object_id)
+        self._graph.add_edge(fact.subject_id, fact.object_id, key=fact.id, fact=fact)
+        self._facts[fact.id] = fact
+        self._dirty = True
+
+    def _close(self, current: Fact, t_invalid: datetime, superseded_by: UUID | None) -> None:
+        fact_id = current.id
         replacement = current.model_copy(
             update={"t_invalid": t_invalid, "superseded_by": superseded_by}
         )
