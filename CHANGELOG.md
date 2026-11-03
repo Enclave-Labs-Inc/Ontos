@@ -14,6 +14,52 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-03 - persistent audit, bitemporal integrity and read-path hardening
+
+`ontos serve` now keeps its Article-12 audit trail in Postgres, and
+`ontos query` and `ontos ingest` write audit records too. Every tool
+failure is audited, and nothing runs when the audit store is unavailable.
+Store writes can no longer rewrite fact history, and supersession is
+atomic. Read paths hide facts and exported entities that would reveal
+restricted entities. Neo4j reads are deterministic and no longer
+enumerate every path. `ask` can run under `ontos serve` with a local
+Ollama planner, and ontology suggestions can be LLM-assisted from a local
+model (#66 M2b). **Read the upgrade notes: this release has breaking
+changes.**
+
+### Upgrade notes
+- **Breaking: `ONTOS_ENV=prod` requires `ONTOS_AUDIT_DB_URL`.** Without
+  it, `ontos serve` refuses to boot. The Helm chart already sets it from
+  the `ontos-audit-db` Secret.
+- **Breaking: audit is fail-closed.**
+  - An MCP tool call whose audit record can't be written fails with
+    `audit unavailable`. A transport rejection (401/403) becomes a 500.
+  - `ontos query` and `ontos ingest` exit with code 1 before running if
+    the audit store can't be opened.
+- **Async database URLs only.** Audit DB URLs must use an async driver:
+  `postgresql+asyncpg://` (install the new `postgres` extra; the image
+  includes it) or `sqlite+aiosqlite://`. `.env.example` previously listed
+  sync URLs that were always rejected.
+- **Bounded arguments.** MCP `search` `k` must be 1–100 and `traverse`
+  `depth` 1–10. Values outside those ranges are rejected and audited.
+- **Breaking for custom `GraphStore` implementations.**
+  - `add_fact` must reject an existing id (`FactAlreadyExistsError`).
+  - `close_fact` must refuse an already-closed fact (`FactNotOpenError`).
+  - Stores must implement the new atomic `supersede(new_fact, closes)`,
+    which ingest now calls.
+- **Fewer results by design.** Facts whose endpoint entities the caller
+  can't see are no longer returned (#91). Ordinary exports omit untyped
+  entities that no exported fact names (#100); `--include-acl-mask`
+  exports are unchanged.
+- **`ask` errors.** `ask` is disabled until `ONTOS_PLANNER_BACKEND=ollama`
+  and `ONTOS_ONTOLOGY_PATH` are set. Planning failures return a fixed
+  message instead of the planner's error text.
+- **Ranking changes.** Search ordering is now deterministic. Traversals
+  return each fact once, and executor scores use true hop distances.
+  Expect rankings to differ from 0.7.0.
+- **New `ontos query --acting-on-behalf-of SUBJECT`.** Without it, `ontos
+  query` still sees public facts only.
+
 ### Performance — Neo4j traverse no longer enumerates every path (#104)
 - **The problem.** `traverse` matched `(start)-[:RELATES*1..depth]-(end)` and
   deduplicated relationships afterwards. Variable-length matching enumerates

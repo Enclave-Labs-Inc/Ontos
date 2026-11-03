@@ -27,7 +27,7 @@ kubectl create secret generic ontos-openfga \
 # MCP callers must be authenticated (0.7.0+): point the chart at your IdP.
 # Use auth.publicKeySecretRef.name instead of jwksUri for a pinned key.
 helm install ontos ./deploy/helm/ontos \
-    --set image.tag=0.7.0 \
+    --set image.tag=0.8.0 \
     --set auth.issuer=https://idp.example.internal/realms/acme \
     --set auth.audience=ontos \
     --set auth.jwksUri=https://idp.example.internal/realms/acme/protocol/openid-connect/certs

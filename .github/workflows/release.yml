@@ -164,8 +164,10 @@ jobs:
         run: |
           VERSION="${{ needs.build.outputs.version }}"
           # Extract the section between `## [VERSION]` and the next `## [`.
-          awk -v v="[$VERSION]" '
-            $0 ~ "^## " v { flag=1; next }
+          # Literal prefix match: as a regex, "[X.Y.Z]" is a character
+          # class, so it never matched and every release got the stub.
+          awk -v h="## [$VERSION]" '
+            index($0, h) == 1 { flag=1; next }
             flag && /^## \[/ { flag=0 }
             flag { print }
           ' CHANGELOG.md > release_notes.md
