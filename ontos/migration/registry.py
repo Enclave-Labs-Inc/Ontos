@@ -115,6 +115,21 @@ class MigrationRegistry:
         source_id = fact.provenance.ontology_id
         source_version = fact.provenance.ontology_version
 
+        # A version alone cannot establish the ontology family.
+        # Strict, verified migrations require both stamp components.
+        # Retain legacy behavior for non-strict registries.
+        if self._strict and source_version and not source_id:
+            warnings.append(
+                MigrationWarning(
+                    fact_id=fact.id,
+                    from_version=source_version,
+                    to_version=target.version,
+                    migration_id=_REGISTRY_ID,
+                    reason="ontology-id-unstamped",
+                )
+            )
+            return None, warnings
+
         if source_version == target.version and source_id in (target.id, ""):
             return fact, warnings
 

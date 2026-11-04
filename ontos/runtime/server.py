@@ -28,7 +28,9 @@ from ontos.audit.base import AuditSink, AuditUnavailableError, emit_record, look
 from ontos.audit.emitter import AuditEmitter
 from ontos.authz import AUDIT_EXPORTER, VIEW, AuthzBackend, InMemoryAuthz
 from ontos.authz.base import AuthzError
-from ontos.executor import DeterministicExecutor, Executor
+from ontos.executor import Executor
+from ontos.migration.loading import MigrationConfigurationError
+from ontos.ontology import Ontology
 from ontos.planner import Planner, PlannerError
 from ontos.runtime.auth import (
     AuthRejectionAuditMiddleware,
@@ -40,6 +42,7 @@ from ontos.runtime.auth import (
     resolve_caller,
 )
 from ontos.runtime.config import RuntimeConfig
+from ontos.runtime.migration_executor import build_verified_executor
 from ontos.runtime.models import ArticleTwelveField, AuditRecord, Fact
 from ontos.runtime.temporal import parse_as_of
 from ontos.storage.base import GraphStore
@@ -195,7 +198,7 @@ def build_authz(config: RuntimeConfig) -> AuthzBackend | None:
     )
 
 
-def build_planner(config: RuntimeConfig) -> Planner | None:
+def build_planner(config: RuntimeConfig, *, ontology: Ontology | None = None) -> Planner | None:
     """The `ask` tool's planner from `ONTOS_PLANNER_*`, or None when disabled.
 
     Planning needs the ontology, so `ONTOS_ONTOLOGY_PATH` is required with it.
@@ -218,7 +221,10 @@ def build_planner(config: RuntimeConfig) -> Planner | None:
         base_url=config.planner_url,
         timeout_s=config.planner_timeout_s,
     )
-    return LlmPlanner(llm, load_ontology(config.ontology_path))
+    return LlmPlanner(
+        llm,
+        ontology if ontology is not None else load_ontology(config.ontology_path),
+    )
 
 
 def build_audit_sink(config: RuntimeConfig) -> AuditSink:
@@ -261,6 +267,34 @@ def build_server(
     snapshot_metadata: SnapshotMetadata | None = None,
 ) -> FastMCP:
     cfg = config if config is not None else RuntimeConfig.from_env()
+
+    # Fail closed: configured migrations must never be bypassed by an
+    # independently supplied executor. Validate before creating storage.
+    if executor is not None and (
+        cfg.migration_dir is not None or cfg.ontology_history_dir is not None
+    ):
+        raise MigrationConfigurationError(
+            "custom executor cannot bypass configured verified migrations"
+        )
+
+    # Pin the active ontology at startup when migrations are enabled.
+    # The planner and executor must use the same validated instance.
+    active_ontology: Ontology | None = None
+    if cfg.migration_dir is not None or cfg.ontology_history_dir is not None:
+        if cfg.ontology_path is None:
+            raise MigrationConfigurationError(
+                "an active ontology is required when migrations are configured"
+            )
+        from ontos.ontology import load_ontology
+
+        active_ontology = load_ontology(cfg.ontology_path)
+
+    if executor is not None:
+        resolved_executor: Executor = executor
+    elif active_ontology is not None:
+        resolved_executor = build_verified_executor(cfg, active_ontology=active_ontology)
+    else:
+        resolved_executor = build_verified_executor(cfg)
     store = store if store is not None else build_store(cfg)
     audit = audit if audit is not None else build_audit_sink(cfg)
     # Note: authz is opt-in — passing None disables authz and falls back
@@ -270,8 +304,12 @@ def build_server(
     # opt-in — if no planner is wired, the `ask` tool is disabled (the
     # store tools still work). This lets M0/M1 deployments run without
     # an LLM planner backend.
-    resolved_executor: Executor = executor if executor is not None else DeterministicExecutor()
-    resolved_planner: Planner | None = planner if planner is not None else build_planner(cfg)
+    if planner is not None:
+        resolved_planner: Planner | None = planner
+    elif active_ontology is not None:
+        resolved_planner = build_planner(cfg, ontology=active_ontology)
+    else:
+        resolved_planner = build_planner(cfg)
 
     async def _resolve_allowed_acls(
         subject: str | None,
@@ -732,7 +770,11 @@ def build_server(
         # for the read tools that don't need it.
         from ontos.ontology import load_ontology
 
-        ontology = load_ontology(cfg.ontology_path)
+        # Migration-enabled servers use the ontology verified at startup.
+        # Non-migration deployments retain the existing reload behavior.
+        ontology = (
+            active_ontology if active_ontology is not None else load_ontology(cfg.ontology_path)
+        )
         allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
 
         try:

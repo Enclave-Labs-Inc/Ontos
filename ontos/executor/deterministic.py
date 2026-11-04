@@ -314,8 +314,10 @@ class DeterministicExecutor:
                                 allowed_acls=allowed_acls,
                             )
                         )
-                        distances = _hop_distances(start, facts, step.direction)
                         facts = await self._translate(facts, warnings)
+                        distances = _hop_distances(start, facts, step.direction)
+                        # Remove facts connected only through rejected edges.
+                        facts = [fact for fact in facts if fact.id in distances]
                         _absorb(
                             facts,
                             collected,
@@ -336,8 +338,10 @@ class DeterministicExecutor:
                             allowed_acls=allowed_acls,
                         )
                     )
-                    distances = _hop_distances(start, facts, step.direction)
                     facts = await self._translate(facts, warnings)
+                    distances = _hop_distances(start, facts, step.direction)
+                    # Remove facts connected only through rejected edges.
+                    facts = [fact for fact in facts if fact.id in distances]
                     _absorb(
                         facts,
                         collected,
@@ -435,8 +439,8 @@ def _hop_distances(
 
     A multi-depth step returns facts up to `depth` hops out; stamping them
     all with one hop scored a distant fact like a direct neighbour (#103).
-    Computed before migration translation, so a dropped fact can't make
-    later ones look unreachable.
+    Computed after migration translation so rejected edges cannot
+    establish reachability or influence surviving fact distances.
     """
     neighbours: dict[str, list[tuple[Any, str]]] = {}
     for f in facts:

@@ -278,3 +278,79 @@ def test_ingest_failure_is_audited(
     (record,) = _records(audit_url)
     assert _field(record, ArticleTwelveField.RESULT_FACT_IDS) == []
     assert _field(record, ArticleTwelveField.POLICY_DECISIONS)[-1]["result"] == "error"
+
+
+def test_query_rejects_unverified_migration_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid migration history must block planning and storage access."""
+    from uuid import uuid4
+
+    from ontos.migration.loading import MigrationConfigurationError
+    from ontos.migration.records import MigrationRecord
+    from ontos.ontology import load_ontology
+
+    active = load_ontology(STARTER)
+    previous = "0.0" if active.version != "0.0" else "0.1"
+
+    migrations = tmp_path / "migrations"
+    history = tmp_path / "history"
+    migrations.mkdir()
+    history.mkdir()
+
+    # This record has a structurally valid migration edge, but there
+    # are no historical ontology files to substantiate it.
+    record = MigrationRecord.model_validate(
+        {
+            "schema_version": 1,
+            "ontology_id": active.id,
+            "from_version": previous,
+            "to_version": active.version,
+            "migration_kind": "identity",
+            "approval_query_id": str(uuid4()),
+            "approved_changes": [
+                {
+                    "action": "add_pattern",
+                    "subject_type": "Person",
+                    "predicate": "works_at",
+                    "object_type": "Company",
+                }
+            ],
+        }
+    )
+    (migrations / "migration.yaml").write_text(record.model_dump_json())
+
+    monkeypatch.setenv("ONTOS_MIGRATIONS_DIR", str(migrations))
+    monkeypatch.setenv("ONTOS_ONTOLOGY_HISTORY_DIR", str(history))
+    monkeypatch.setattr(ontos.llm, "OllamaBackend", _StubLLM)
+
+    planned: list[str] = []
+
+    class RecordingPlanner(_SeedAcme):
+        async def plan(self, question: str, ontology: object) -> Plan:
+            planned.append(question)
+            return await super().plan(question, ontology)
+
+    monkeypatch.setattr(ontos.planner, "LlmPlanner", RecordingPlanner)
+
+    opened_store: list[bool] = []
+
+    def unexpected_store(config: object) -> None:
+        opened_store.append(True)
+        raise AssertionError("graph store opened before migration verification")
+
+    monkeypatch.setattr(
+        ontos.runtime.server,
+        "build_store",
+        unexpected_store,
+    )
+
+    result = _query(tmp_path / "unused.pkl")
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, MigrationConfigurationError)
+    assert "history verification failed" in str(result.exception)
+    assert planned == []
+    assert opened_store == []
+    assert '"hits"' not in result.stdout

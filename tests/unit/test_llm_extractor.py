@@ -556,3 +556,123 @@ async def test_backend_failure_logging_excludes_sensitive_content(
     logged = repr(logger.warning.call_args)
     assert secret not in logged
     assert document not in logged
+
+
+def _ontology_with_predicate_mapping(ontology: Ontology) -> Ontology:
+    from ontos.ontology import PredicateMapping
+
+    return ontology.model_copy(
+        update={
+            "predicate_mappings": [
+                PredicateMapping(
+                    subject_type="Person",
+                    observed_predicate="employed_by",
+                    object_type="Company",
+                    maps_to="works_at",
+                )
+            ]
+        }
+    )
+
+
+async def test_approved_predicate_mapping_normalizes_fact(
+    ontology: Ontology,
+) -> None:
+    mapped = _ontology_with_predicate_mapping(ontology)
+    raw = _valid_triple(predicate="employed_by")
+
+    result = await LlmExtractor(FakeLLM([[raw]]), mapped).extract(
+        ExtractionInput(
+            source_id="mapped-document",
+            text="Alice is employed by Acme.",
+        )
+    )
+
+    assert len(result.facts) == 1
+    assert result.rejected == []
+
+    fact = result.facts[0]
+    assert fact.predicate == "works_at"
+    assert fact.provenance.mapped_from_predicate == "employed_by"
+    assert fact.provenance.source_id == "mapped-document"
+    assert fact.provenance.ontology_id == mapped.id
+    assert fact.provenance.ontology_version == mapped.version
+
+    # Normalization must not mutate the raw LLM response.
+    assert raw.predicate == "employed_by"
+
+    # Relationship mappings must not leak into entity provenance.
+    assert result.entities
+    assert all(entity.provenance.mapped_from_predicate is None for entity in result.entities)
+
+
+async def test_predicate_mapping_is_type_pair_scoped(
+    ontology: Ontology,
+) -> None:
+    mapped = _ontology_with_predicate_mapping(ontology)
+
+    raw = _valid_triple(
+        subject_id="company:acme",
+        subject_type="Company",
+        subject_canonical_name="Acme Corp",
+        predicate="employed_by",
+        object_id="person:alice",
+        object_type="Person",
+        object_canonical_name="Alice Smith",
+    )
+
+    result = await LlmExtractor(FakeLLM([[raw]]), mapped).extract(
+        ExtractionInput(
+            source_id="reversed-types",
+            text="Test document.",
+        )
+    )
+
+    assert result.facts == []
+    assert len(result.rejected) == 1
+    assert result.rejected[0].reason == "pattern_not_in_ontology"
+    assert result.rejected[0].raw_triple.predicate == "employed_by"
+
+
+async def test_predicate_mapping_does_not_bypass_confidence_threshold(
+    ontology: Ontology,
+) -> None:
+    mapped = _ontology_with_predicate_mapping(ontology)
+    raw = _valid_triple(
+        predicate="employed_by",
+        llm_confidence=0.2,
+    )
+
+    result = await LlmExtractor(
+        FakeLLM([[raw]]),
+        mapped,
+        min_confidence=0.5,
+    ).extract(
+        ExtractionInput(
+            source_id="low-confidence",
+            text="Uncertain employment relationship.",
+        )
+    )
+
+    assert result.facts == []
+    assert len(result.rejected) == 1
+    assert result.rejected[0].reason == "below_min_confidence"
+    assert result.rejected[0].raw_triple.predicate == "employed_by"
+
+
+async def test_unmapped_fact_keeps_legacy_behavior(
+    ontology: Ontology,
+) -> None:
+    result = await LlmExtractor(
+        FakeLLM([[_valid_triple()]]),
+        ontology,
+    ).extract(
+        ExtractionInput(
+            source_id="legacy-document",
+            text="Alice works at Acme.",
+        )
+    )
+
+    assert len(result.facts) == 1
+    assert result.facts[0].predicate == "works_at"
+    assert result.facts[0].provenance.mapped_from_predicate is None

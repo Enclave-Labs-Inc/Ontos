@@ -225,8 +225,14 @@ class LlmExtractor:
         for raw in raw_triples:
             label, score = _calibrate(raw.llm_confidence)
 
-            if not self._ontology.is_valid_pattern(
+            # Normalize only an approved, type-pair-scoped mapping.
+            # Keep raw unchanged for rejected-candidate evidence.
+            normalized_predicate = self._ontology.resolve_predicate(
                 raw.subject_type, raw.predicate, raw.object_type
+            )
+
+            if not self._ontology.is_valid_pattern(
+                raw.subject_type, normalized_predicate, raw.object_type
             ):
                 reason: Literal["pattern_not_in_ontology", "below_min_confidence"] | None = (
                     "pattern_not_in_ontology"
@@ -264,6 +270,9 @@ class LlmExtractor:
                 ontology_version=self._ontology.version,
                 confidence=label,
                 confidence_score=score,
+                mapped_from_predicate=(
+                    raw.predicate if normalized_predicate != raw.predicate else None
+                ),
             )
 
             for eid, etype, ename in (
@@ -294,13 +303,13 @@ class LlmExtractor:
                         id=eid,
                         type=etype,
                         canonical_name=canonical_name,
-                        provenance=provenance,
+                        provenance=provenance.model_copy(update={"mapped_from_predicate": None}),
                     )
 
             facts.append(
                 Fact(
                     subject_id=raw.subject_id,
-                    predicate=raw.predicate,
+                    predicate=normalized_predicate,
                     object_id=raw.object_id,
                     provenance=provenance,
                     t_valid=now,

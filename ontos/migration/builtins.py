@@ -18,6 +18,8 @@ runs). The migration seam translates **facts**, not entity typings.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from ontos.ontology import Ontology
 from ontos.runtime.models import Fact
 
@@ -136,6 +138,44 @@ class CardinalityTighten:
     @property
     def predicate(self) -> str:
         return self._predicate
+
+    async def migrate_fact(
+        self,
+        fact: Fact,
+        source: Ontology,
+        target: Ontology,
+    ) -> Fact | None:
+        return fact
+
+
+class IdentityMigration:
+    """Preserve historical facts across an approved additive ontology change.
+
+    The stored fact and its original ontology stamp are never modified.
+    """
+
+    def __init__(
+        self,
+        *,
+        from_version: str,
+        to_version: str,
+        approval_query_id: UUID,
+    ) -> None:
+        self._from_version = from_version
+        self._to_version = to_version
+        self.approval_query_id = approval_query_id
+
+    @property
+    def id(self) -> str:
+        return f"ontos.migration.identity.{self.approval_query_id}"
+
+    @property
+    def from_version(self) -> str:
+        return self._from_version
+
+    @property
+    def to_version(self) -> str:
+        return self._to_version
 
     async def migrate_fact(
         self,
