@@ -30,6 +30,7 @@ _CONTEXT: dict[str, object] = {
     "ontologyVersion": "urn:ontos:ontologyVersion",
     "confidence": "urn:ontos:confidence",
     "confidenceScore": "urn:ontos:confidenceScore",
+    "mappedFromPredicate": "urn:ontos:mappedFromPredicate",
     "tValid": "urn:ontos:tValid",
     "tInvalid": "urn:ontos:tInvalid",
     "ingestedAt": "urn:ontos:ingestedAt",
@@ -78,6 +79,8 @@ def _fact_node(fact: Fact) -> dict[str, object]:
         "tValid": fact.t_valid.isoformat(),
         "ingestedAt": fact.ingested_at.isoformat(),
     }
+    if fact.provenance.mapped_from_predicate is not None:
+        node["mappedFromPredicate"] = fact.provenance.mapped_from_predicate
     if fact.t_invalid is not None:
         node["tInvalid"] = fact.t_invalid.isoformat()
     if fact.superseded_by is not None:
@@ -225,6 +228,11 @@ def load_jsonld(path: Path) -> tuple[GraphScan, dict[str, str]]:
                         ontology_version=str(item.get("ontologyVersion", "")),
                         confidence=Confidence(str(item["confidence"])),
                         confidence_score=float(item["confidenceScore"]),
+                        mapped_from_predicate=(
+                            str(item["mappedFromPredicate"])
+                            if item.get("mappedFromPredicate") is not None
+                            else None
+                        ),
                     ),
                     t_valid=datetime.fromisoformat(str(item["tValid"])),
                     t_invalid=(

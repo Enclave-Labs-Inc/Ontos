@@ -354,3 +354,160 @@ def test_query_rejects_unverified_migration_history(
     assert planned == []
     assert opened_store == []
     assert '"hits"' not in result.stdout
+
+
+def test_verified_migration_cli_audit_hides_rejected_paths_and_acl_nodes(
+    audit_url: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only reachable, authorized, migration-valid facts enter audit results."""
+    from tests.unit.test_migration_executor_factory import (
+        _fact,
+        _setup_artifacts,
+    )
+
+    active_path, migrations, history, _ = _setup_artifacts(tmp_path)
+
+    monkeypatch.setenv("ONTOS_MIGRATIONS_DIR", str(migrations))
+    monkeypatch.setenv("ONTOS_ONTOLOGY_HISTORY_DIR", str(history))
+    monkeypatch.setenv("ONTOS_ONTOLOGY_PATH", str(active_path))
+
+    class _MigrationPlanner:
+        id = "migration-compliance-planner"
+
+        def __init__(self, llm: object, ontology: object) -> None:
+            pass
+
+        async def plan(self, question: str, ontology: object) -> Plan:
+            return Plan(
+                seed=SeedByEntity(entity_id="person:a"),
+                steps=[TraversalStep(direction="out", depth=2)],
+            )
+
+    monkeypatch.setattr(ontos.planner, "LlmPlanner", _MigrationPlanner)
+
+    authz = InMemoryAuthz()
+    authz.grant("user:reader", VIEW, "acl:public")
+    monkeypatch.setattr(
+        ontos.runtime.server,
+        "build_authz",
+        lambda cfg: authz,
+    )
+
+    def fact(subject: str, target: str, version: str, acl: str | None = None):
+        return _fact(version=version).model_copy(
+            update={
+                "subject_id": subject,
+                "object_id": target,
+                "acl_ref": acl,
+            }
+        )
+
+    # Visible and valid two-hop path.
+    direct = fact("person:a", "person:d", "0.2")
+    second_hop = fact("person:d", "person:e", "0.2")
+
+    # Rejected migration edge, followed by a valid but unreachable fact.
+    rejected = fact("person:a", "person:b", "0.0")
+    disconnected = fact("person:b", "person:c", "0.2")
+
+    # Forbidden edge with no migration path. The reader must never
+    # receive a warning revealing its existence.
+    hidden = fact(
+        "person:a",
+        "person:confidential",
+        "0.0",
+        "acl:secret",
+    )
+
+    visible_facts = [direct, second_hop, rejected, disconnected]
+
+    def save_store(path: Path, facts: list) -> None:
+        async def seed() -> None:
+            store = NetworkxStore(path=path)
+            try:
+                for item in facts:
+                    await store.add_fact(item)
+            finally:
+                await store.close()
+
+        asyncio.run(seed())
+
+    baseline_path = tmp_path / "baseline.pkl"
+    hidden_path = tmp_path / "with-hidden.pkl"
+
+    save_store(baseline_path, visible_facts)
+    save_store(hidden_path, [*visible_facts, hidden])
+
+    def run_query(path: Path) -> dict:
+        result = CliRunner().invoke(
+            app,
+            [
+                "query",
+                "who?",
+                "--ontology",
+                str(active_path),
+                "--storage-path",
+                str(path),
+                "--acting-on-behalf-of",
+                "user:reader",
+            ],
+        )
+        assert result.exit_code == 0, (
+            result.stdout,
+            result.stderr,
+            result.exception,
+        )
+        return json.loads(result.stdout)
+
+    baseline = run_query(baseline_path)
+    with_hidden = run_query(hidden_path)
+
+    def returned_ids(body: dict) -> list[str]:
+        return [hit["fact"]["id"] for hit in body["hits"]]
+
+    expected = {str(direct.id), str(second_hop.id)}
+
+    assert set(returned_ids(baseline)) == expected
+    assert set(returned_ids(with_hidden)) == expected
+
+    for excluded in (rejected, disconnected, hidden):
+        assert str(excluded.id) not in returned_ids(with_hidden)
+
+    # Visible migration failures may be explained to the caller.
+    assert any(
+        "no-migration-path" in warning and str(rejected.id) in warning
+        for warning in baseline["warnings"]
+    )
+
+    # Adding an ACL-hidden fact cannot change visible counts,
+    # query warnings, or returned facts.
+    assert returned_ids(baseline) == returned_ids(with_hidden)
+    assert baseline["warnings"] == with_hidden["warnings"]
+    assert len(baseline["hits"]) == len(with_hidden["hits"]) == 2
+
+    records = _records(audit_url)
+    assert len(records) == 2
+
+    for record, body in zip(records, (baseline, with_hidden), strict=True):
+        assert _field(record, ArticleTwelveField.TOOL_INVOKED) == "ontos.query"
+        assert sorted(_field(record, ArticleTwelveField.RESULT_FACT_IDS)) == sorted(
+            returned_ids(body)
+        )
+        assert _field(record, ArticleTwelveField.ACTING_ON_BEHALF_OF) == "user:reader"
+
+        audited_ids = _field(record, ArticleTwelveField.RESULT_FACT_IDS)
+        for excluded in (rejected, disconnected, hidden):
+            assert str(excluded.id) not in audited_ids
+
+    # Neither the caller response nor its audit record may expose
+    # identifiers or names associated with the ACL-hidden edge.
+    disclosed = json.dumps(with_hidden) + records[-1].model_dump_json()
+
+    for secret in (
+        str(hidden.id),
+        "person:confidential",
+        "acl:secret",
+    ):
+        assert secret not in disclosed
