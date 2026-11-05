@@ -106,14 +106,78 @@ behavior is retained.
 
 ## Query-time behavior
 
-With verified migrations enabled, the deterministic executor
-uses a strict migration registry.
+With verified migrations enabled, `DeterministicExecutor` uses a
+strict migration registry. **This filtering currently applies to
+MCP `ask` and CLI `ontos query` only.**
 
-- A fact already on the active ontology version can be read normally.
-- A historical fact with a verified migration path remains visible.
-- A historical fact without a migration path is excluded and generates
-  a migration warning.
-- Query-time identity migrations do not rewrite stored facts.
+For these two query paths:
+
+- A fact stamped with the active ontology ID and version can be
+  read normally.
+- A historical fact with the matching ontology ID and a complete,
+  verified migration path to the active version remains visible.
+- A fact without a valid migration path is excluded from the query
+  result and generates a migration warning.
+- Query-time migrations do not rewrite or delete stored facts.
+- Facts rejected during migration cannot bridge graph reachability.
+
+**Strict migration filtering is not global.** MCP `search`,
+`traverse`, `explain`, and `provenance`, as well as all
+`ontos export` operations, read the graph store directly.
+They do not apply `MigrationRegistry.migrate_fact`, and may
+therefore return facts that `ask` or `ontos query` exclude.
+Existing ACL restrictions still apply to these direct reads.
+Do not rely on strict migration filtering as a guarantee for
+MCP direct reads, exports, or other graph consumers.
+
+### Historical fact visibility and recovery
+
+**Enabling strict migrations on an existing graph can make older
+facts disappear from `ask` and `ontos query` results.**
+This does not delete the facts from storage.
+
+Strict mode excludes facts whose provenance has:
+
+- No ontology version (including facts created before ontology
+  version stamping was introduced).
+- An ontology ID different from the active ontology ID,
+  including `ontos.unknown` or an empty ID.
+- A version older than the earliest migration edge, or any
+  version without a complete verified chain to the active version.
+
+The query emits a migration warning, but does not automatically
+repair these records.
+
+Before enabling migrations on an existing graph, operators should
+inspect the stored facts' ontology IDs and versions, retain a
+backup, and test representative queries against the proposed
+active ontology and migration history.
+
+For historical facts with the **same ontology ID**, recovery may
+be possible by supplying a verified migration chain beginning
+at the oldest stamped version. The corresponding historical
+ontology YAML files and declarative migration records must
+describe valid transitions all the way to the active version.
+Do not invent migration edges to bypass version verification.
+
+Facts with **missing version stamps or incompatible ontology IDs**
+cannot be made valid merely by adding a migration edge. Recover
+them by re-ingesting the original source documents under the
+correct active ontology using the normal extraction and validation
+pipeline, preserving source ACLs and provenance.
+
+Scoped operator-triggered re-ingestion is planned for M3-3;
+M3-1 does not perform it automatically. Never promote stored
+rejected candidates directly into trusted facts.
+
+If activation unexpectedly hides required facts, operators can
+revert the active configuration and disable verified migrations
+by unsetting both `ONTOS_MIGRATIONS_DIR` and
+`ONTOS_ONTOLOGY_HISTORY_DIR`, then restarting the affected
+process. This restores legacy executor behavior; it does not
+repair missing provenance or establish a migration history.
+
+### Active ontology selection
 
 The CLI `ontos query` command uses its explicitly supplied
 `--ontology` file as the active ontology.
