@@ -315,7 +315,7 @@ class DeterministicExecutor:
                             )
                         )
                         facts = await self._translate(facts, warnings)
-                        distances = _hop_distances(start, facts, step.direction)
+                        distances = hop_distances(start, facts, step.direction)
                         # Remove facts connected only through rejected edges.
                         facts = [fact for fact in facts if fact.id in distances]
                         _absorb(
@@ -339,7 +339,7 @@ class DeterministicExecutor:
                         )
                     )
                     facts = await self._translate(facts, warnings)
-                    distances = _hop_distances(start, facts, step.direction)
+                    distances = hop_distances(start, facts, step.direction)
                     # Remove facts connected only through rejected edges.
                     facts = [fact for fact in facts if fact.id in distances]
                     _absorb(
@@ -430,7 +430,7 @@ class DeterministicExecutor:
         return scores
 
 
-def _hop_distances(
+def hop_distances(
     start: str,
     facts: list[Fact],
     direction: Literal["out", "in", "both"],

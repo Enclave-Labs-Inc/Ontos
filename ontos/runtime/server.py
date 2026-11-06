@@ -43,6 +43,7 @@ from ontos.runtime.auth import (
 )
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.migration_executor import build_verified_executor
+from ontos.runtime.migration_view import MigrationView, build_migration_view
 from ontos.runtime.models import ArticleTwelveField, AuditRecord, Fact
 from ontos.runtime.temporal import parse_as_of
 from ontos.storage.base import GraphStore
@@ -97,6 +98,9 @@ class SnapshotMetadata(BaseModel):
 
 MAX_SEARCH_K = 100
 MAX_TRAVERSE_DEPTH = 10
+# With migrations on, `search` refetches when projection drops facts so a
+# caller still gets up to `k`; this bounds the extra store reads.
+_MAX_SEARCH_FETCH = 4 * MAX_SEARCH_K
 
 
 class InvalidToolArgumentError(ValueError):
@@ -289,12 +293,15 @@ def build_server(
 
         active_ontology = load_ontology(cfg.ontology_path)
 
-    if executor is not None:
-        resolved_executor: Executor = executor
-    elif active_ontology is not None:
-        resolved_executor = build_verified_executor(cfg, active_ontology=active_ontology)
-    else:
-        resolved_executor = build_verified_executor(cfg)
+    # One verified registry for the executor and every direct read (#112).
+    migration_view: MigrationView | None = (
+        build_migration_view(cfg, active_ontology=active_ontology)
+        if active_ontology is not None
+        else None
+    )
+    resolved_executor: Executor = (
+        executor if executor is not None else build_verified_executor(cfg, view=migration_view)
+    )
     store = store if store is not None else build_store(cfg)
     audit = audit if audit is not None else build_audit_sink(cfg)
     # Note: authz is opt-in — passing None disables authz and falls back
@@ -372,7 +379,13 @@ def build_server(
             result_fact_ids=result_fact_ids,
             latency_ms=latency_ms,
             model_versions=_model_versions(cfg),
-            policy_decisions=[caller.policy_decision(), *policy_decisions],
+            policy_decisions=[
+                caller.policy_decision(),
+                *policy_decisions,
+                # Which ontology results were projected onto, never what
+                # projection excluded (#112).
+                *([migration_view.audit_decision()] if migration_view is not None else []),
+            ],
         )
 
     # The verified caller and query text of the current tool call, set by
@@ -510,13 +523,23 @@ def build_server(
         ts = _parse_as_of_arg(as_of)
         k = _bounded_arg("k", k, 1, MAX_SEARCH_K)
         allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
-        facts = await store.search(
-            query,
-            as_of=ts,
-            k=k,
-            acl_subject=caller.principal,
-            allowed_acls=allowed_acls,
-        )
+        fetch = k
+        while True:
+            fetched = await store.search(
+                query,
+                as_of=ts,
+                k=fetch,
+                acl_subject=caller.principal,
+                allowed_acls=allowed_acls,
+            )
+            if migration_view is None:
+                facts = fetched
+                break
+            facts = await migration_view.project(fetched)
+            if len(facts) >= k or len(fetched) < fetch or fetch >= _MAX_SEARCH_FETCH:
+                facts = facts[:k]
+                break
+            fetch = min(fetch * 2, _MAX_SEARCH_FETCH)
         latency_ms = (time.perf_counter() - started) * 1000
         record = await _emit(
             tool="search",
@@ -564,6 +587,8 @@ def build_server(
                 allowed_acls=allowed_acls,
             )
         )
+        if migration_view is not None:
+            facts = await migration_view.project_reachable(start, facts, "out")
         latency_ms = (time.perf_counter() - started) * 1000
         record = await _emit(
             tool="traverse",
@@ -604,6 +629,8 @@ def build_server(
             acl_subject=caller.principal,
             allowed_acls=allowed_acls,
         )
+        if migration_view is not None:
+            facts = await migration_view.project(facts)
         latency_ms = (time.perf_counter() - started) * 1000
         record = await _emit(
             tool="explain",
@@ -645,6 +672,10 @@ def build_server(
             acl_subject=caller.principal,
             allowed_acls=allowed_acls,
         )
+        if fact is not None and migration_view is not None:
+            # An excluded fact reads as nonexistent, like an ACL-hidden one.
+            projected = await migration_view.project([fact])
+            fact = projected[0] if projected else None
         latency_ms = (time.perf_counter() - started) * 1000
         payload: Fact | None = fact
         record = await _emit(
