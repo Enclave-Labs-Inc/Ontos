@@ -6,6 +6,7 @@ Raw model responses must not be exposed to reviewers.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -34,6 +35,52 @@ _SYSTEM = (
     "Return only the requested JSON schema fields. "
     "Never include ACLs, sources, counts, references, or metadata."
 )
+
+
+def _proposal_schema(candidate_count: int) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "proposals": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "candidate_id": {
+                            "type": "integer",
+                            "enum": list(range(candidate_count)),
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": ["map_to_existing", "new_relation_type"],
+                        },
+                        "relation_type": {"type": "string"},
+                    },
+                    "required": ["candidate_id", "kind", "relation_type"],
+                },
+            }
+        },
+        "required": ["proposals"],
+    }
+
+
+def prompt_schema_digest(generation_options: dict[str, Any]) -> str:
+    """SHA-256 over the system prompt, response schema and sampling options.
+
+    Recorded with each M2b run so a suggestion can be traced to the exact
+    instructions that produced it, alongside the model digest (#90).
+    """
+    canonical = json.dumps(
+        {
+            "system": _SYSTEM,
+            "schema": _proposal_schema(0),
+            "options": generation_options,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -99,40 +146,7 @@ async def request_acl_isolated_suggestions(
                     }
                 )
 
-            schema: dict[str, Any] = {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "proposals": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "candidate_id": {
-                                    "type": "integer",
-                                    "enum": list(range(len(chunk))),
-                                },
-                                "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                        "map_to_existing",
-                                        "new_relation_type",
-                                    ],
-                                },
-                                "relation_type": {"type": "string"},
-                            },
-                            "required": [
-                                "candidate_id",
-                                "kind",
-                                "relation_type",
-                            ],
-                        },
-                    }
-                },
-                "required": ["proposals"],
-            }
-
+            schema = _proposal_schema(len(chunk))
             user = json.dumps({"evidence": evidence}, sort_keys=True)
             response = await backend.structured_suggest(system=_SYSTEM, user=user, schema=schema)
 

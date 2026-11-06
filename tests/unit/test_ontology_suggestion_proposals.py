@@ -218,7 +218,8 @@ def test_excess_proposals_fail_closed() -> None:
         ontology=_ontology(),
     )
     assert result.proposals == ()
-    assert result.invalid_count == 3
+    # One refused response, however many proposals it padded in (#90).
+    assert result.invalid_count == 1
 
 
 def test_malformed_model_response_is_counted() -> None:

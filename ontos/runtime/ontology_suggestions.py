@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Literal
 
@@ -10,9 +11,11 @@ import structlog
 from ontos.audit.base import AuditSink
 from ontos.authz import ONTOLOGY_REVIEWER, VIEW, AuthzBackend
 from ontos.authz.base import AuthzError
+from ontos.llm.ollama import SUGGESTION_OPTIONS
 from ontos.ontology.loader import Ontology
 from ontos.ontology.suggestion_backend import SuggestionBackend
 from ontos.ontology.suggestion_pipeline import generate_llm_suggestions
+from ontos.ontology.suggestion_requests import prompt_schema_digest
 from ontos.ontology.suggestion_trust import require_approved_suggestion_backend
 from ontos.ontology.suggestions import (
     OntologySuggestion,
@@ -75,6 +78,8 @@ async def _audit_suggestions(
     generation_mode: Literal["m2a", "m2b"] = "m2a",
     generator_id: str | None = None,
     generator_version: str | None = None,
+    prompt_schema_sha256: str | None = None,
+    refused_generator: str | None = None,
 ) -> AuditRecord:
     """Record a request without logging candidate text or raw IDs."""
     tool_arguments: dict[str, object] = {
@@ -90,6 +95,12 @@ async def _audit_suggestions(
     if generation_mode == "m2b" and generator_id is not None and generator_version is not None:
         model_versions["generator_id"] = generator_id
         model_versions["generator_version"] = generator_version
+        if prompt_schema_sha256 is not None:
+            model_versions["prompt_schema_sha256"] = prompt_schema_sha256
+    elif refused_generator is not None:
+        # A trust refusal must be distinguishable from a model failure (#90).
+        model_versions["generator_id"] = refused_generator
+        model_versions["generator_trust"] = "refused"
 
     query_text = (
         "ontology deterministic suggestions"
@@ -149,6 +160,8 @@ async def list_ontology_suggestions(
     invalid_count = 0
     audited_generator_id: str | None = None
     audited_generator_version: str | None = None
+    prompt_digest: str | None = None
+    refused_generator: str | None = None
     cursor: str | None = None
     seen_cursors: set[str] = set()
     stage = "inspection"
@@ -161,6 +174,7 @@ async def list_ontology_suggestions(
         "audit_error",
         "incomplete_result",
         "generation_error",
+        "cancelled",
     ] = "allow"
 
     try:
@@ -183,9 +197,15 @@ async def list_ontology_suggestions(
         # Reject unapproved backends before accessing candidate storage.
         if backend is not None:
             stage = "generation"
-            approved = require_approved_suggestion_backend(backend)
+            try:
+                approved = require_approved_suggestion_backend(backend)
+            except Exception:
+                refused_generator = _generator_label(backend)
+                raise
             audited_generator_id = approved.id
-            audited_generator_version = approved.version
+            # Pin the exact weights before any evidence is read (#90).
+            audited_generator_version = await approved.resolve_suggestion_version()
+            prompt_digest = prompt_schema_digest(SUGGESTION_OPTIONS)
             stage = "inspection"
 
         while True:
@@ -252,6 +272,7 @@ async def list_ontology_suggestions(
                 ontology=ontology,
                 backend=backend,
                 reference_key=reference_key,
+                generator_version=audited_generator_version,
             )
             suggestions.extend(generated.suggestions)
             invalid_count = generated.invalid_count
@@ -278,6 +299,7 @@ async def list_ontology_suggestions(
             decision="allow",
             generator_id=audited_generator_id,
             generator_version=audited_generator_version,
+            prompt_schema_sha256=prompt_digest,
             suggestion_refs=refs,
             candidate_count=len(records),
             suggestion_count=len(suggestions),
@@ -287,8 +309,12 @@ async def list_ontology_suggestions(
 
         return suggestions, audit_record
 
-    except Exception as exc:
-        if isinstance(exc, CandidateInspectionAuditError):
+    except BaseException as exc:
+        # BaseException: a cancelled model call (Ctrl-C, task cancel) must
+        # still leave an outcome record, not end at `request_started` (#90).
+        if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)):
+            decision = "cancelled"
+        elif isinstance(exc, CandidateInspectionAuditError):
             decision = "audit_error"
         elif isinstance(exc, CandidateInspectionDeniedError):
             decision = "deny"
@@ -316,6 +342,8 @@ async def list_ontology_suggestions(
                 decision=decision,
                 generator_id=audited_generator_id,
                 generator_version=audited_generator_version,
+                prompt_schema_sha256=prompt_digest,
+                refused_generator=refused_generator,
                 suggestion_refs=[],
                 candidate_count=len(records),
                 suggestion_count=0,
@@ -333,6 +361,13 @@ async def list_ontology_suggestions(
             )
             raise exc from None
         raise
+
+
+def _generator_label(backend: object) -> str:
+    """A bounded, printable name for a refused backend; never its contents."""
+    raw = getattr(backend, "id", None)
+    label = raw if isinstance(raw, str) and raw else type(backend).__name__
+    return "".join(ch for ch in label if ch.isprintable())[:128]
 
 
 async def audit_suggestion_setup_failure(
