@@ -14,6 +14,27 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — M2b suggestion correctness and CLI output (#90)
+- **Stable order.** M2a and M2b suggestions are sorted together by
+  `(acl_ref, kind, pattern, observed_predicate)`, instead of following the
+  model's response order.
+- **Stricter `OntologySuggestion`.**
+  - Every label must be an identifier of at most 64 characters, which rejects
+    values such as `DROP TABLE x;`.
+  - `map_to_existing` and `new_relation_type` require a lower_snake_case
+    `observed_predicate` and `extractor_versions`.
+  - `add_pattern` rejects `observed_predicate`.
+  - A new relation must keep the observed predicate.
+- **Skipped evidence is reported.** Candidates whose predicate isn't
+  lower_snake_case (e.g. `employedBy`) are counted as `skipped_count` in the
+  audit and the CLI, instead of being dropped silently. Ontology loading is
+  unchanged.
+- **CLI `generation` block.** Shows mode, generator id and pinned version,
+  `invalid_count`, `skipped_count` and the outcome audit `query_id`.
+- **Specific failure hints.** The CLI distinguishes connection refused, a
+  model that isn't installed (or a 404), timeouts, an oversized prompt and a
+  refused backend. Response bodies are never printed.
+
 ### Fixed — M2b suggestion audit and reproducibility (#90)
 - **Cancellation is audited.** A cancelled model call (Ctrl-C, task cancel)
   now writes a `cancelled` outcome record before re-raising. The trail no

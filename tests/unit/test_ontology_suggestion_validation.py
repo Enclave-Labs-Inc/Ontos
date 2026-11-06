@@ -53,6 +53,9 @@ def proposal(
 ) -> OntologySuggestion:
     mapped = predicate if kind == "map_to_existing" else None
     proposed = predicate if kind == "new_relation_type" else None
+    # LLM-assisted kinds always carry the observed predicate (#90): a
+    # mapping's differs from its target, a new relation keeps it unchanged.
+    observed = {"map_to_existing": "employed_by", "new_relation_type": predicate}.get(kind)
 
     return OntologySuggestion.model_validate(
         {
@@ -64,6 +67,8 @@ def proposal(
             ),
             "mapped_relation_type": mapped,
             "proposed_relation_type": proposed,
+            "observed_predicate": observed,
+            "extractor_versions": [("scripted-extractor", "1")] if observed else [],
             "acl_ref": "acl:finance",
             "support_count": 1,
             "supporting_candidate_refs": ["protected-reference"],
@@ -112,11 +117,23 @@ def test_existing_pattern_not_suggested_again() -> None:
 @pytest.mark.parametrize(
     ("subject", "predicate", "object"),
     [
-        ("Unknown", "reports_to", "Person"),
-        ("Person", "reports_to", "Unknown"),
         ("Person", "Reports To", "Company"),
         ("Person", "reports_to;DROP", "Company"),
         ("Person", "reports_to", "Company<script>"),
+    ],
+)
+def test_unsafe_labels_cannot_be_constructed(subject: str, predicate: str, object: str) -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        proposal("new_relation_type", subject=subject, predicate=predicate, object=object)
+
+
+@pytest.mark.parametrize(
+    ("subject", "predicate", "object"),
+    [
+        ("Unknown", "reports_to", "Person"),
+        ("Person", "reports_to", "Unknown"),
     ],
 )
 def test_invalid_references_or_labels_rejected(
