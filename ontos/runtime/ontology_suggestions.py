@@ -75,6 +75,7 @@ async def _audit_suggestions(
     suggestion_count: int,
     latency_ms: float,
     invalid_count: int = 0,
+    skipped_count: int = 0,
     generation_mode: Literal["m2a", "m2b"] = "m2a",
     generator_id: str | None = None,
     generator_version: str | None = None,
@@ -89,6 +90,7 @@ async def _audit_suggestions(
         "candidate_count": candidate_count,
         "suggestion_count": suggestion_count,
         "invalid_count": invalid_count,
+        "skipped_count": skipped_count,
     }
     policy_decisions = [{"policy": "ontology_suggestions", "result": decision}]
     model_versions = {"component": f"ontology-suggestions-{generation_mode}-v1"}
@@ -158,6 +160,7 @@ async def list_ontology_suggestions(
     started = time.perf_counter()
     records: list[StoredCandidate] = []
     invalid_count = 0
+    skipped_count = 0
     audited_generator_id: str | None = None
     audited_generator_version: str | None = None
     prompt_digest: str | None = None
@@ -276,6 +279,20 @@ async def list_ontology_suggestions(
             )
             suggestions.extend(generated.suggestions)
             invalid_count = generated.invalid_count
+            skipped_count = generated.skipped_count
+
+        # M2a sorts its output; M2b follows the model's order. Sort the
+        # combined result so the same input always prints the same way (#90).
+        suggestions.sort(
+            key=lambda s: (
+                s.acl_ref or "",
+                s.kind,
+                (s.pattern.subject_type, s.pattern.predicate, s.pattern.object_type)
+                if s.pattern is not None
+                else ("", "", ""),
+                s.observed_predicate or "",
+            )
+        )
 
         # LLM generation can be slow; permissions may change meanwhile.
         # Recheck before auditing and returning any suggestion.
@@ -304,6 +321,7 @@ async def list_ontology_suggestions(
             candidate_count=len(records),
             suggestion_count=len(suggestions),
             invalid_count=invalid_count,
+            skipped_count=skipped_count,
             latency_ms=(time.perf_counter() - started) * 1000,
         )
 

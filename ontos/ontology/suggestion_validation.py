@@ -6,13 +6,12 @@ It only validates already-constructed, typed suggestions.
 
 from __future__ import annotations
 
-import re
-
+from ontos.ontology.labels import RELATION_LABEL
+from ontos.ontology.labels import SAFE_LABEL as ENTITY_LABEL
 from ontos.ontology.loader import Ontology
 from ontos.ontology.suggestions import OntologySuggestion
 
-RELATION_LABEL = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*\Z")
-ENTITY_LABEL = re.compile(r"[A-Za-z][A-Za-z0-9_]*\Z")
+__all__ = ["ENTITY_LABEL", "RELATION_LABEL", "is_valid_ontology_suggestion"]
 
 
 def is_valid_ontology_suggestion(

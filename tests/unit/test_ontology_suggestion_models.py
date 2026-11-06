@@ -41,7 +41,12 @@ def test_add_pattern_still_valid() -> None:
 
 def test_map_to_existing_valid_shape() -> None:
     result = OntologySuggestion.model_validate(
-        _proposal("map_to_existing", mapped_relation_type="works_at")
+        _proposal(
+            "map_to_existing",
+            mapped_relation_type="works_at",
+            observed_predicate="employed_by",
+            extractor_versions=[("scripted-extractor", "1")],
+        )
     )
     assert result.mapped_relation_type == "works_at"
     assert result.proposed_relation_type is None
@@ -57,9 +62,42 @@ def test_new_relation_type_valid_shape() -> None:
                 object_type="Person",
             ),
             proposed_relation_type="mentors",
+            observed_predicate="mentors",
+            extractor_versions=[("scripted-extractor", "1")],
         )
     )
     assert result.proposed_relation_type == "mentors"
+
+
+@pytest.mark.parametrize(
+    ("kind", "predicate", "changes"),
+    [
+        # The shapes #90 found accepted before.
+        ("new_relation_type", "DROP TABLE x;", {"proposed_relation_type": "DROP TABLE x;"}),
+        ("map_to_existing", "works_at", {"mapped_relation_type": "works_at"}),
+        (
+            "map_to_existing",
+            "works_at",
+            {"mapped_relation_type": "works_at", "observed_predicate": "employed_by"},
+        ),
+        ("add_pattern", "works_at", {"observed_predicate": "employed_by"}),
+        (
+            "new_relation_type",
+            "mentors",
+            {
+                "proposed_relation_type": "mentors",
+                "observed_predicate": "coaches",
+                "extractor_versions": [("e", "1")],
+            },
+        ),
+    ],
+)
+def test_weak_shapes_are_rejected(kind: str, predicate: str, changes: dict[str, object]) -> None:
+    from pydantic import ValidationError
+
+    pattern = Pattern(subject_type="Person", predicate=predicate, object_type="Company")
+    with pytest.raises(ValidationError):
+        OntologySuggestion.model_validate(_proposal(kind, pattern=pattern, **changes))
 
 
 @pytest.mark.parametrize(

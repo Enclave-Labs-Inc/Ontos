@@ -1942,7 +1942,7 @@ def ontology_suggestions_list(
                 typer.echo("Candidate storage unavailable.", err=True)
                 raise typer.Exit(code=1) from None
 
-            suggestions, _ = await list_ontology_suggestions(
+            suggestions, outcome = await list_ontology_suggestions(
                 candidate_store=store,
                 authz=authz,
                 audit=audit,
@@ -1962,6 +1962,7 @@ def ontology_suggestions_list(
                     {
                         "ontology_id": ontology.id,
                         "ontology_version": ontology.version,
+                        "generation": _suggestion_generation_summary(outcome),
                         "suggestions": [
                             suggestion.model_dump(mode="json") for suggestion in suggestions
                         ],
@@ -1980,7 +1981,10 @@ def ontology_suggestions_list(
                 "ontology-suggestions-failed",
                 error_type=type(exc).__name__,
             )
-            typer.echo("Ontology suggestions failed.", err=True)
+            typer.echo(
+                f"Ontology suggestions failed: {_suggestion_failure_hint(exc, llm_model)}",
+                err=True,
+            )
             raise typer.Exit(code=1) from None
         finally:
             if store is not None:
@@ -1988,6 +1992,50 @@ def ontology_suggestions_list(
             await _close_store_without_masking(audit)
 
     asyncio.run(_run())
+
+
+def _suggestion_generation_summary(outcome: Any) -> dict[str, object]:
+    """How the suggestions were generated, from the caller's own audit record."""
+    from ontos.runtime.models import ArticleTwelveField
+
+    arguments = json.loads(outcome.article12[ArticleTwelveField.TOOL_ARGUMENTS])
+    versions = json.loads(outcome.article12[ArticleTwelveField.MODEL_VERSIONS])
+    return {
+        "mode": "llm-assisted" if "generator_id" in versions else "deterministic",
+        "generator_id": versions.get("generator_id"),
+        "generator_version": versions.get("generator_version"),
+        "invalid_count": arguments.get("invalid_count", 0),
+        "skipped_count": arguments.get("skipped_count", 0),
+        "audit_query_id": str(outcome.query_id),
+    }
+
+
+def _suggestion_failure_hint(exc: Exception, llm_model: str | None) -> str:
+    """An actionable hint naming the failure class, never a response body (#90)."""
+    import httpx
+
+    from ontos.llm.ollama import (
+        OllamaTimeoutError,
+        SuggestionModelUnavailableError,
+        SuggestionPromptTooLargeError,
+    )
+    from ontos.ontology.suggestion_backend import SuggestionBackendRefusedError
+    from ontos.ontology.suggestion_endpoint import UntrustedSuggestionEndpointError
+
+    model = llm_model or "MODEL"
+    if isinstance(exc, httpx.ConnectError):
+        return "could not reach Ollama on loopback port 11434. Is `ollama serve` running?"
+    if isinstance(exc, SuggestionModelUnavailableError) or (
+        isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404
+    ):
+        return f"model {model!r} is not installed. Run `ollama pull {model}`."
+    if isinstance(exc, (OllamaTimeoutError, httpx.TimeoutException)):
+        return "Ollama timed out. Raise --ollama-timeout or warm the model first."
+    if isinstance(exc, SuggestionPromptTooLargeError):
+        return "the evidence does not fit the model's context window."
+    if isinstance(exc, (SuggestionBackendRefusedError, UntrustedSuggestionEndpointError)):
+        return "the LLM backend was refused by the sovereignty policy."
+    return f"unexpected {type(exc).__name__}; see the audit record."
 
 
 audit_app = typer.Typer(help="Audit chain commands.")

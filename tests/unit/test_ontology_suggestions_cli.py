@@ -490,9 +490,11 @@ def test_m2b_cli_refuses_remote_endpoint_before_inspection(
     # Replace only the CLI's backend factory. The production trust
     # module still holds the real OllamaBackend class and checks the
     # actual returned instance.
+    # Accept the CLI's `timeout_s`: a narrower stub raised TypeError before
+    # the endpoint check this test is about ever ran.
     monkeypatch.setattr(
         "ontos.llm.ollama.OllamaBackend",
-        lambda model: remote_backend,
+        lambda model, **_: remote_backend,
     )
 
     args = _suggestions_cli_args(storage_path, "user:reviewer") + ["--llm-model", "scripted-m2b"]
@@ -500,7 +502,8 @@ def test_m2b_cli_refuses_remote_endpoint_before_inspection(
     result = runner.invoke(app, args)
 
     assert result.exit_code == 1
-    assert "Ontology suggestions failed." in result.output
+    assert "refused by the sovereignty policy" in result.output
+    assert "TypeError" not in result.output
     assert "10.0.0.5" not in result.output
     assert "remote-test.pkl" not in result.output
     assert "Traceback" not in result.output

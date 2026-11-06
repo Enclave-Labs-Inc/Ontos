@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ontos.ontology.labels import is_relation_label, is_safe_label
 from ontos.ontology.loader import Ontology, Pattern
 from ontos.runtime.candidate_inspection import candidate_audit_reference
 from ontos.storage.base import StoredCandidate
@@ -39,15 +40,50 @@ class OntologySuggestion(BaseModel):
 
     @model_validator(mode="after")
     def _fields_match_kind(self) -> OntologySuggestion:
-        """Reject incomplete or contradictory suggestion kinds."""
+        """Reject incomplete, contradictory or malformed suggestions.
+
+        Defence in depth (#90): every layer before this already validates,
+        but a suggestion must not be constructible with unsafe labels.
+        """
         if self.pattern is None:
             raise ValueError(f"{self.kind} suggestions require a pattern")
+
+        labels = [
+            self.pattern.subject_type,
+            self.pattern.predicate,
+            self.pattern.object_type,
+            *(
+                value
+                for value in (
+                    self.mapped_relation_type,
+                    self.proposed_relation_type,
+                    self.observed_predicate,
+                )
+                if value is not None
+            ),
+        ]
+        if not all(is_safe_label(label) for label in labels):
+            raise ValueError("suggestion labels must be identifiers of at most 64 characters")
+        if any(
+            not extractor_id or not version or len(extractor_id) > 128 or len(version) > 128
+            for extractor_id, version in self.extractor_versions
+        ):
+            raise ValueError("extractor_versions entries must be non-empty and bounded")
+
+        if self.kind != "add_pattern":
+            # LLM-assisted kinds always rest on an observed predicate.
+            if self.observed_predicate is None or not is_relation_label(self.observed_predicate):
+                raise ValueError(f"{self.kind} requires a lower_snake_case observed_predicate")
+            if not self.extractor_versions:
+                raise ValueError(f"{self.kind} requires extractor_versions")
 
         if self.kind == "add_pattern":
             if self.mapped_relation_type is not None:
                 raise ValueError("add_pattern cannot specify mapped_relation_type")
             if self.proposed_relation_type is not None:
                 raise ValueError("add_pattern cannot specify proposed_relation_type")
+            if self.observed_predicate is not None:
+                raise ValueError("add_pattern cannot specify observed_predicate")
 
         elif self.kind == "map_to_existing":
             if not self.mapped_relation_type:
@@ -64,6 +100,8 @@ class OntologySuggestion(BaseModel):
                 raise ValueError("new_relation_type cannot map to an existing relation")
             if self.pattern.predicate != self.proposed_relation_type:
                 raise ValueError("proposed relation must match pattern predicate")
+            if self.proposed_relation_type != self.observed_predicate:
+                raise ValueError("a new relation type must keep the observed predicate")
 
         return self
 

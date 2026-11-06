@@ -10,8 +10,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
+from ontos.ontology.labels import is_relation_label
 from ontos.ontology.loader import Ontology
 from ontos.ontology.suggestion_backend import SuggestionBackend
+from ontos.ontology.suggestion_generation import partition_current_suggestion_evidence
 from ontos.ontology.suggestion_materialization import (
     materialize_supported_suggestions,
 )
@@ -33,6 +35,10 @@ from ontos.storage.base import StoredCandidate
 class LLMGenerationResult:
     suggestions: tuple[OntologySuggestion, ...]
     invalid_count: int
+    # Eligible candidates never sent to the model because their predicate
+    # isn't lower_snake_case (e.g. `employedBy`). Reported rather than
+    # dropped silently (#90).
+    skipped_count: int = 0
 
 
 async def generate_llm_suggestions(
@@ -55,6 +61,14 @@ async def generate_llm_suggestions(
         raise ValueError("A derived candidate-reference key is required")
 
     candidates = list(authorized_candidates)
+    skipped_count = sum(
+        1
+        for group in partition_current_suggestion_evidence(
+            authorized_candidates=candidates, ontology=ontology
+        ).values()
+        for stored in group
+        if not is_relation_label(stored.candidate.raw_triple.predicate)
+    )
 
     raw = await request_acl_isolated_suggestions(
         authorized_candidates=candidates,
@@ -88,4 +102,5 @@ async def generate_llm_suggestions(
         invalid_count=(
             validated.invalid_count + supported.invalid_count + materialized.invalid_count
         ),
+        skipped_count=skipped_count,
     )
