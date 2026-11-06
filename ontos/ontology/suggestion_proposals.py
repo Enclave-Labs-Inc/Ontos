@@ -51,9 +51,11 @@ def validate_acl_model_responses(
 
         items = payload["proposals"]
 
-        # One proposal per evidence pattern. Excess output is refused.
+        # One proposal per evidence pattern. Excess output refuses the whole
+        # response, counted once like any other invalid response (#90): the
+        # model must not be able to inflate the count by padding.
         if len(items) > len(response.evidence_patterns):
-            invalid_count += len(items)
+            invalid_count += 1
             continue
 
         seen_ids: set[int] = set()

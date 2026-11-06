@@ -42,6 +42,7 @@ async def generate_llm_suggestions(
     backend: SuggestionBackend,
     reference_key: bytes,
     generated_at: datetime | None = None,
+    generator_version: str | None = None,
 ) -> LLMGenerationResult:
     """Generate only validated, evidence-backed suggestions.
 
@@ -77,7 +78,8 @@ async def generate_llm_suggestions(
         supports=supported.proposals,
         ontology=ontology,
         generator_id=approved.id,
-        generator_version=approved.version,
+        # The caller's resolved `model@digest` when available (#90).
+        generator_version=generator_version or approved.version,
         generated_at=generated_at,
     )
 

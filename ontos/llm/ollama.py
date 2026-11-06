@@ -37,6 +37,22 @@ from ontos.planner import (
     TraversalStep,
 )
 
+# Ontology suggestions must be reproducible and must not be truncated
+# silently (#90). Greedy decoding with a fixed seed, and an explicit
+# context window instead of Ollama's per-model default.
+SUGGESTION_OPTIONS: dict[str, Any] = {"temperature": 0, "seed": 0, "num_ctx": 16384}
+# Rough lower bound of characters per token, so the size check refuses a
+# prompt before it could overflow `num_ctx` rather than after.
+_CHARS_PER_TOKEN = 3
+
+
+class SuggestionPromptTooLargeError(RuntimeError):
+    """A suggestion prompt would not fit, or was truncated, in the context window."""
+
+
+class SuggestionModelUnavailableError(RuntimeError):
+    """The requested model is not present on the local Ollama server."""
+
 
 class OllamaTimeoutError(RuntimeError):
     """Raised when Ollama does not respond within ``timeout_s``.
@@ -105,12 +121,47 @@ class OllamaBackend:
         self, system: str, user: str, schema: dict[str, Any]
     ) -> dict[str, Any]:
         """Use a direct, proxy-free, non-redirecting loopback connection."""
+        endpoint = self._trusted_suggestion_endpoint()
+        prompt_chars = len(system) + len(user) + len(json.dumps(schema))
+        if prompt_chars > SUGGESTION_OPTIONS["num_ctx"] * _CHARS_PER_TOKEN * 3 // 4:
+            raise SuggestionPromptTooLargeError(
+                "ontology suggestion prompt exceeds the model context window"
+            )
+        return await self._chat(system, user, schema, _trusted_suggestion_endpoint=endpoint)
+
+    async def resolve_suggestion_version(self) -> str:
+        """`model@digest` of the locally installed model, for the audit record.
+
+        A tag such as `qwen2.5:7b` can be re-pulled with different weights;
+        the digest identifies the exact weights that generated a suggestion.
+        """
+        endpoint = self._trusted_suggestion_endpoint()
+        wanted = {self._model} if ":" in self._model else {self._model, f"{self._model}:latest"}
+        async with httpx.AsyncClient(
+            timeout=self._timeout_s, trust_env=False, follow_redirects=False
+        ) as client:
+            response = await client.get(f"{endpoint}/api/tags")
+            response.raise_for_status()
+            listing = response.json()
+        models = listing.get("models") if isinstance(listing, dict) else None
+        for entry in models if isinstance(models, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            names = {entry.get("name"), entry.get("model")}
+            digest = entry.get("digest")
+            if wanted & names and isinstance(digest, str) and digest:
+                return f"{self._model}@sha256:{digest.removeprefix('sha256:')}"
+        raise SuggestionModelUnavailableError(
+            f"model {self._model!r} is not installed on the local Ollama server"
+        )
+
+    def _trusted_suggestion_endpoint(self) -> str:
         endpoint = require_local_ollama_endpoint(self._base_url)
         if self._client is not None:
             raise UntrustedSuggestionEndpointError(
                 "Injected HTTP clients are forbidden for ontology suggestions"
             )
-        return await self._chat(system, user, schema, _trusted_suggestion_endpoint=endpoint)
+        return endpoint
 
     async def _chat(
         self,
@@ -132,6 +183,8 @@ class OllamaBackend:
             # a JSON blob on `message.content` we parse below.
             "format": json_schema,
         }
+        if _trusted_suggestion_endpoint is not None:
+            body["options"] = dict(SUGGESTION_OPTIONS)
         url = f"{_trusted_suggestion_endpoint or self._base_url}/api/chat"
         # Translate httpx.ReadTimeout into our typed OllamaTimeoutError so
         # LlmExtractor / LlmPlanner can produce actionable messages
@@ -173,6 +226,14 @@ class OllamaBackend:
             # Transport and HTTP failures still propagate fail-closed.
             if not isinstance(data, dict):
                 return {"proposals": None}
+
+            # Ollama truncates an oversized prompt silently; a prompt that
+            # filled the window may have lost evidence or instructions.
+            prompt_tokens = data.get("prompt_eval_count")
+            if isinstance(prompt_tokens, int) and prompt_tokens >= SUGGESTION_OPTIONS["num_ctx"]:
+                raise SuggestionPromptTooLargeError(
+                    "ontology suggestion prompt was truncated to the model context window"
+                )
 
             message = data.get("message")
             if not isinstance(message, dict):

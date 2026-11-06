@@ -14,6 +14,25 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — M2b suggestion audit and reproducibility (#90)
+- **Cancellation is audited.** A cancelled model call (Ctrl-C, task cancel)
+  now writes a `cancelled` outcome record before re-raising. The trail no
+  longer ends at `request_started`.
+- **Pinned model version.** `generator_version` is now `model@sha256:<digest>`,
+  resolved once per run from the local Ollama `/api/tags` before any evidence
+  is read. Outcome records also carry `prompt_schema_sha256`, covering the
+  system prompt, response schema and sampling options. A model that isn't
+  installed fails before candidates are read.
+- **Reproducible generation.** Suggestion requests send `temperature=0`,
+  `seed=0` and an explicit `num_ctx`. A prompt that wouldn't fit is refused
+  before sending, and a prompt Ollama reports as filling the window fails the
+  request instead of returning truncated results.
+- **Refused backends are named.** A refused backend appears in the outcome
+  record as `generator_id` with `generator_trust: "refused"`, so a trust
+  refusal is distinguishable from a model failure.
+- **`invalid_count` is consistent.** A response padded with excess proposals
+  counts as one invalid response, like any other.
+
 ### Added — versioned ontologies and verified migrations (#66 M3-1, #111)
 - **Predicate mappings.** Ontology YAML gains `predicate_mappings`, each
   scoped to one subject type, observed predicate and object type. The

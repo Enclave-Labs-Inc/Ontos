@@ -17,6 +17,17 @@ from ontos.storage.base import candidate_storage_id
 from ontos.storage.networkx_store import NetworkxStore
 
 
+@pytest.fixture(autouse=True)
+def _pinned_model_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scripted runs have no Ollama server; stub the `/api/tags` digest lookup."""
+    from ontos.llm.ollama import OllamaBackend
+
+    async def resolve(self: OllamaBackend) -> str:
+        return f"{self._model}@sha256:{'0' * 64}"
+
+    monkeypatch.setattr(OllamaBackend, "resolve_suggestion_version", resolve)
+
+
 def _ontology() -> Ontology:
     return Ontology(
         id="ontos.starter",
