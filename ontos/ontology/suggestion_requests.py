@@ -8,21 +8,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from dataclasses import dataclass
 from typing import Any
 
+from ontos.ontology.labels import is_relation_label
 from ontos.ontology.loader import Ontology
-from ontos.ontology.suggestion_backend import (
-    SuggestionBackend,
-    require_sovereign_suggestion_backend,
-)
+from ontos.ontology.suggestion_backend import SuggestionBackendRefusedError
 from ontos.ontology.suggestion_generation import (
     partition_current_suggestion_evidence,
 )
+from ontos.ontology.suggestion_trust import ApprovedSuggestionBackend
 from ontos.storage.base import StoredCandidate
 
-_SAFE_PREDICATE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*\Z")
 MAX_PATTERNS_PER_ACL = 100
 
 _SYSTEM = (
@@ -96,10 +93,17 @@ async def request_acl_isolated_suggestions(
     *,
     authorized_candidates: list[StoredCandidate],
     ontology: Ontology,
-    backend: SuggestionBackend,
+    backend: ApprovedSuggestionBackend,
 ) -> list[ACLScopedRawResponse]:
-    """Request separately for each ACL; never send identifying metadata."""
-    require_sovereign_suggestion_backend(backend)
+    """Request separately for each ACL; never send identifying metadata.
+
+    Takes only a backend the trust gate approved; the gate is not repeated
+    here (#90).
+    """
+    if not isinstance(backend, ApprovedSuggestionBackend):
+        raise SuggestionBackendRefusedError(
+            "Ontology suggestion requests require a backend approved by the trust gate"
+        )
 
     groups = partition_current_suggestion_evidence(
         authorized_candidates=authorized_candidates,
@@ -117,8 +121,7 @@ async def request_acl_isolated_suggestions(
                         c.candidate.raw_triple.object_type,
                     )
                     for c in candidates
-                    if len(c.candidate.raw_triple.predicate) <= 64
-                    and _SAFE_PREDICATE.fullmatch(c.candidate.raw_triple.predicate)
+                    if is_relation_label(c.candidate.raw_triple.predicate)
                 }
             )
         )

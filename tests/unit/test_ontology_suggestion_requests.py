@@ -83,6 +83,9 @@ class ScriptedBackend:
     version = "1"
     sovereign = True
 
+    def attest_local_transport(self) -> str:
+        return "http://127.0.0.1:11434"
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
@@ -93,8 +96,28 @@ class ScriptedBackend:
         return {"proposals": []}
 
 
+@pytest.fixture
+def approve(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Mint a gate token for a scripted backend, approving its class for this test.
+
+    Requests accept only a token from the trust gate (#90), so tests go
+    through the real gate rather than around it.
+    """
+    from ontos.ontology import suggestion_trust
+
+    def _approve(backend: object) -> Any:
+        monkeypatch.setattr(
+            suggestion_trust,
+            "APPROVED_SUGGESTION_BACKENDS",
+            (*suggestion_trust.APPROVED_SUGGESTION_BACKENDS, type(backend)),
+        )
+        return suggestion_trust.require_approved_suggestion_backend(backend)  # type: ignore[arg-type]
+
+    return _approve
+
+
 @pytest.mark.asyncio
-async def test_each_acl_gets_its_own_request() -> None:
+async def test_each_acl_gets_its_own_request(approve: Any) -> None:
     backend = ScriptedBackend()
     candidates = [
         _candidate("finance", "finance", "owns"),
@@ -106,7 +129,7 @@ async def test_each_acl_gets_its_own_request() -> None:
     results = await request_acl_isolated_suggestions(
         authorized_candidates=candidates,
         ontology=_ontology(),
-        backend=backend,
+        backend=approve(backend),
     )
 
     assert len(backend.calls) == 3
@@ -133,13 +156,13 @@ async def test_each_acl_gets_its_own_request() -> None:
 
 
 @pytest.mark.asyncio
-async def test_prompt_excludes_identifying_metadata() -> None:
+async def test_prompt_excludes_identifying_metadata(approve: Any) -> None:
     backend = ScriptedBackend()
 
     await request_acl_isolated_suggestions(
         authorized_candidates=[_candidate("private", "secret-acl")],
         ontology=_ontology(),
-        backend=backend,
+        backend=approve(backend),
     )
 
     assert len(backend.calls) == 1
@@ -159,7 +182,7 @@ async def test_prompt_excludes_identifying_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_instruction_like_predicate_never_enters_prompt() -> None:
+async def test_instruction_like_predicate_never_enters_prompt(approve: Any) -> None:
     backend = ScriptedBackend()
 
     results = await request_acl_isolated_suggestions(
@@ -171,7 +194,7 @@ async def test_instruction_like_predicate_never_enters_prompt() -> None:
             )
         ],
         ontology=_ontology(),
-        backend=backend,
+        backend=approve(backend),
     )
 
     assert results == []
@@ -204,7 +227,7 @@ def test_new_relation_type_prompt_matches_validation_rule() -> None:
 
 
 @pytest.mark.asyncio
-async def test_large_acl_is_split_without_mixing_evidence() -> None:
+async def test_large_acl_is_split_without_mixing_evidence(approve: Any) -> None:
     """101 distinct patterns require two independent model requests."""
     backend = ScriptedBackend()
 
@@ -216,7 +239,7 @@ async def test_large_acl_is_split_without_mixing_evidence() -> None:
     responses = await request_acl_isolated_suggestions(
         authorized_candidates=candidates,
         ontology=_ontology(),
-        backend=backend,
+        backend=approve(backend),
     )
 
     assert len(backend.calls) == 4
@@ -253,7 +276,7 @@ async def test_large_acl_is_split_without_mixing_evidence() -> None:
 
 
 @pytest.mark.asyncio
-async def test_second_acl_batch_failure_aborts_generation() -> None:
+async def test_second_acl_batch_failure_aborts_generation(approve: Any) -> None:
     """A later batch failure must not return earlier batch results."""
 
     class FailingSecondBatch(ScriptedBackend):
@@ -273,7 +296,7 @@ async def test_second_acl_batch_failure_aborts_generation() -> None:
         await request_acl_isolated_suggestions(
             authorized_candidates=candidates,
             ontology=_ontology(),
-            backend=backend,
+            backend=approve(backend),
         )
 
     assert len(backend.calls) == 2

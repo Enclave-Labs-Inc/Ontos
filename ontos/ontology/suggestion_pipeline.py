@@ -25,6 +25,7 @@ from ontos.ontology.suggestion_requests import (
 )
 from ontos.ontology.suggestion_support import resolve_proposal_support
 from ontos.ontology.suggestion_trust import (
+    ApprovedSuggestionBackend,
     require_approved_suggestion_backend,
 )
 from ontos.ontology.suggestions import OntologySuggestion
@@ -45,14 +46,15 @@ async def generate_llm_suggestions(
     *,
     authorized_candidates: Sequence[StoredCandidate],
     ontology: Ontology,
-    backend: SuggestionBackend,
+    backend: SuggestionBackend | ApprovedSuggestionBackend,
     reference_key: bytes,
     generated_at: datetime | None = None,
     generator_version: str | None = None,
 ) -> LLMGenerationResult:
     """Generate only validated, evidence-backed suggestions.
 
-    The production backend gate runs before candidate inspection here.
+    Pass the token from `require_approved_suggestion_backend` (the audited
+    service does); a raw backend is approved here, once.
     Any backend failure aborts the entire batch; no partial result returns.
     """
     approved = require_approved_suggestion_backend(backend)
