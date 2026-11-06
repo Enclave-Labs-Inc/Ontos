@@ -6,7 +6,7 @@ It only validates already-constructed, typed suggestions.
 
 from __future__ import annotations
 
-from ontos.ontology.labels import RELATION_LABEL
+from ontos.ontology.labels import RELATION_LABEL, is_relation_label, is_safe_label
 from ontos.ontology.labels import SAFE_LABEL as ENTITY_LABEL
 from ontos.ontology.loader import Ontology
 from ontos.ontology.suggestions import OntologySuggestion
@@ -27,9 +27,9 @@ def is_valid_ontology_suggestion(
         return False
 
     if not (
-        ENTITY_LABEL.fullmatch(pattern.subject_type)
-        and ENTITY_LABEL.fullmatch(pattern.object_type)
-        and RELATION_LABEL.fullmatch(pattern.predicate)
+        is_safe_label(pattern.subject_type)
+        and is_safe_label(pattern.object_type)
+        and is_safe_label(pattern.predicate)
     ):
         return False
 
@@ -53,7 +53,12 @@ def is_valid_ontology_suggestion(
         return exists and allowed and suggestion.mapped_relation_type == pattern.predicate
 
     if suggestion.kind == "new_relation_type":
-        return not exists and not allowed and suggestion.proposed_relation_type == pattern.predicate
+        return (
+            not exists
+            and not allowed
+            and suggestion.proposed_relation_type == pattern.predicate
+            and is_relation_label(pattern.predicate)
+        )
 
     return False
 

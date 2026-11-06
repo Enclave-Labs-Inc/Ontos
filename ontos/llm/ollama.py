@@ -23,12 +23,12 @@ from typing import Any
 import httpx
 
 from ontos.extraction import RawTriple
-from ontos.llm.prompts import extraction_prompt, planner_prompt
-from ontos.ontology import Ontology
-from ontos.ontology.suggestion_endpoint import (
+from ontos.llm.local_endpoint import (
     UntrustedSuggestionEndpointError,
     require_local_ollama_endpoint,
 )
+from ontos.llm.prompts import extraction_prompt, planner_prompt
+from ontos.ontology import Ontology
 from ontos.planner import (
     RawPlan,
     Seed,
@@ -121,7 +121,7 @@ class OllamaBackend:
         self, system: str, user: str, schema: dict[str, Any]
     ) -> dict[str, Any]:
         """Use a direct, proxy-free, non-redirecting loopback connection."""
-        endpoint = self._trusted_suggestion_endpoint()
+        endpoint = self.attest_local_transport()
         prompt_chars = len(system) + len(user) + len(json.dumps(schema))
         if prompt_chars > SUGGESTION_OPTIONS["num_ctx"] * _CHARS_PER_TOKEN * 3 // 4:
             raise SuggestionPromptTooLargeError(
@@ -135,7 +135,7 @@ class OllamaBackend:
         A tag such as `qwen2.5:7b` can be re-pulled with different weights;
         the digest identifies the exact weights that generated a suggestion.
         """
-        endpoint = self._trusted_suggestion_endpoint()
+        endpoint = self.attest_local_transport()
         wanted = {self._model} if ":" in self._model else {self._model, f"{self._model}:latest"}
         async with httpx.AsyncClient(
             timeout=self._timeout_s, trust_env=False, follow_redirects=False
@@ -155,7 +155,13 @@ class OllamaBackend:
             f"model {self._model!r} is not installed on the local Ollama server"
         )
 
-    def _trusted_suggestion_endpoint(self) -> str:
+    def attest_local_transport(self) -> str:
+        """The canonical loopback endpoint, or raise if this transport isn't local.
+
+        The suggestion trust gate calls this instead of reading adapter
+        internals (#90). Refuses a non-loopback URL and an injected HTTP
+        client, which could enable redirects, proxies or another transport.
+        """
         endpoint = require_local_ollama_endpoint(self._base_url)
         if self._client is not None:
             raise UntrustedSuggestionEndpointError(

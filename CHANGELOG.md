@@ -14,6 +14,28 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Changed — one trust boundary and one validation path for M2b (#90)
+- **Explicit approval registry.** `APPROVED_SUGGESTION_BACKENDS` lists the
+  exact classes allowed to receive candidate evidence; subclasses and
+  spoofed objects are still refused. Backends prove a local transport
+  through a public `attest_local_transport()`. The gate no longer reads
+  Ollama internals, so a sovereign Scribe adapter can be added without
+  editing the gate.
+- **Checked once per request.** `require_approved_suggestion_backend`
+  returns a sealed `ApprovedSuggestionBackend` that only the gate can mint.
+  The pipeline and request layers accept that token instead of repeating
+  the sovereignty check (previously up to four times per request).
+- **No import cycle.** The loopback endpoint policy moved to
+  `ontos.llm.local_endpoint`, with a re-export at the old path.
+- **One label rule, one final validation.**
+  - Every relation-label check uses `ontos.ontology.labels`; the regex was
+    defined five times before.
+  - The ontology-consistency filter now runs once, over M2a and M2b output
+    together.
+  - `map_to_existing` can now target an existing uppercase relation such as
+    `WORKS_AT`. Membership in the ontology is what makes a target safe, so it
+    is no longer rejected for not being lower_snake_case.
+
 ### Fixed — M2b suggestion correctness and CLI output (#90)
 - **Stable order.** M2a and M2b suggestions are sorted together by
   `(acl_ref, kind, pattern, observed_predicate)`, instead of following the

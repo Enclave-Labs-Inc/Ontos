@@ -2014,13 +2014,13 @@ def _suggestion_failure_hint(exc: Exception, llm_model: str | None) -> str:
     """An actionable hint naming the failure class, never a response body (#90)."""
     import httpx
 
+    from ontos.llm.local_endpoint import UntrustedSuggestionEndpointError
     from ontos.llm.ollama import (
         OllamaTimeoutError,
         SuggestionModelUnavailableError,
         SuggestionPromptTooLargeError,
     )
     from ontos.ontology.suggestion_backend import SuggestionBackendRefusedError
-    from ontos.ontology.suggestion_endpoint import UntrustedSuggestionEndpointError
 
     model = llm_model or "MODEL"
     if isinstance(exc, httpx.ConnectError):

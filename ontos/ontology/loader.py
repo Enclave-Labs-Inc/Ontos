@@ -19,12 +19,13 @@ LinkML-shaped file raises a `NotImplementedError` with a clear pointer.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from ontos.ontology.labels import is_relation_label
 
 # The typed property values we can persist onto entities and relations
 # via Neo4j's native driver types. Anything richer belongs in a Fact,
@@ -84,9 +85,6 @@ class Pattern(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
-_PREDICATE_LABEL = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*\Z")
-
-
 class PredicateMapping(BaseModel):
     """Normalize an observed relation for one directed type pair."""
 
@@ -100,7 +98,7 @@ class PredicateMapping(BaseModel):
     @field_validator("observed_predicate")
     @classmethod
     def _valid_observed_predicate(cls, value: str) -> str:
-        if len(value) > 64 or _PREDICATE_LABEL.fullmatch(value) is None:
+        if not is_relation_label(value):
             raise ValueError("observed_predicate must be lower_snake_case, max 64 characters")
         return value
 

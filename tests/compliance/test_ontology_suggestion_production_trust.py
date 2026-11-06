@@ -34,7 +34,9 @@ class OllamaSubclass(OllamaBackend):
 
 def test_real_local_ollama_is_approved() -> None:
     backend = OllamaBackend("gemma3:12b")
-    assert require_approved_suggestion_backend(backend) is backend
+    approved = require_approved_suggestion_backend(backend)
+    assert approved.backend is backend
+    assert approved.endpoint == "http://127.0.0.1:11434"
 
 
 def test_spoofed_sovereign_marker_is_refused() -> None:

@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal, cast
 
+from ontos.ontology.labels import is_relation_label, is_safe_label
 from ontos.ontology.loader import Ontology
 from ontos.ontology.suggestion_requests import ACLScopedRawResponse
 
-_VALID_RELATION = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*\Z")
 _PROPOSAL_FIELDS = frozenset({"candidate_id", "kind", "relation_type"})
 
 
@@ -76,8 +75,7 @@ def validate_acl_model_responses(
                 or candidate_id in seen_ids
                 or not isinstance(kind, str)
                 or not isinstance(relation_type, str)
-                or len(relation_type) > 64
-                or not _VALID_RELATION.fullmatch(relation_type)
+                or not is_safe_label(relation_type)
             ):
                 invalid_count += 1
                 continue
@@ -99,7 +97,11 @@ def validate_acl_model_responses(
             elif kind == "new_relation_type":
                 # The new name must be grounded in observed evidence.
                 # The model may classify, but not invent an unrelated name.
-                valid = relation_type not in relation_labels and relation_type == predicate
+                valid = (
+                    relation_type not in relation_labels
+                    and relation_type == predicate
+                    and is_relation_label(relation_type)
+                )
             else:
                 valid = False
 

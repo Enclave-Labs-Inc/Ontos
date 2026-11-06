@@ -16,7 +16,11 @@ from ontos.ontology.loader import Ontology
 from ontos.ontology.suggestion_backend import SuggestionBackend
 from ontos.ontology.suggestion_pipeline import generate_llm_suggestions
 from ontos.ontology.suggestion_requests import prompt_schema_digest
-from ontos.ontology.suggestion_trust import require_approved_suggestion_backend
+from ontos.ontology.suggestion_trust import (
+    ApprovedSuggestionBackend,
+    require_approved_suggestion_backend,
+)
+from ontos.ontology.suggestion_validation import filter_ontology_suggestions
 from ontos.ontology.suggestions import (
     OntologySuggestion,
     suggest_missing_patterns,
@@ -165,6 +169,7 @@ async def list_ontology_suggestions(
     audited_generator_version: str | None = None
     prompt_digest: str | None = None
     refused_generator: str | None = None
+    approved: ApprovedSuggestionBackend | None = None
     cursor: str | None = None
     seen_cursors: set[str] = set()
     stage = "inspection"
@@ -270,16 +275,25 @@ async def list_ontology_suggestions(
                 if ontology.relation_type(record.candidate.raw_triple.predicate) is None
             ]
 
+            assert approved is not None
             generated = await generate_llm_suggestions(
                 authorized_candidates=llm_candidates,
                 ontology=ontology,
-                backend=backend,
+                backend=approved,
                 reference_key=reference_key,
                 generator_version=audited_generator_version,
             )
             suggestions.extend(generated.suggestions)
             invalid_count = generated.invalid_count
             skipped_count = generated.skipped_count
+
+        # One shared validation for both modes (#90): every suggestion, M2a
+        # or M2b, must be consistent with the active ontology and carry
+        # complete review evidence.
+        suggestions, dropped = filter_ontology_suggestions(
+            suggestions, ontology, require_m2b_evidence=True
+        )
+        invalid_count += dropped
 
         # M2a sorts its output; M2b follows the model's order. Sort the
         # combined result so the same input always prints the same way (#90).

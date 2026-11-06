@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from ontos.ontology.labels import is_relation_label, is_safe_label
 from ontos.ontology.loader import Ontology, Pattern
 from ontos.ontology.suggestion_support import SupportedSemanticProposal
-from ontos.ontology.suggestion_validation import filter_ontology_suggestions
 from ontos.ontology.suggestions import OntologySuggestion
-
-_RELATION_LABEL = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*\Z")
 
 
 @dataclass(frozen=True)
@@ -67,10 +64,11 @@ def materialize_supported_suggestions(
             )
             or subject not in entity_types
             or object_type not in entity_types
-            or len(observed_predicate) > 64
-            or not _RELATION_LABEL.fullmatch(observed_predicate)
-            or len(target) > 64
-            or not _RELATION_LABEL.fullmatch(target)
+            # Observed predicates are model-facing: lower_snake_case only.
+            # Targets may be an existing ontology label such as `WORKS_AT`;
+            # membership below is what makes a mapping target safe.
+            or not is_relation_label(observed_predicate)
+            or not is_safe_label(target)
             or ontology.is_valid_pattern(subject, observed_predicate, object_type)
         ):
             invalid_count += 1
@@ -81,7 +79,11 @@ def materialize_supported_suggestions(
                 subject, target, object_type
             )
         elif semantic.kind == "new_relation_type":
-            valid = target == observed_predicate and target not in relation_types
+            valid = (
+                target == observed_predicate
+                and target not in relation_types
+                and is_relation_label(target)
+            )
         else:
             valid = False
 
@@ -117,11 +119,9 @@ def materialize_supported_suggestions(
         constructed.append(suggestion)
         seen.add(identity)
 
-    filtered_suggestions, dropped = filter_ontology_suggestions(
-        constructed, ontology, require_m2b_evidence=True
-    )
-
+    # The ontology-consistency filter runs once, over M2a and M2b output
+    # together, in the audited service (#90).
     return SuggestionMaterializationResult(
-        suggestions=tuple(filtered_suggestions),
-        invalid_count=invalid_count + dropped,
+        suggestions=tuple(constructed),
+        invalid_count=invalid_count,
     )
