@@ -191,3 +191,39 @@ def test_jsonld_round_trip_preserves_unknown_entity_type(tmp_path) -> None:
 
     assert loaded.entities[0].type is None
     assert loaded.entities[0].canonical_name is None
+
+
+def test_jsonld_preserves_mapping_provenance_and_loads_legacy(tmp_path) -> None:
+    base = _scan()
+    fact = base.facts[0]
+    mapped = fact.model_copy(
+        update={
+            "provenance": fact.provenance.model_copy(update={"mapped_from_predicate": "works_for"})
+        }
+    )
+    scan = GraphScan(
+        entities=base.entities,
+        facts=[mapped],
+        merges=base.merges,
+    )
+
+    document = json.loads(render_jsonld(scan))
+    fact_node = next(item for item in document["@graph"] if item.get("@type") == "Fact")
+    assert fact_node["predicate"] == "works_at"
+    assert fact_node["mappedFromPredicate"] == "works_for"
+    assert "mappedFromPredicate" in document["@context"]
+
+    path = tmp_path / "mapped.jsonld"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    loaded, _ = load_jsonld(path)
+    assert loaded.facts[0].provenance.mapped_from_predicate == "works_for"
+    assert loaded.facts[0].predicate == "works_at"
+
+    # Simulate an export created before M3-1.
+    fact_node.pop("mappedFromPredicate")
+    document["@context"].pop("mappedFromPredicate")
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    legacy, _ = load_jsonld(path)
+    assert legacy.facts[0].provenance.mapped_from_predicate is None
+    assert legacy.facts[0].predicate == "works_at"

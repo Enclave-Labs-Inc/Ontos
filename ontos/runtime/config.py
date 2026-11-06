@@ -126,6 +126,11 @@ class RuntimeConfig:
     planner_url: str = "http://localhost:11434"
     planner_timeout_s: float = 60.0
 
+    # M3: Both directories are required to enable verified identity
+    # migrations. No migration configuration preserves legacy behavior.
+    migration_dir: Path | None = None
+    ontology_history_dir: Path | None = None
+
     def with_storage_override(self, storage: StorageConfig) -> RuntimeConfig:
         """Return this runtime config with only storage settings overridden.
 
@@ -159,6 +164,14 @@ class RuntimeConfig:
 
     @classmethod
     def from_env(cls) -> RuntimeConfig:
+        migration_raw = os.getenv("ONTOS_MIGRATIONS_DIR", "")
+        history_raw = os.getenv("ONTOS_ONTOLOGY_HISTORY_DIR", "")
+
+        if bool(migration_raw) != bool(history_raw):
+            raise ValueError(
+                "ONTOS_MIGRATIONS_DIR and ONTOS_ONTOLOGY_HISTORY_DIR must be configured together"
+            )
+
         # ONTOS_STORAGE_PATH: unset or empty → None (in-memory). An
         # explicit path (with ~ expansion) persists the dev store.
         # No auto-default here on purpose — tests that build via
@@ -202,4 +215,6 @@ class RuntimeConfig:
             planner_model=os.getenv("ONTOS_PLANNER_MODEL", "llama3.1:8b"),
             planner_url=os.getenv("ONTOS_PLANNER_URL", "http://localhost:11434"),
             planner_timeout_s=float(os.getenv("ONTOS_PLANNER_TIMEOUT", "60")),
+            migration_dir=(Path(migration_raw).expanduser() if migration_raw else None),
+            ontology_history_dir=(Path(history_raw).expanduser() if history_raw else None),
         )

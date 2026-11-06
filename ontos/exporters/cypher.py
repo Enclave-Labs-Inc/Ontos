@@ -329,6 +329,7 @@ def load_cypher(path: Path) -> GraphScan:
                         ontology_version=_required_str(props, "ontology_version"),
                         confidence=Confidence(_required_str(props, "confidence")),
                         confidence_score=float(confidence_score),
+                        mapped_from_predicate=_optional_str(props, "mapped_from_predicate"),
                     ),
                     t_valid=datetime.fromisoformat(_required_str(props, "t_valid")),
                     t_invalid=(
@@ -477,6 +478,7 @@ async def push_neo4j(
                 "ontology_version": fact.provenance.ontology_version,
                 "confidence": fact.provenance.confidence.value,
                 "confidence_score": fact.provenance.confidence_score,
+                "mapped_from_predicate": fact.provenance.mapped_from_predicate,
                 "t_valid": fact.t_valid.isoformat(),
                 "ingested_at": fact.ingested_at.isoformat(),
             }
@@ -570,6 +572,7 @@ def render_cypher(scan: GraphScan) -> str:
                     ("ontology_version", fact.provenance.ontology_version),
                     ("confidence", fact.provenance.confidence.value),
                     ("confidence_score", fact.provenance.confidence_score),
+                    ("mapped_from_predicate", fact.provenance.mapped_from_predicate),
                     ("t_valid", fact.t_valid.isoformat()),
                     (
                         "t_invalid",

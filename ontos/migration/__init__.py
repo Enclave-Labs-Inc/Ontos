@@ -16,6 +16,7 @@ chains them via BFS when the target is more than one hop away.
 from ontos.migration.base import MigrationWarning, OntologyMigration
 from ontos.migration.builtins import (
     CardinalityTighten,
+    IdentityMigration,
     PredicateDeprecate,
     PredicateRename,
 )
@@ -23,6 +24,7 @@ from ontos.migration.registry import MigrationRegistry
 
 __all__ = [
     "CardinalityTighten",
+    "IdentityMigration",
     "MigrationRegistry",
     "MigrationWarning",
     "OntologyMigration",

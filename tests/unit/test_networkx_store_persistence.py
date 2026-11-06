@@ -279,3 +279,69 @@ def test_load_wraps_import_error_as_storage_error(tmp_path: Path) -> None:
 
     with pytest.raises(StorageError, match="version drift"):
         NetworkxStore(path=pkl)
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        NetworkxStore._MAGIC_HEADER,
+        NetworkxStore._LEGACY_MAGIC_HEADERS[1],
+    ],
+)
+async def test_old_pickle_without_mapping_provenance_loads_and_exports(
+    tmp_path: Path,
+    header: bytes,
+) -> None:
+    """Pre-M3-1 facts must load and export without rewriting the pickle."""
+    from ontos.exporters.graphml import render_graphml
+
+    path = tmp_path / "legacy-provenance.pkl"
+    original = _fact("alice", "works_at", "acme").model_copy(update={"acl_ref": "acl:finance"})
+
+    writer = NetworkxStore(path=path)
+    await writer.add_fact(original)
+    await writer.close()
+
+    raw = path.read_bytes()
+    payload = pickle.loads(raw[len(NetworkxStore._MAGIC_HEADER) :])
+
+    # Simulate a Fact pickled by an older Ontos release. Pydantic's
+    # new field default is not automatically inserted on unpickle.
+    old_fact = payload["facts"][original.id]
+    old_fact.provenance.__dict__.pop("mapped_from_predicate")
+    assert "mapped_from_predicate" not in old_fact.provenance.__dict__
+
+    old_edge_fact = payload["graph"]["alice"]["acme"][original.id]["fact"]
+    assert "mapped_from_predicate" not in old_edge_fact.provenance.__dict__
+
+    path.write_bytes(header + pickle.dumps(payload))
+    original_bytes = path.read_bytes()
+
+    reader = NetworkxStore(path=path)
+    restored = await reader.get_fact(original.id)
+
+    assert restored is not None
+    assert restored == original
+    assert restored.id == original.id
+    assert restored.acl_ref == "acl:finance"
+    assert restored.provenance.mapped_from_predicate is None
+    assert restored.model_dump()["provenance"]["mapped_from_predicate"] is None
+
+    # Edge-based readers must see the same normalized object.
+    edge_fact = reader._graph["alice"]["acme"][original.id]["fact"]
+    assert edge_fact is restored
+
+    visible = await reader.facts_for_entity(
+        "alice",
+        allowed_acls=["acl:finance"],
+    )
+    assert visible == [restored]
+
+    snapshot = await reader.scan(allowed_acls=["acl:finance"])
+    assert [fact.id for fact in snapshot.facts] == [original.id]
+    assert "works_at" in render_graphml(snapshot)
+
+    await reader.close()
+
+    # Loading and exporting must not alter persisted data.
+    assert path.read_bytes() == original_bytes

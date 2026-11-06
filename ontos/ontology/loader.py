@@ -19,6 +19,7 @@ LinkML-shaped file raises a `NotImplementedError` with a clear pointer.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -83,6 +84,27 @@ class Pattern(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+_PREDICATE_LABEL = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*\Z")
+
+
+class PredicateMapping(BaseModel):
+    """Normalize an observed relation for one directed type pair."""
+
+    subject_type: str
+    observed_predicate: str
+    object_type: str
+    maps_to: str
+
+    model_config = ConfigDict(frozen=True)
+
+    @field_validator("observed_predicate")
+    @classmethod
+    def _valid_observed_predicate(cls, value: str) -> str:
+        if len(value) > 64 or _PREDICATE_LABEL.fullmatch(value) is None:
+            raise ValueError("observed_predicate must be lower_snake_case, max 64 characters")
+        return value
+
+
 class Ontology(BaseModel):
     # #34: `id` + `version` form the stamp written into
     # `Provenance.ontology_id` / `Provenance.ontology_version` on every
@@ -100,6 +122,7 @@ class Ontology(BaseModel):
     entity_types: list[EntityType]
     relation_types: list[RelationType]
     patterns: list[Pattern]
+    predicate_mappings: list[PredicateMapping] = Field(default_factory=list)
 
     model_config = ConfigDict(frozen=True)
 
@@ -139,6 +162,22 @@ class Ontology(BaseModel):
                 return True
         return False
 
+    def resolve_predicate(
+        self,
+        subject_type: str,
+        observed_predicate: str,
+        object_type: str,
+    ) -> str:
+        """Resolve a mapping only for its exact directed type pair."""
+        for mapping in self.predicate_mappings:
+            if (
+                mapping.subject_type == subject_type
+                and mapping.observed_predicate == observed_predicate
+                and mapping.object_type == object_type
+            ):
+                return mapping.maps_to
+        return observed_predicate
+
     def check_referential_integrity(self) -> list[str]:
         """Return a list of human-readable problems, empty if the ontology is coherent."""
         problems: list[str] = []
@@ -156,6 +195,50 @@ class Ontology(BaseModel):
             if p.predicate not in relation_labels:
                 problems.append(
                     f"pattern[{i}]: predicate {p.predicate!r} is not a declared relation_type"
+                )
+        seen_mappings: set[tuple[str, str, str]] = set()
+
+        for i, mapping in enumerate(self.predicate_mappings):
+            key = (
+                mapping.subject_type,
+                mapping.observed_predicate,
+                mapping.object_type,
+            )
+
+            if key in seen_mappings:
+                problems.append(f"predicate_mappings[{i}]: duplicate mapping for {key!r}")
+            seen_mappings.add(key)
+
+            if mapping.subject_type not in entity_labels:
+                problems.append(
+                    f"predicate_mappings[{i}]: unknown subject_type {mapping.subject_type!r}"
+                )
+
+            if mapping.object_type not in entity_labels:
+                problems.append(
+                    f"predicate_mappings[{i}]: unknown object_type {mapping.object_type!r}"
+                )
+
+            if mapping.maps_to not in relation_labels:
+                problems.append(
+                    f"predicate_mappings[{i}]: unknown target relation {mapping.maps_to!r}"
+                )
+            elif not self.is_valid_pattern(
+                mapping.subject_type,
+                mapping.maps_to,
+                mapping.object_type,
+            ):
+                problems.append(
+                    f"predicate_mappings[{i}]: target relation is not valid for the type pair"
+                )
+
+            if self.is_valid_pattern(
+                mapping.subject_type,
+                mapping.observed_predicate,
+                mapping.object_type,
+            ):
+                problems.append(
+                    f"predicate_mappings[{i}]: observed predicate is already a valid pattern"
                 )
         return problems
 

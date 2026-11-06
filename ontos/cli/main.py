@@ -720,9 +720,9 @@ def query(
     ] = None,
 ) -> None:
     """Run one NL question through planner + executor locally; print ranked hits."""
-    from ontos.executor import DeterministicExecutor
     from ontos.ontology import load_ontology
     from ontos.planner import LlmPlanner
+    from ontos.runtime.migration_executor import build_verified_executor
     from ontos.runtime.server import build_store
 
     cli_options = ctx.obj if isinstance(ctx.obj, dict) else {}
@@ -750,7 +750,7 @@ def query(
         anthropic_api_key_env=anthropic_api_key_env,
     )
     planner = LlmPlanner(llm, ontology)
-    executor = DeterministicExecutor()
+    executor = build_verified_executor(cfg, active_ontology=ontology)
     store = build_store(cfg)
 
     async def _run() -> None:

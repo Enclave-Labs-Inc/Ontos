@@ -214,7 +214,18 @@ class NetworkxStore:
             ) from exc
         try:
             self._graph = payload["graph"]
-            self._facts = payload["facts"]
+            # Pickled Pydantic objects retain their old __dict__. Rebuild
+            # them so fields introduced after the pickle was written
+            # receive their defaults (including mapped_from_predicate).
+            self._facts = {
+                fact_id: Fact.model_validate(fact.model_dump())
+                for fact_id, fact in payload["facts"].items()
+            }
+            # Graph traversal reads edge attributes, not self._facts.
+            # Both representations must reference the rebuilt Fact.
+            for _, _, _, edge_data in self._graph.edges(keys=True, data=True):
+                edge_fact: Fact = edge_data["fact"]
+                edge_data["fact"] = self._facts[edge_fact.id]
             # V1 payloads lack "merges"; default to empty (the lazy
             # migration path — on next flush the file gets rewritten
             # under the current magic header with the new key).

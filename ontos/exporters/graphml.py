@@ -42,6 +42,7 @@ _EDGE_KEYS = {
     "ontology_version": "e_ontology_version",
     "confidence": "e_confidence",
     "confidence_score": "e_confidence_score",
+    "mapped_from_predicate": "e_mapped_from_predicate",
     "t_valid": "e_t_valid",
     "t_invalid": "e_t_invalid",
     "ingested_at": "e_ingested_at",
@@ -184,6 +185,7 @@ def load_graphml(path: Path) -> GraphScan:
                         ontology_version=values.get("ontology_version", ""),
                         confidence=Confidence(values["confidence"]),
                         confidence_score=float(values["confidence_score"]),
+                        mapped_from_predicate=values.get("mapped_from_predicate"),
                     ),
                     t_valid=datetime.fromisoformat(values["t_valid"]),
                     t_invalid=(
@@ -296,6 +298,11 @@ def render_graphml(scan: GraphScan) -> str:
         _add_data(edge, _EDGE_KEYS["ontology_version"], fact.provenance.ontology_version)
         _add_data(edge, _EDGE_KEYS["confidence"], fact.provenance.confidence.value)
         _add_data(edge, _EDGE_KEYS["confidence_score"], fact.provenance.confidence_score)
+        _add_data(
+            edge,
+            _EDGE_KEYS["mapped_from_predicate"],
+            fact.provenance.mapped_from_predicate,
+        )
         _add_data(edge, _EDGE_KEYS["t_valid"], fact.t_valid.isoformat())
         _add_data(
             edge,

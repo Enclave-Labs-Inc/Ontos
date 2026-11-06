@@ -214,3 +214,51 @@ def test_push_neo4j_writes_visualization_schema_with_parameters() -> None:
     assert any(
         params.get("fact_id") == "00000000-0000-0000-0000-000000000123" for _query, params in calls
     )
+
+
+def test_cypher_preserves_mapping_provenance_and_loads_legacy(
+    tmp_path: Path,
+) -> None:
+    base = _scan()
+    fact = base.facts[0]
+    mapped = fact.model_copy(
+        update={
+            "provenance": fact.provenance.model_copy(update={"mapped_from_predicate": "works_for"})
+        }
+    )
+    scan = GraphScan(
+        entities=base.entities,
+        facts=[mapped],
+        merges=base.merges,
+    )
+
+    rendered = render_cypher(scan)
+    assert "mapped_from_predicate" in rendered
+    assert "works_for" in rendered
+
+    path = tmp_path / "mapped.cypher"
+    path.write_text(rendered, encoding="utf-8")
+    loaded = load_cypher(path)
+    assert loaded.facts[0].provenance.mapped_from_predicate == "works_for"
+    assert loaded.facts[0].predicate == "works_at"
+
+    # Remove the new property from the fact's SET statement
+    # to simulate an older exported Cypher script.
+    legacy_lines = []
+    removed = 0
+    for line in rendered.splitlines():
+        if line.startswith("SET r += ") and "mapped_from_predicate" in line:
+            position = line.index("mapped_from_predicate")
+            before = line.rfind(",", 0, position)
+            after = line.find(",", position)
+            assert before >= 0 and after > position
+            line = line[:before] + line[after:]
+            removed += 1
+        legacy_lines.append(line)
+
+    assert removed == 1
+    path.write_text("\n".join(legacy_lines) + "\n", encoding="utf-8")
+
+    legacy = load_cypher(path)
+    assert legacy.facts[0].provenance.mapped_from_predicate is None
+    assert legacy.facts[0].predicate == "works_at"

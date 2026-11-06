@@ -163,3 +163,49 @@ def test_load_graphml_round_trips_exported_snapshot(tmp_path: Path) -> None:
     loaded = load_graphml(snapshot)
 
     assert render_graphml(loaded) == render_graphml(original)
+
+
+def test_graphml_preserves_mapping_provenance_and_loads_legacy(
+    tmp_path: Path,
+) -> None:
+    base = _scan()
+    fact = base.facts[0]
+    mapped = fact.model_copy(
+        update={
+            "provenance": fact.provenance.model_copy(update={"mapped_from_predicate": "works_for"})
+        }
+    )
+    scan = GraphScan(
+        entities=base.entities,
+        facts=[mapped],
+        merges=base.merges,
+    )
+
+    root = ET.fromstring(render_graphml(scan))
+    field_id = "e_mapped_from_predicate"
+    assert any(element.get("id") == field_id for element in root)
+    assert any(
+        element.get("key") == field_id and element.text == "works_for" for element in root.iter()
+    )
+
+    path = tmp_path / "mapped.graphml"
+    path.write_text(ET.tostring(root, encoding="unicode"), encoding="utf-8")
+    loaded = load_graphml(path)
+    assert loaded.facts[0].provenance.mapped_from_predicate == "works_for"
+    assert loaded.facts[0].predicate == "works_at"
+
+    # Remove the new key declaration and edge data to emulate
+    # a GraphML file produced before the mapping field existed.
+    for element in list(root):
+        if element.get("id") == field_id:
+            root.remove(element)
+
+    for element in root.iter():
+        for child in list(element):
+            if child.get("key") == field_id:
+                element.remove(child)
+
+    path.write_text(ET.tostring(root, encoding="unicode"), encoding="utf-8")
+    legacy = load_graphml(path)
+    assert legacy.facts[0].provenance.mapped_from_predicate is None
+    assert legacy.facts[0].predicate == "works_at"

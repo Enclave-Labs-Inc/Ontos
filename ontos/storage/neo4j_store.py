@@ -114,6 +114,7 @@ def _fact_to_edge_props(fact: Fact) -> dict[str, Any]:
         "prov_ontology_version": fact.provenance.ontology_version,
         "prov_confidence": fact.provenance.confidence.value,
         "prov_confidence_score": fact.provenance.confidence_score,
+        "prov_mapped_from_predicate": fact.provenance.mapped_from_predicate,
     }
 
 
@@ -153,6 +154,7 @@ def _edge_props_to_fact(subject_id: str, object_id: str, props: dict[str, Any]) 
             ontology_version=props.get("prov_ontology_version", "") or "",
             confidence=Confidence(props["prov_confidence"]),
             confidence_score=props["prov_confidence_score"],
+            mapped_from_predicate=props.get("prov_mapped_from_predicate"),
         ),
         t_valid=_to_python_datetime(props["t_valid"]),
         t_invalid=_to_python_datetime(props.get("t_invalid")),
