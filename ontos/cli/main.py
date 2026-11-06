@@ -965,6 +965,12 @@ def _scan_for_export(
     if push_target is not None:
         _reject_operational_push_target(cfg, *push_target)
     _default_dev_signing_key_if_missing()
+    from ontos.runtime.migration_view import build_migration_view
+
+    # The privileged ACL-mask export is an audit of stored state, so it is
+    # not projected; every other export matches what `ask` shows (#112).
+    # Built before the store opens so bad migration config fails first.
+    migration_view = None if include_acl_mask else build_migration_view(cfg)
     authz = build_authz(cfg) if acting_on_behalf_of is not None else None
     store = build_store(cfg)
 
@@ -1013,6 +1019,10 @@ def _scan_for_export(
                 allowed_acls=allowed_acls,
                 include_all_acls=include_acl_mask,
             )
+            # Before the neighbourhood filter: an excluded fact must not
+            # bridge to entities beyond it.
+            if migration_view is not None:
+                scan = await migration_view.project_scan(scan)
 
             if entity is not None:
                 neighborhood_hops = 2 if hops is None else hops

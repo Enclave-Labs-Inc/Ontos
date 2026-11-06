@@ -106,34 +106,49 @@ behavior is retained.
 
 ## Query-time behavior
 
-With verified migrations enabled, `DeterministicExecutor` uses a
-strict migration registry. **This filtering currently applies to
-MCP `ask` and CLI `ontos query` only.**
+With verified migrations enabled, every read surface projects facts
+through the same strict registry and active ontology (#112):
 
-For these two query paths:
+- MCP `ask` and CLI `ontos query` (through `DeterministicExecutor`);
+- MCP `search`, `traverse`, `explain` and `provenance`;
+- every `ontos export` format, including `--entity` / `--hops`
+  neighbourhoods and `export neo4j --push`.
+
+On all of them:
 
 - A fact stamped with the active ontology ID and version can be
   read normally.
 - A historical fact with the matching ontology ID and a complete,
   verified migration path to the active version remains visible.
-- A fact without a valid migration path is excluded from the query
-  result and generates a migration warning.
+- A fact without a valid migration path is excluded. `provenance`
+  returns the same `null` as for a nonexistent fact.
+- An excluded fact cannot bridge reachability: `traverse`, `ask` and
+  neighbourhood exports drop facts reachable only through it.
+- Exports also drop untyped endpoint nodes that only excluded facts
+  name.
+- `search` refetches when exclusions would leave fewer than `k`
+  results, up to a fixed bound.
 - Query-time migrations do not rewrite or delete stored facts.
-- Facts rejected during migration cannot bridge graph reachability.
+- ACL filtering runs first. Projection never widens what a caller
+  may see.
 
-**Strict migration filtering is not global.** MCP `search`,
-`traverse`, `explain`, and `provenance`, as well as all
-`ontos export` operations, read the graph store directly.
-They do not apply `MigrationRegistry.migrate_fact`, and may
-therefore return facts that `ask` or `ontos query` exclude.
-Existing ACL restrictions still apply to these direct reads.
-Do not rely on strict migration filtering as a guarantee for
-MCP direct reads, exports, or other graph consumers.
+Audit records note which ontology results were projected onto
+(`{"policy": "ontology_migration", "ontology_id", "ontology_version"}`).
+Direct reads do not report what they excluded, in responses or in audit
+records: no ids, counts or warnings. Each exclusion is logged
+server-side (`ontology-migration-excluded`, with fact id and reason) for
+operators. `ask` and `ontos query` keep their existing per-fact
+migration warnings in `warnings`.
+
+**Exception:** the privileged `ontos export --include-acl-mask` is an
+audit of stored state, so it is not projected and includes every
+stored fact regardless of migration path.
 
 ### Historical fact visibility and recovery
 
 **Enabling strict migrations on an existing graph can make older
-facts disappear from `ask` and `ontos query` results.**
+facts disappear from every read surface** (`ask`, `ontos query`, the
+MCP direct reads and non-privileged exports).
 This does not delete the facts from storage.
 
 Strict mode excludes facts whose provenance has:

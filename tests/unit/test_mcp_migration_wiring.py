@@ -31,7 +31,9 @@ def test_server_uses_shared_executor_factory(
     expected = DeterministicExecutor()
     received: list[RuntimeConfig] = []
 
-    def factory(cfg: RuntimeConfig) -> DeterministicExecutor:
+    def factory(cfg: RuntimeConfig, *, view: object = None) -> DeterministicExecutor:
+        # Without migration config there is no shared view to pass on.
+        assert view is None
         received.append(cfg)
         return expected
 

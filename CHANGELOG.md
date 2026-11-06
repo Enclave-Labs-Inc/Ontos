@@ -14,6 +14,37 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Added — versioned ontologies and verified migrations (#66 M3-1, #111)
+- **Predicate mappings.** Ontology YAML gains `predicate_mappings`, each
+  scoped to one subject type, observed predicate and object type. The
+  extractor normalises a mapped predicate before validation and records the
+  original in `Provenance.mapped_from_predicate`.
+- **Declarative migration records** for additive changes (`add_pattern`,
+  `map_to_existing`, `new_relation_type`), with non-overwriting generation of
+  versioned ontology and migration files.
+- **Verified migrations.** `ONTOS_MIGRATIONS_DIR` and
+  `ONTOS_ONTOLOGY_HISTORY_DIR` load a migration chain. The chain must be
+  complete and acyclic and end at the active version, and every step is
+  verified against the historical ontology files. Misconfiguration stops the
+  server at boot.
+- **Old stores still load.** NetworkX stores and `.pkl` snapshots saved
+  before `mapped_from_predicate` existed load correctly.
+
+### Fixed — verified migrations apply to every read surface (#112)
+- **The gap.** M3-1 hid facts without a verified migration path from `ask`
+  and `ontos query` only. The MCP `search`, `traverse`, `explain` and
+  `provenance` tools and `ontos export` still returned them.
+- **Every read surface now projects through the same verified registry.**
+  - Excluded facts can't bridge traversals or `--entity` export
+    neighbourhoods.
+  - Exports drop untyped endpoints that only excluded facts name.
+  - `provenance` answers `null` for an excluded fact.
+  - `search` refetches to fill `k`.
+- **Nothing reported back.** Audit records name the ontology results were
+  projected onto, and never what was excluded.
+- **Exempt:** the privileged `--include-acl-mask` export, which audits
+  stored state.
+
 ## [0.8.0] - 2026-11-03 - persistent audit, bitemporal integrity and read-path hardening
 
 `ontos serve` now keeps its Article-12 audit trail in Postgres, and
