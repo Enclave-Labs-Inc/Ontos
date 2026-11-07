@@ -19,8 +19,17 @@ from typing import Literal
 
 import structlog
 
+from ontos.audit.base import AuditSink
 from ontos.executor.deterministic import hop_distances
-from ontos.migration.loading import MigrationConfigurationError, load_migration_registry
+from ontos.migration.approval_audit import (
+    MigrationApprovalAuditError,
+    verify_migration_approval_records,
+)
+from ontos.migration.loading import (
+    MigrationConfigurationError,
+    _load_migration_registry_with_records,
+)
+from ontos.migration.records import MigrationRecord
 from ontos.migration.registry import MigrationRegistry
 from ontos.ontology import Ontology, load_ontology
 from ontos.runtime.config import RuntimeConfig
@@ -30,12 +39,45 @@ from ontos.storage.models import GraphScan
 log = structlog.get_logger()
 
 
+@dataclass
+class _ApprovalVerificationGate:
+    """Verification state for the pinned migration records."""
+
+    records: tuple[MigrationRecord, ...]
+    verified: bool = False
+
+
 @dataclass(frozen=True)
 class MigrationView:
-    """The active ontology and its verified, strict migration registry."""
+    """A migration projection requiring approval verification."""
 
     ontology: Ontology
     registry: MigrationRegistry
+    verification_gate: _ApprovalVerificationGate | None = None
+
+    def require_verified_approvals(self) -> None:
+        """Refuse migration-backed reads before audit verification."""
+        gate = self.verification_gate
+        if gate is not None and not gate.verified:
+            raise MigrationApprovalAuditError("Migration approval audit has not been verified")
+
+    async def verify_approvals(self, audit: AuditSink) -> None:
+        """Verify the records used to construct this registry.
+
+        This is a startup/invocation verification gate, not continuous
+        monitoring. A long-running server does not automatically detect
+        audit-chain changes made after successful verification. Restart
+        the runtime after audit changes to force fresh verification.
+        """
+        gate = self.verification_gate
+        if gate is None:
+            return
+
+        await verify_migration_approval_records(
+            records=gate.records,
+            audit=audit,
+        )
+        gate.verified = True
 
     def audit_decision(self) -> dict[str, str]:
         """Policy decision naming the ontology results were projected onto."""
@@ -47,6 +89,7 @@ class MigrationView:
 
     async def project(self, facts: Iterable[Fact]) -> list[Fact]:
         """Facts translated to the active ontology; unverifiable ones dropped."""
+        self.require_verified_approvals()
         projected: list[Fact] = []
         for fact in facts:
             migrated, warnings = await self.registry.migrate_fact(fact, self.ontology)
@@ -121,10 +164,16 @@ def build_migration_view(
             )
         active_ontology = load_ontology(config.ontology_path)
 
-    registry = load_migration_registry(
+    registry, records = _load_migration_registry_with_records(
         migration_dir,
         active_ontology=active_ontology,
         historical_ontology_dir=history_dir,
         strict=True,
     )
-    return MigrationView(ontology=active_ontology, registry=registry)
+    return MigrationView(
+        ontology=active_ontology,
+        registry=registry,
+        verification_gate=_ApprovalVerificationGate(
+            records=tuple(records),
+        ),
+    )

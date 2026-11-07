@@ -25,6 +25,9 @@ AUDIT_EXPORTER: str = "audit_exporter"
 # Dedicated role for inspecting rejected ontology candidates.
 ONTOLOGY_REVIEWER: str = "ontology_reviewer"
 
+# Dedicated approval privilege; reviewer and audit roles do not imply it.
+ONTOLOGY_APPROVER: str = "ontology_approver"
+
 
 @runtime_checkable
 class AuthzBackend(Protocol):

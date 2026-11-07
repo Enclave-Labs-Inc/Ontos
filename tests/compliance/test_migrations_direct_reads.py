@@ -25,13 +25,15 @@ from typer.testing import CliRunner
 import ontos.llm
 import ontos.planner
 from ontos.audit.emitter import AuditEmitter
+from ontos.audit.postgres import PostgresAuditEmitter
 from ontos.cli.main import app
-from ontos.migration.records import MigrationRecord
+from ontos.migration.records import AddPatternChange, MigrationRecord, load_migration_record
 from ontos.ontology.artifact_writer import write_ontology_version
 from ontos.ontology.loader import EntityType, Ontology, Pattern, RelationType
 from ontos.planner import Plan, SeedByEntity, TraversalStep
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.models import ArticleTwelveField, Confidence, Fact, Provenance
+from ontos.runtime.ontology_approval import _audit_approval
 from ontos.runtime.server import build_server
 from ontos.storage.networkx_store import NetworkxStore
 
@@ -115,6 +117,44 @@ def _migration_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Runtim
     )
 
 
+async def _approved_server_audit(
+    cfg: RuntimeConfig,
+    signing_key: bytes,
+) -> AuditEmitter:
+    """Create a real approval for the pinned migration fixture."""
+    assert cfg.migration_dir is not None
+    migration_path = cfg.migration_dir / "m.yaml"
+    record = load_migration_record(migration_path)
+
+    assert len(record.approved_changes) == 1
+    change = record.approved_changes[0]
+    assert isinstance(change, AddPatternChange)
+
+    audit = AuditEmitter(signing_key=signing_key)
+    approval = await _audit_approval(
+        audit=audit,
+        subject="user:operator",
+        agent_identity="ontos-cli-local-operator",
+        ontology_id=record.ontology_id,
+        base_version=record.from_version,
+        new_version=record.to_version,
+        requested_change=change,
+        acl_ref="acl:legal",
+        decision="approval_granted",
+        support_count=1,
+        supporting_candidate_refs=["a" * 64],
+    )
+
+    approved_record = record.model_copy(update={"approval_query_id": approval.query_id})
+    migration_path.write_text(
+        yaml.safe_dump(approved_record.model_dump(mode="json")),
+        encoding="utf-8",
+    )
+
+    assert audit.verify_chain()
+    return audit
+
+
 async def _store() -> NetworkxStore:
     store = NetworkxStore()
     for fact in ALL:
@@ -137,7 +177,7 @@ def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RuntimeConfig:
 
 
 async def test_direct_reads_exclude_facts_without_a_verified_path(cfg: RuntimeConfig) -> None:
-    audit = AuditEmitter(signing_key=b"direct-reads")
+    audit = await _approved_server_audit(cfg, b"direct-reads")
     server = build_server(cfg, store=await _store(), audit=audit)
 
     async with Client(server) as client:
@@ -165,6 +205,8 @@ async def test_direct_reads_exclude_facts_without_a_verified_path(cfg: RuntimeCo
     assert excluded.data.payload is None
 
     for record in audit._chain:
+        if record.article12[ArticleTwelveField.TOOL_INVOKED] == "ontology_approve":
+            continue
         # The provenance call's query_text is the id the caller supplied;
         # what the server reports back must never include an excluded fact.
         _no_hidden_ids(record.article12[ArticleTwelveField.RESULT_FACT_IDS])
@@ -178,7 +220,8 @@ async def test_direct_reads_exclude_facts_without_a_verified_path(cfg: RuntimeCo
 
 
 async def test_search_still_returns_k_when_the_top_hit_is_excluded(cfg: RuntimeConfig) -> None:
-    server = build_server(cfg, store=await _store(), audit=AuditEmitter(signing_key=b"k"))
+    audit = await _approved_server_audit(cfg, b"k")
+    server = build_server(cfg, store=await _store(), audit=audit)
 
     async with Client(server) as client:
         result = await client.call_tool(
@@ -211,10 +254,11 @@ async def test_ask_and_direct_reads_agree(
 
     monkeypatch.setattr(ontos.llm, "OllamaBackend", _StubLLM)
     monkeypatch.setattr(ontos.planner, "LlmPlanner", _Planner)
+    audit = await _approved_server_audit(cfg, b"agree")
     server = build_server(
         replace(cfg, planner_backend="ollama"),
         store=await _store(),
-        audit=AuditEmitter(signing_key=b"agree"),
+        audit=audit,
     )
 
     async with Client(server) as client:
@@ -243,6 +287,51 @@ async def test_without_migrations_reads_are_unchanged(
     assert _ids(traversed) == {str(f.id) for f in ALL}
 
 
+async def _persist_export_approval(
+    cfg: RuntimeConfig,
+    audit_url: str,
+) -> None:
+    """Persist a matching Article-12 approval for CLI export tests."""
+    assert cfg.migration_dir is not None
+    migration_path = cfg.migration_dir / "m.yaml"
+    record = load_migration_record(migration_path)
+
+    assert len(record.approved_changes) == 1
+    change = record.approved_changes[0]
+    assert isinstance(change, AddPatternChange)
+
+    audit = PostgresAuditEmitter.from_url(
+        audit_url,
+        signing_key_env="ONTOS_AUDIT_SIGNING_KEY",
+    )
+    try:
+        await audit.initialize()
+
+        approval = await _audit_approval(
+            audit=audit,
+            subject="user:operator",
+            agent_identity="ontos-cli-local-operator",
+            ontology_id=record.ontology_id,
+            base_version=record.from_version,
+            new_version=record.to_version,
+            requested_change=change,
+            acl_ref="acl:legal",
+            decision="approval_granted",
+            support_count=1,
+            supporting_candidate_refs=["a" * 64],
+        )
+
+        assert await audit.verify_chain_async()
+    finally:
+        await audit.close()
+
+    approved_record = record.model_copy(update={"approval_query_id": approval.query_id})
+    migration_path.write_text(
+        yaml.safe_dump(approved_record.model_dump(mode="json")),
+        encoding="utf-8",
+    )
+
+
 def _export(
     cfg: RuntimeConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *extra: str
 ) -> str:
@@ -262,6 +351,11 @@ def _export(
     monkeypatch.setenv("ONTOS_ONTOLOGY_PATH", str(cfg.ontology_path))
     monkeypatch.setenv("ONTOS_AUDIT_DB_URL", f"sqlite+aiosqlite:///{tmp_path / 'audit.sqlite'}")
     monkeypatch.setenv("ONTOS_AUDIT_SIGNING_KEY", "export-migration-key")
+
+    # Use the same persistent audit history that export verifies.
+    audit_url = f"sqlite+aiosqlite:///{tmp_path / 'audit.sqlite'}"
+    asyncio.run(_persist_export_approval(cfg, audit_url))
+
     output = tmp_path / "graph.graphml"
     result = CliRunner().invoke(
         app,

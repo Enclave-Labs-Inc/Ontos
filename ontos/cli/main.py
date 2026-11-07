@@ -723,6 +723,7 @@ def query(
     from ontos.ontology import load_ontology
     from ontos.planner import LlmPlanner
     from ontos.runtime.migration_executor import build_verified_executor
+    from ontos.runtime.migration_view import build_migration_view
     from ontos.runtime.server import build_store
 
     cli_options = ctx.obj if isinstance(ctx.obj, dict) else {}
@@ -750,7 +751,15 @@ def query(
         anthropic_api_key_env=anthropic_api_key_env,
     )
     planner = LlmPlanner(llm, ontology)
-    executor = build_verified_executor(cfg, active_ontology=ontology)
+    migration_view = build_migration_view(
+        cfg,
+        active_ontology=ontology,
+    )
+    executor = build_verified_executor(
+        cfg,
+        active_ontology=ontology,
+        view=migration_view,
+    )
     store = build_store(cfg)
 
     async def _run() -> None:
@@ -786,6 +795,11 @@ def query(
 
         try:
             try:
+                # Verify the pinned migration records before graph access.
+                # Verification failures reach the existing CLI failure audit.
+                if migration_view is not None:
+                    await migration_view.verify_approvals(audit)
+
                 await initialize_store(store)
                 allowed_acls: list[str] | None = None
                 authz = build_authz(cfg) if acting_on_behalf_of is not None else None
@@ -876,6 +890,13 @@ async def _emit_export_audit(
         if include_acl_mask
         else []
     )
+    if not include_acl_mask and decision == "approval_verification_failed":
+        policy_decisions.append(
+            {
+                "policy": "ontology_approval",
+                "result": "verification_failed",
+            }
+        )
 
     emitter = PostgresAuditEmitter.from_url(
         db_url,
@@ -978,6 +999,28 @@ def _scan_for_export(
         from ontos.runtime.server import initialize_store
 
         try:
+            if migration_view is not None:
+                # Verify the pinned migrations before graph initialization.
+                approval_audit = await _open_cli_audit(cfg)
+                try:
+                    try:
+                        await migration_view.verify_approvals(approval_audit)
+                    except Exception:
+                        # Fail closed and persist the rejected export attempt.
+                        await _emit_export_audit(
+                            db_url=cfg.audit_db_url,
+                            signing_key_env=cfg.audit_signing_key_env,
+                            scan=None,
+                            acting_on_behalf_of=acting_on_behalf_of,
+                            export_format=export_format,
+                            include_acl_mask=False,
+                            decision="approval_verification_failed",
+                            latency_ms=(time.perf_counter() - started_at) * 1000,
+                        )
+                        raise
+                finally:
+                    await _close_store_without_masking(approval_audit)
+
             await initialize_store(store)
             if include_acl_mask:
                 if authz is None:
@@ -2036,6 +2079,233 @@ def _suggestion_failure_hint(exc: Exception, llm_model: str | None) -> str:
     if isinstance(exc, (SuggestionBackendRefusedError, UntrustedSuggestionEndpointError)):
         return "the LLM backend was refused by the sovereignty policy."
     return f"unexpected {type(exc).__name__}; see the audit record."
+
+
+@ontology_app.command("approve")
+def ontology_approve(
+    ctx: typer.Context,
+    acting_on_behalf_of: Annotated[
+        str,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Trusted-local-operator asserted identity; not authentication.",
+        ),
+    ],
+    ontology_path: Annotated[
+        Path,
+        typer.Option("--ontology", help="Active ontology YAML."),
+    ],
+    base_version: Annotated[
+        str,
+        typer.Option("--base-version", help="Expected active ontology version."),
+    ],
+    new_version: Annotated[
+        str,
+        typer.Option("--new-version", help="Explicit new ontology version."),
+    ],
+    change_file: Annotated[
+        Path,
+        typer.Option("--change-file", help="YAML containing one proposed change."),
+    ],
+    ontology_output: Annotated[
+        Path,
+        typer.Option("--ontology-output", help="New ontology YAML destination."),
+    ],
+    migration_output: Annotated[
+        Path,
+        typer.Option("--migration-output", help="New migration YAML destination."),
+    ],
+    acl_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--acl-ref",
+            help="Exact evidence ACL scope; omit only for public evidence.",
+        ),
+    ] = None,
+    storage_path: Annotated[
+        str | None,
+        typer.Option("--storage-path", help="Local NetworkX storage path."),
+    ] = None,
+) -> None:
+    """Approve one evidence-backed change without activating the ontology."""
+    import yaml
+    from pydantic import TypeAdapter
+
+    from ontos.audit.postgres import PostgresAuditEmitter
+    from ontos.migration.records import ApprovedChange
+    from ontos.ontology import load_ontology
+    from ontos.ontology.approval_selection import ApprovalChange, ApprovalSuggestionNotFoundError
+    from ontos.runtime.candidate_inspection import CandidateInspectionDeniedError
+    from ontos.runtime.ontology_approval import (
+        _audit_approval,
+        approve_ontology_change,
+    )
+    from ontos.runtime.server import build_authz, build_store, initialize_store
+    from ontos.storage.base import CandidateStore
+
+    storage_url, storage_password_env = _cli_storage_override(ctx)
+    if storage_url is not None and storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    if not acting_on_behalf_of.strip():
+        raise typer.BadParameter("--acting-on-behalf-of cannot be empty.")
+
+    try:
+        ontology = load_ontology(ontology_path)
+    except Exception:
+        typer.echo("Unable to load active ontology.", err=True)
+        raise typer.Exit(code=2) from None
+
+    # Accept exactly one discriminated migration change, not a migration
+    # record with an operator-supplied approval_query_id.
+    try:
+        if change_file.stat().st_size > 1_048_576:
+            raise ValueError("Change file too large")
+        payload = yaml.safe_load(change_file.read_text(encoding="utf-8"))
+        requested_change: ApprovalChange = TypeAdapter(ApprovedChange).validate_python(payload)
+    except Exception:
+        typer.echo("Invalid approval change file.", err=True)
+        raise typer.Exit(code=2) from None
+
+    resolved_path = None if storage_url is not None else _resolve_storage_path(storage_path)
+
+    try:
+        cfg = _build_cli_runtime_config(
+            resolved_path,
+            storage_url=storage_url,
+            storage_password_env=storage_password_env,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+    if not cfg.audit_db_url:
+        typer.echo("Persistent audit database is required.", err=True)
+        raise typer.Exit(code=2)
+
+    if not os.environ.get(cfg.audit_signing_key_env):
+        typer.echo("Audit signing key is required.", err=True)
+        raise typer.Exit(code=2)
+
+    try:
+        audit = PostgresAuditEmitter.from_url(
+            cfg.audit_db_url,
+            signing_key_env=cfg.audit_signing_key_env,
+        )
+    except Exception:
+        typer.echo("Unable to configure persistent audit.", err=True)
+        raise typer.Exit(code=1) from None
+
+    async def _run() -> None:
+        store = None
+        try:
+            try:
+                await audit.initialize()
+            except Exception:
+                typer.echo(
+                    "Audit store unavailable; no candidates were read.",
+                    err=True,
+                )
+                raise typer.Exit(code=1) from None
+
+            async def audit_setup_failure(decision: str) -> None:
+                from typing import cast
+
+                from ontos.runtime.ontology_approval import ApprovalAuditDecision
+
+                try:
+                    await _audit_approval(
+                        audit=audit,
+                        subject=acting_on_behalf_of,
+                        agent_identity="ontos-cli-local-operator",
+                        ontology_id=ontology.id,
+                        base_version=base_version,
+                        new_version=new_version,
+                        requested_change=requested_change,
+                        acl_ref=acl_ref,
+                        identity_assurance="operator_asserted",
+                        decision=cast(ApprovalAuditDecision, decision),
+                    )
+                except Exception:
+                    # Do not expose audit backend errors or continue without
+                    # recording the setup failure.
+                    typer.echo(
+                        "Approval setup failed; unable to record failure audit.",
+                        err=True,
+                    )
+                    raise typer.Exit(code=1) from None
+
+            try:
+                authz = build_authz(cfg)
+            except Exception:
+                await audit_setup_failure("authorization_error")
+                typer.echo("Approval authorization unavailable.", err=True)
+                raise typer.Exit(code=1) from None
+
+            try:
+                store = build_store(cfg)
+                if not isinstance(store, CandidateStore):
+                    raise TypeError("Storage does not support candidates")
+                await initialize_store(store)
+            except Exception:
+                await audit_setup_failure("storage_error")
+                typer.echo("Candidate storage unavailable.", err=True)
+                raise typer.Exit(code=1) from None
+
+            try:
+                updated, record = await approve_ontology_change(
+                    candidate_store=store,
+                    authz=authz,
+                    audit=audit,
+                    ontology=ontology,
+                    subject=acting_on_behalf_of,
+                    agent_identity="ontos-cli-local-operator",
+                    identity_assurance="operator_asserted",
+                    requested_change=requested_change,
+                    acl_ref=acl_ref,
+                    base_version=base_version,
+                    new_version=new_version,
+                    ontology_path=ontology_output,
+                    migration_path=migration_output,
+                )
+            except CandidateInspectionDeniedError:
+                typer.echo("Ontology approval denied.", err=True)
+                raise typer.Exit(code=1) from None
+            except ApprovalSuggestionNotFoundError:
+                typer.echo("No such suggestion.", err=True)
+                raise typer.Exit(code=1) from None
+            except (ValueError, FileExistsError, FileNotFoundError):
+                typer.echo(
+                    "Invalid approval request, version, or output destination.",
+                    err=True,
+                )
+                raise typer.Exit(code=2) from None
+            except Exception:
+                typer.echo(
+                    "Ontology approval failed; inspect the audit record.",
+                    err=True,
+                )
+                raise typer.Exit(code=1) from None
+
+            typer.echo(
+                json.dumps(
+                    {
+                        "ontology_id": updated.id,
+                        "base_version": base_version,
+                        "new_version": updated.version,
+                        "approval_query_id": str(record.approval_query_id),
+                        "ontology_output": str(ontology_output),
+                        "migration_output": str(migration_output),
+                        "activated": False,
+                    },
+                    indent=2,
+                )
+            )
+        finally:
+            if store is not None:
+                await _close_store_without_masking(store)
+            await _close_store_without_masking(audit)
+
+    asyncio.run(_run())
 
 
 audit_app = typer.Typer(help="Audit chain commands.")

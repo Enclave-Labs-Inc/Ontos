@@ -41,9 +41,14 @@ def partition_current_suggestion_evidence(
         if triple.subject_type not in entity_labels or triple.object_type not in entity_labels:
             continue
 
-        if ontology.is_valid_pattern(
+        resolved_predicate = ontology.resolve_predicate(
             triple.subject_type,
             triple.predicate,
+            triple.object_type,
+        )
+        if resolved_predicate != triple.predicate or ontology.is_valid_pattern(
+            triple.subject_type,
+            resolved_predicate,
             triple.object_type,
         ):
             continue

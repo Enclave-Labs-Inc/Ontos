@@ -346,6 +346,9 @@ def build_server(
     async def _lifespan(_: FastMCP[Any]) -> AsyncIterator[dict[str, Any]]:
         await initialize_store(store)
         await initialize_audit(audit)
+        if migration_view is not None:
+            # Fail startup before exposing any migration-backed read.
+            await migration_view.verify_approvals(audit)
         yield {}
 
     mcp = FastMCP("ontos", auth=build_token_verifier(cfg), lifespan=_lifespan)

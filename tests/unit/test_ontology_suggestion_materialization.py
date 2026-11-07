@@ -287,3 +287,28 @@ def test_strict_review_accepts_complete_m2b_evidence() -> None:
 
     assert dropped == 0
     assert accepted == list(result.suggestions)
+
+
+def test_approved_mapping_is_not_materialized() -> None:
+    from ontos.ontology.loader import PredicateMapping
+
+    ontology = _ontology().model_copy(
+        update={
+            "predicate_mappings": [
+                PredicateMapping(
+                    subject_type="Person",
+                    observed_predicate="manages",
+                    object_type="Company",
+                    maps_to="works_at",
+                )
+            ]
+        }
+    )
+
+    result = _materialize(
+        [_support(observed="manages", target="works_at")],
+        ontology=ontology,
+    )
+
+    assert result.suggestions == ()
+    assert result.invalid_count == 1

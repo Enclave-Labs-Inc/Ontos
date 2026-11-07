@@ -3,7 +3,6 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 import yaml
@@ -12,20 +11,21 @@ from fastmcp import Client
 import ontos.llm
 import ontos.planner
 from ontos.audit.emitter import AuditEmitter
-from ontos.migration.records import MigrationRecord
+from ontos.migration.records import AddPatternChange, MigrationRecord
 from ontos.ontology.artifact_writer import write_ontology_version
 from ontos.ontology.loader import EntityType, Ontology, Pattern, RelationType
 from ontos.planner import Plan, SeedByEntity, TraversalStep
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.models import Confidence, Fact, Provenance
+from ontos.runtime.ontology_approval import _audit_approval
 from ontos.runtime.server import build_server
 from ontos.storage.networkx_store import NetworkxStore
 
 
-def _artifacts(
+async def _artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[RuntimeConfig, Path]:
+) -> tuple[RuntimeConfig, Path, AuditEmitter]:
     monkeypatch.delenv("ONTOS_MIGRATIONS_DIR", raising=False)
     monkeypatch.delenv("ONTOS_ONTOLOGY_HISTORY_DIR", raising=False)
     monkeypatch.delenv("ONTOS_ONTOLOGY_PATH", raising=False)
@@ -58,6 +58,28 @@ def _artifacts(
 
     (history / "ontology-0.1.yaml").write_text(yaml.safe_dump(base.model_dump(mode="json")))
 
+    # Use a genuine Article-12 approval for this migration.
+    # The server receives this same audit sink at startup.
+    audit = AuditEmitter(signing_key=b"m3-mcp-test")
+    approval = await _audit_approval(
+        audit=audit,
+        subject="user:operator",
+        agent_identity="ontos-cli-local-operator",
+        ontology_id=base.id,
+        base_version="0.1",
+        new_version="0.2",
+        requested_change=AddPatternChange(
+            action="add_pattern",
+            subject_type="Person",
+            predicate="acquired",
+            object_type="Company",
+        ),
+        acl_ref="acl:legal",
+        decision="approval_granted",
+        support_count=1,
+        supporting_candidate_refs=["a" * 64],
+    )
+
     record = MigrationRecord.model_validate(
         {
             "schema_version": 1,
@@ -65,7 +87,7 @@ def _artifacts(
             "from_version": "0.1",
             "to_version": "0.2",
             "migration_kind": "identity",
-            "approval_query_id": str(uuid4()),
+            "approval_query_id": str(approval.query_id),
             "approved_changes": [
                 {
                     "action": "add_pattern",
@@ -93,7 +115,7 @@ def _artifacts(
         ontology_history_dir=history,
     )
 
-    return config, active_path
+    return config, active_path, audit
 
 
 def _fact(version: str) -> Fact:
@@ -165,7 +187,7 @@ async def test_mcp_keeps_historical_fact_visible_with_pinned_ontology(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config, active_path = _artifacts(tmp_path, monkeypatch)
+    config, active_path, audit = await _artifacts(tmp_path, monkeypatch)
     pinned = _stub_planner(monkeypatch)
 
     store = NetworkxStore()
@@ -175,7 +197,7 @@ async def test_mcp_keeps_historical_fact_visible_with_pinned_ontology(
     server = build_server(
         config,
         store=store,
-        audit=AuditEmitter(signing_key=b"m3-mcp-test"),
+        audit=audit,
     )
 
     assert len(pinned) == 1
@@ -212,7 +234,7 @@ async def test_mcp_drops_fact_without_verified_migration_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config, _ = _artifacts(tmp_path, monkeypatch)
+    config, _, audit = await _artifacts(tmp_path, monkeypatch)
     _stub_planner(monkeypatch)
 
     store = NetworkxStore()
@@ -222,7 +244,7 @@ async def test_mcp_drops_fact_without_verified_migration_path(
     server = build_server(
         config,
         store=store,
-        audit=AuditEmitter(signing_key=b"m3-mcp-test"),
+        audit=audit,
     )
 
     try:

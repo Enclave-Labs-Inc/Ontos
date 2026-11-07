@@ -8,8 +8,9 @@ from uuid import uuid4
 import pytest
 import yaml
 
+from ontos.audit.emitter import AuditEmitter
 from ontos.migration.loading import MigrationConfigurationError
-from ontos.migration.records import MigrationRecord
+from ontos.migration.records import AddPatternChange, MigrationRecord, load_migration_record
 from ontos.ontology.artifact_writer import write_ontology_version
 from ontos.ontology.loader import (
     EntityType,
@@ -21,7 +22,9 @@ from ontos.ontology.loader import (
 from ontos.planner import Plan, SeedByEntity, TraversalStep
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.migration_executor import build_verified_executor
+from ontos.runtime.migration_view import build_migration_view
 from ontos.runtime.models import Confidence, Fact, Provenance
+from ontos.runtime.ontology_approval import _audit_approval
 from ontos.storage.networkx_store import NetworkxStore
 
 
@@ -99,6 +102,42 @@ def _setup_artifacts(
     return active_path, migrations, history, active
 
 
+async def _approve_migration_fixture(
+    migrations: Path,
+) -> AuditEmitter:
+    """Create a genuine approval for this fixture's migration record."""
+    migration_path = migrations / "0.1-to-0.2.yaml"
+    record = load_migration_record(migration_path)
+
+    assert len(record.approved_changes) == 1
+    change = record.approved_changes[0]
+    assert isinstance(change, AddPatternChange)
+
+    audit = AuditEmitter(signing_key=b"m3-executor-migration-test")
+
+    approval = await _audit_approval(
+        audit=audit,
+        subject="user:operator",
+        agent_identity="ontos-cli-local-operator",
+        ontology_id=record.ontology_id,
+        base_version=record.from_version,
+        new_version=record.to_version,
+        requested_change=change,
+        acl_ref="acl:legal",
+        decision="approval_granted",
+        support_count=1,
+        supporting_candidate_refs=["a" * 64],
+    )
+
+    # Update only the approval reference. The ontology history and
+    # migration change remain identical to the original fixture.
+    approved_record = record.model_copy(update={"approval_query_id": approval.query_id})
+    migration_path.write_text(yaml.safe_dump(approved_record.model_dump(mode="json")))
+
+    assert audit.verify_chain()
+    return audit
+
+
 def _fact(*, version: str = "0.1") -> Fact:
     now = datetime.now(UTC)
 
@@ -140,7 +179,16 @@ async def test_verified_executor_keeps_historical_fact_visible(
         ontology_history_dir=history,
     )
 
-    executor = build_verified_executor(config)
+    audit = await _approve_migration_fixture(migrations)
+    view = build_migration_view(config)
+    assert view is not None
+    assert view.registry.strict
+
+    # This is the same verification that production callers must
+    # complete before executing migration-backed queries.
+    await view.verify_approvals(audit)
+
+    executor = build_verified_executor(config, view=view)
     stored = _fact()
     store = NetworkxStore()
 
@@ -173,7 +221,16 @@ async def test_verified_executor_drops_fact_without_migration_path(
         ontology_history_dir=history,
     )
 
-    executor = build_verified_executor(config)
+    audit = await _approve_migration_fixture(migrations)
+    view = build_migration_view(config)
+    assert view is not None
+    assert view.registry.strict
+
+    # This is the same verification that production callers must
+    # complete before executing migration-backed queries.
+    await view.verify_approvals(audit)
+
+    executor = build_verified_executor(config, view=view)
 
     # The registry has a verified 0.1 -> 0.2 edge,
     # but no route from 0.0 to 0.2.

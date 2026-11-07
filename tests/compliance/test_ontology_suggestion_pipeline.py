@@ -278,3 +278,63 @@ async def test_later_acl_failure_aborts_entire_batch(
         )
 
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_mapped_predicate_never_reaches_direct_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ontos.ontology.loader import PredicateMapping
+
+    ontology = _ontology().model_copy(
+        update={
+            "predicate_mappings": [
+                PredicateMapping(
+                    subject_type="Person",
+                    observed_predicate="manages",
+                    object_type="Company",
+                    maps_to="works_at",
+                )
+            ]
+        }
+    )
+
+    calls: list[dict[str, Any]] = []
+
+    async def scripted(
+        self: OllamaBackend,
+        system: str,
+        user: str,
+        schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = json.loads(user)
+        calls.append(payload)
+
+        return {
+            "proposals": [
+                {
+                    "candidate_id": item["candidate_id"],
+                    "kind": "new_relation_type",
+                    "relation_type": item["predicate"],
+                }
+                for item in payload["evidence"]
+            ]
+        }
+
+    monkeypatch.setattr(OllamaBackend, "structured_suggest", scripted)
+
+    result = await generate_llm_suggestions(
+        authorized_candidates=[
+            _candidate("mapped", "finance", "manages"),
+            _candidate("unmapped", "finance", "owns"),
+        ],
+        ontology=ontology,
+        backend=OllamaBackend("scripted"),
+        reference_key=KEY,
+        generated_at=NOW,
+    )
+
+    assert len(calls) == 1
+    assert [item["predicate"] for item in calls[0]["evidence"]] == ["owns"]
+    assert len(result.suggestions) == 1
+    assert result.suggestions[0].observed_predicate == "owns"

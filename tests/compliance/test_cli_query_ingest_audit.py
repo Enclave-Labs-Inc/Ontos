@@ -369,6 +369,55 @@ def test_verified_migration_cli_audit_hides_rejected_paths_and_acl_nodes(
 
     active_path, migrations, history, _ = _setup_artifacts(tmp_path)
 
+    # M3-2: the CLI requires a real, persistent Article-12 approval
+    # matching the migration before it can access graph storage.
+    from uuid import UUID
+
+    import yaml
+
+    from ontos.migration.records import AddPatternChange, load_migration_record
+    from ontos.runtime.ontology_approval import _audit_approval
+
+    migration_path = migrations / "0.1-to-0.2.yaml"
+    record = load_migration_record(migration_path)
+
+    assert len(record.approved_changes) == 1
+    change = record.approved_changes[0]
+    assert isinstance(change, AddPatternChange)
+
+    async def persist_approval() -> UUID:
+        audit = PostgresAuditEmitter.from_url(
+            audit_url,
+            signing_key_env="ONTOS_AUDIT_SIGNING_KEY",
+        )
+        try:
+            await audit.initialize()
+            approval = await _audit_approval(
+                audit=audit,
+                subject="user:operator",
+                agent_identity="ontos-cli-local-operator",
+                ontology_id=record.ontology_id,
+                base_version=record.from_version,
+                new_version=record.to_version,
+                requested_change=change,
+                acl_ref="acl:legal",
+                decision="approval_granted",
+                support_count=1,
+                supporting_candidate_refs=["a" * 64],
+            )
+            assert await audit.verify_chain_async()
+            return approval.query_id
+        finally:
+            await audit.close()
+
+    approved_record = record.model_copy(
+        update={"approval_query_id": asyncio.run(persist_approval())}
+    )
+    migration_path.write_text(
+        yaml.safe_dump(approved_record.model_dump(mode="json")),
+        encoding="utf-8",
+    )
+
     monkeypatch.setenv("ONTOS_MIGRATIONS_DIR", str(migrations))
     monkeypatch.setenv("ONTOS_ONTOLOGY_HISTORY_DIR", str(history))
     monkeypatch.setenv("ONTOS_ONTOLOGY_PATH", str(active_path))
@@ -488,6 +537,22 @@ def test_verified_migration_cli_audit_hides_rejected_paths_and_acl_nodes(
     assert len(baseline["hits"]) == len(with_hidden["hits"]) == 2
 
     records = _records(audit_url)
+    # M3-2 adds one genuine approval event before the two queries.
+    assert len(records) == 3
+
+    approval_events = [
+        record
+        for record in records
+        if _field(record, ArticleTwelveField.TOOL_INVOKED) == "ontology_approve"
+    ]
+    assert len(approval_events) == 1
+
+    # The remaining assertions concern query audit records only.
+    records = [
+        record
+        for record in records
+        if _field(record, ArticleTwelveField.TOOL_INVOKED) == "ontos.query"
+    ]
     assert len(records) == 2
 
     for record, body in zip(records, (baseline, with_hidden), strict=True):
