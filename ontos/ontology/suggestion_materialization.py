@@ -69,6 +69,8 @@ def materialize_supported_suggestions(
             # membership below is what makes a mapping target safe.
             or not is_relation_label(observed_predicate)
             or not is_safe_label(target)
+            or ontology.resolve_predicate(subject, observed_predicate, object_type)
+            != observed_predicate
             or ontology.is_valid_pattern(subject, observed_predicate, object_type)
         ):
             invalid_count += 1

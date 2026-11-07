@@ -33,4 +33,5 @@ def build_verified_executor(
     return DeterministicExecutor(
         current_ontology=view.ontology,
         migration_registry=view.registry,
+        migration_approval_check=view.require_verified_approvals,
     )

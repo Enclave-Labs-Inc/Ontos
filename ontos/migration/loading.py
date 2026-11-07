@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ontos.audit.base import AuditSink
+from ontos.migration.approval_audit import verify_migration_approval_records
 from ontos.migration.history import MigrationHistoryError, verify_migration_history
 from ontos.migration.records import (
     MigrationRecord,
@@ -24,13 +26,13 @@ class MigrationConfigurationError(ValueError):
     """Configured migration records are missing or inconsistent."""
 
 
-def load_migration_registry(
+def _load_migration_registry_with_records(
     directory: Path | str,
     *,
     active_ontology: Ontology,
     historical_ontology_dir: Path | str,
     strict: bool = True,
-) -> MigrationRegistry:
+) -> tuple[MigrationRegistry, list[MigrationRecord]]:
     """Load a complete, non-branching chain ending at the active version.
 
     Validate version connectivity and every recorded transition
@@ -117,4 +119,51 @@ def load_migration_registry(
     for record in records:
         register_migration_record(registry, record)
 
+    return registry, records
+
+
+def load_migration_registry(
+    directory: Path | str,
+    *,
+    active_ontology: Ontology,
+    historical_ontology_dir: Path | str,
+    strict: bool = True,
+) -> MigrationRegistry:
+    """Legacy synchronous loader retained during runtime integration.
+
+    This validates migration history but NOT Article-12 approvals.
+    Production paths must use load_audit_verified_migration_registry.
+    """
+    registry, _ = _load_migration_registry_with_records(
+        directory,
+        active_ontology=active_ontology,
+        historical_ontology_dir=historical_ontology_dir,
+        strict=strict,
+    )
+    return registry
+
+
+async def load_audit_verified_migration_registry(
+    directory: Path | str,
+    *,
+    active_ontology: Ontology,
+    historical_ontology_dir: Path | str,
+    audit: AuditSink,
+    strict: bool = True,
+) -> MigrationRegistry:
+    """Require valid history and matching Article-12 approvals.
+
+    Verification uses precisely the records from registry construction.
+    Nothing is returned to callers when verification fails.
+    """
+    registry, records = _load_migration_registry_with_records(
+        directory,
+        active_ontology=active_ontology,
+        historical_ontology_dir=historical_ontology_dir,
+        strict=strict,
+    )
+    await verify_migration_approval_records(
+        records=records,
+        audit=audit,
+    )
     return registry

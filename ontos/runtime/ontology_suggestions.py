@@ -272,7 +272,15 @@ async def list_ontology_suggestions(
             llm_candidates = [
                 record
                 for record in records
-                if ontology.relation_type(record.candidate.raw_triple.predicate) is None
+                if (
+                    ontology.resolve_predicate(
+                        record.candidate.raw_triple.subject_type,
+                        record.candidate.raw_triple.predicate,
+                        record.candidate.raw_triple.object_type,
+                    )
+                    == record.candidate.raw_triple.predicate
+                    and ontology.relation_type(record.candidate.raw_triple.predicate) is None
+                )
             ]
 
             assert approved is not None
