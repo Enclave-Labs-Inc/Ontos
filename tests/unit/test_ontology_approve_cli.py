@@ -79,6 +79,45 @@ def test_approve_rejects_operator_supplied_approval_id(
     assert not (tmp_path / "ontology-0.2.yaml").exists()
 
 
+def test_authorization_and_failure_audit_both_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ontos.runtime import ontology_approval as approval
+    from ontos.runtime import server as runtime_server
+
+    change = tmp_path / "change.yaml"
+    change.write_text(
+        "action: add_pattern\nsubject_type: Person\npredicate: acquired\nobject_type: Company\n"
+    )
+
+    monkeypatch.setenv(
+        "ONTOS_AUDIT_DB_URL",
+        f"sqlite+aiosqlite:///{tmp_path / 'audit.sqlite'}",
+    )
+    monkeypatch.setenv("ONTOS_AUDIT_SIGNING_KEY", "approval-setup-test-key")
+
+    def fail_authorization(_cfg: object) -> None:
+        raise RuntimeError("private authorization backend details")
+
+    async def fail_failure_audit(**_kwargs: object) -> None:
+        raise OSError("private audit backend details")
+
+    monkeypatch.setattr(runtime_server, "build_authz", fail_authorization)
+    monkeypatch.setattr(approval, "_audit_approval", fail_failure_audit)
+
+    result = runner.invoke(app, _args(tmp_path, change))
+
+    assert result.exit_code == 1, (
+        f"actual exit={result.exit_code}; output={result.output!r}; exception={result.exception!r}"
+    )
+    assert "Approval setup failed; unable to record failure audit." in result.output
+    assert "private authorization backend details" not in result.output
+    assert "private audit backend details" not in result.output
+    assert not (tmp_path / "ontology-0.2.yaml").exists()
+    assert not (tmp_path / "migration-0.2.yaml").exists()
+
+
 def test_approve_requires_persistent_audit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

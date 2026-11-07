@@ -2212,18 +2212,27 @@ def ontology_approve(
 
                 from ontos.runtime.ontology_approval import ApprovalAuditDecision
 
-                await _audit_approval(
-                    audit=audit,
-                    subject=acting_on_behalf_of,
-                    agent_identity="ontos-cli-local-operator",
-                    ontology_id=ontology.id,
-                    base_version=base_version,
-                    new_version=new_version,
-                    requested_change=requested_change,
-                    acl_ref=acl_ref,
-                    identity_assurance="operator_asserted",
-                    decision=cast(ApprovalAuditDecision, decision),
-                )
+                try:
+                    await _audit_approval(
+                        audit=audit,
+                        subject=acting_on_behalf_of,
+                        agent_identity="ontos-cli-local-operator",
+                        ontology_id=ontology.id,
+                        base_version=base_version,
+                        new_version=new_version,
+                        requested_change=requested_change,
+                        acl_ref=acl_ref,
+                        identity_assurance="operator_asserted",
+                        decision=cast(ApprovalAuditDecision, decision),
+                    )
+                except Exception:
+                    # Do not expose audit backend errors or continue without
+                    # recording the setup failure.
+                    typer.echo(
+                        "Approval setup failed; unable to record failure audit.",
+                        err=True,
+                    )
+                    raise typer.Exit(code=1) from None
 
             try:
                 authz = build_authz(cfg)

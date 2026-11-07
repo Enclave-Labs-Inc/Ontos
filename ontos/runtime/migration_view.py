@@ -62,7 +62,13 @@ class MigrationView:
             raise MigrationApprovalAuditError("Migration approval audit has not been verified")
 
     async def verify_approvals(self, audit: AuditSink) -> None:
-        """Verify the records used to construct this registry."""
+        """Verify the records used to construct this registry.
+
+        This is a startup/invocation verification gate, not continuous
+        monitoring. A long-running server does not automatically detect
+        audit-chain changes made after successful verification. Restart
+        the runtime after audit changes to force fresh verification.
+        """
         gate = self.verification_gate
         if gate is None:
             return
