@@ -26,17 +26,20 @@ class MigrationConfigurationError(ValueError):
     """Configured migration records are missing or inconsistent."""
 
 
-def _load_migration_registry_with_records(
+def load_unverified_migration_registry_with_records(
     directory: Path | str,
     *,
     active_ontology: Ontology,
     historical_ontology_dir: Path | str,
     strict: bool = True,
 ) -> tuple[MigrationRegistry, list[MigrationRecord]]:
-    """Load a complete, non-branching chain ending at the active version.
+    """Load a structurally verified migration chain without approval verification.
 
     Validate version connectivity and every recorded transition
     against historical ontology files before registering edges.
+
+    The returned registry is NOT approval-signature verified. Protected
+    runtime callers must verify the returned records before using it.
     """
     root = Path(directory)
 
@@ -131,10 +134,10 @@ def load_migration_registry(
 ) -> MigrationRegistry:
     """Legacy synchronous loader retained during runtime integration.
 
-    This validates migration history but NOT Article-12 approvals.
+    This validates migration history but NOT approval signatures.
     Production paths must use load_audit_verified_migration_registry.
     """
-    registry, _ = _load_migration_registry_with_records(
+    registry, _ = load_unverified_migration_registry_with_records(
         directory,
         active_ontology=active_ontology,
         historical_ontology_dir=historical_ontology_dir,
@@ -151,12 +154,12 @@ async def load_audit_verified_migration_registry(
     audit: AuditSink,
     strict: bool = True,
 ) -> MigrationRegistry:
-    """Require valid history and matching Article-12 approvals.
+    """Require valid history and signed migration approvals.
 
     Verification uses precisely the records from registry construction.
     Nothing is returned to callers when verification fails.
     """
-    registry, records = _load_migration_registry_with_records(
+    registry, records = load_unverified_migration_registry_with_records(
         directory,
         active_ontology=active_ontology,
         historical_ontology_dir=historical_ontology_dir,

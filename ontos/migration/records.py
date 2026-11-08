@@ -71,6 +71,8 @@ class MigrationRecord(BaseModel):
     migration_kind: Literal["identity"]
     approval_query_id: UUID
     approved_changes: list[ApprovedChange] = Field(min_length=1)
+    # Optional at parse time for historical fixtures; verified reads reject absence.
+    approval_signature: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

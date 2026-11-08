@@ -222,3 +222,64 @@ def test_already_approved_mapping_cannot_be_approved_again() -> None:
             [_candidate("legal", "employed_by")],
             ontology=_ontology(mapped=True),
         )
+
+
+@pytest.mark.parametrize(
+    "invalid_versions",
+    [
+        (),
+        (("", "1"),),
+        (("test-extractor", ""),),
+        (("test-extractor", "1"), ("test-extractor", "1")),
+    ],
+    ids=[
+        "missing-extractor-versions",
+        "empty-extractor-name",
+        "empty-extractor-version",
+        "duplicate-extractor-versions",
+    ],
+)
+def test_approval_rejects_invalid_extractor_versions(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_versions: tuple[tuple[str, str], ...],
+) -> None:
+    """Approval must apply the same final evidence validation as suggestions."""
+    from types import SimpleNamespace
+
+    from ontos.ontology import approval_selection
+
+    original_materialize = approval_selection.materialize_supported_suggestions
+
+    def malformed_materialization(**kwargs: object) -> SimpleNamespace:
+        result = original_materialize(**kwargs)
+        assert len(result.suggestions) == 1
+
+        suggestion = result.suggestions[0].model_copy(
+            update={"extractor_versions": invalid_versions}
+        )
+
+        # Simulate malformed evidence surviving upstream materialization.
+        return SimpleNamespace(suggestions=(suggestion,))
+
+    monkeypatch.setattr(
+        approval_selection,
+        "materialize_supported_suggestions",
+        malformed_materialization,
+    )
+
+    requested = MapToExistingChange(
+        action="map_to_existing",
+        subject_type="Person",
+        observed_predicate="employed_by",
+        object_type="Company",
+        maps_to="works_at",
+    )
+
+    with pytest.raises(
+        ApprovalSuggestionNotFoundError,
+        match="No such suggestion",
+    ):
+        _recompute(
+            requested,
+            [_candidate("legal", "employed_by")],
+        )

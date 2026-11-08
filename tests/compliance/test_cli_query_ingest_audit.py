@@ -371,12 +371,12 @@ def test_verified_migration_cli_audit_hides_rejected_paths_and_acl_nodes(
 
     # M3-2: the CLI requires a real, persistent Article-12 approval
     # matching the migration before it can access graph storage.
-    from uuid import UUID
 
     import yaml
 
-    from ontos.migration.records import AddPatternChange, load_migration_record
-    from ontos.runtime.ontology_approval import _audit_approval
+    from ontos.migration.approval_audit import sign_migration_record
+    from ontos.migration.records import AddPatternChange, MigrationRecord, load_migration_record
+    from ontos.runtime.ontology_approval import record_ontology_approval_event
 
     migration_path = migrations / "0.1-to-0.2.yaml"
     record = load_migration_record(migration_path)
@@ -385,14 +385,14 @@ def test_verified_migration_cli_audit_hides_rejected_paths_and_acl_nodes(
     change = record.approved_changes[0]
     assert isinstance(change, AddPatternChange)
 
-    async def persist_approval() -> UUID:
+    async def persist_approval() -> MigrationRecord:
         audit = PostgresAuditEmitter.from_url(
             audit_url,
             signing_key_env="ONTOS_AUDIT_SIGNING_KEY",
         )
         try:
             await audit.initialize()
-            approval = await _audit_approval(
+            approval = await record_ontology_approval_event(
                 audit=audit,
                 subject="user:operator",
                 agent_identity="ontos-cli-local-operator",
@@ -406,13 +406,14 @@ def test_verified_migration_cli_audit_hides_rejected_paths_and_acl_nodes(
                 supporting_candidate_refs=["a" * 64],
             )
             assert await audit.verify_chain_async()
-            return approval.query_id
+            return sign_migration_record(
+                record=record.model_copy(update={"approval_query_id": approval.query_id}),
+                audit=audit,
+            )
         finally:
             await audit.close()
 
-    approved_record = record.model_copy(
-        update={"approval_query_id": asyncio.run(persist_approval())}
-    )
+    approved_record = asyncio.run(persist_approval())
     migration_path.write_text(
         yaml.safe_dump(approved_record.model_dump(mode="json")),
         encoding="utf-8",

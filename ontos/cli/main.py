@@ -2137,8 +2137,8 @@ def ontology_approve(
     from ontos.ontology.approval_selection import ApprovalChange, ApprovalSuggestionNotFoundError
     from ontos.runtime.candidate_inspection import CandidateInspectionDeniedError
     from ontos.runtime.ontology_approval import (
-        _audit_approval,
         approve_ontology_change,
+        record_ontology_approval_event,
     )
     from ontos.runtime.server import build_authz, build_store, initialize_store
     from ontos.storage.base import CandidateStore
@@ -2213,7 +2213,7 @@ def ontology_approve(
                 from ontos.runtime.ontology_approval import ApprovalAuditDecision
 
                 try:
-                    await _audit_approval(
+                    await record_ontology_approval_event(
                         audit=audit,
                         subject=acting_on_behalf_of,
                         agent_identity="ontos-cli-local-operator",

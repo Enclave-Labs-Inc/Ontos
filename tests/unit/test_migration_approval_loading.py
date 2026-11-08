@@ -1,4 +1,4 @@
-"""M3-2 migration loading requires genuine audit-backed approvals."""
+"""M3-2 migration loading requires valid signed approvals."""
 
 from __future__ import annotations
 
@@ -11,7 +11,10 @@ import yaml
 from fastmcp import Client
 
 from ontos.audit.emitter import AuditEmitter
-from ontos.migration.approval_audit import MigrationApprovalAuditError
+from ontos.migration.approval_audit import (
+    MigrationApprovalAuditError,
+    sign_migration_record,
+)
 from ontos.migration.loading import (
     load_audit_verified_migration_registry,
 )
@@ -22,7 +25,7 @@ from ontos.planner import Plan, SeedByEntity, TraversalStep
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.migration_executor import build_verified_executor
 from ontos.runtime.migration_view import build_migration_view
-from ontos.runtime.ontology_approval import _audit_approval
+from ontos.runtime.ontology_approval import record_ontology_approval_event
 from ontos.runtime.server import build_server
 from ontos.storage.networkx_store import NetworkxStore
 
@@ -73,7 +76,7 @@ async def _artifacts(
 
     audit = AuditEmitter(b"m3-2-verified-loading-test-key")
 
-    event = await _audit_approval(
+    event = await record_ontology_approval_event(
         audit=audit,
         subject="user:operator",
         agent_identity="ontos-cli-local-operator",
@@ -93,9 +96,16 @@ async def _artifacts(
         from_version="0.1",
         to_version="0.2",
         migration_kind="identity",
-        approval_query_id=uuid4() if forged else event.query_id,
+        approval_query_id=event.query_id,
         approved_changes=[_change()],
     )
+
+    # Sign the genuine record before applying any deliberate forgery.
+    record = sign_migration_record(record=record, audit=audit)
+
+    if forged:
+        # Tamper after signing: the signature must no longer verify.
+        record = record.model_copy(update={"approval_query_id": uuid4()})
 
     active = write_ontology_version(
         base=base,
@@ -134,7 +144,7 @@ async def test_forged_id_refuses_verified_registry(
 
     with pytest.raises(
         MigrationApprovalAuditError,
-        match="not found",
+        match="signature verification failed",
     ):
         await load_audit_verified_migration_registry(
             migrations,
@@ -145,7 +155,7 @@ async def test_forged_id_refuses_verified_registry(
         )
 
 
-async def test_broken_audit_chain_refuses_verified_registry(
+async def test_signed_registry_does_not_scan_audit_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -153,17 +163,20 @@ async def test_broken_audit_chain_refuses_verified_registry(
 
     monkeypatch.setattr(audit, "verify_chain", lambda: False)
 
-    with pytest.raises(
-        MigrationApprovalAuditError,
-        match="chain failed",
-    ):
-        await load_audit_verified_migration_registry(
-            migrations,
-            active_ontology=active,
-            historical_ontology_dir=history,
-            audit=audit,
-            strict=True,
-        )
+    def forbidden_lookup(_query_id: object) -> None:
+        raise AssertionError("Runtime must not look up audit events")
+
+    monkeypatch.setattr(audit, "by_query_id", forbidden_lookup)
+
+    registry = await load_audit_verified_migration_registry(
+        migrations,
+        active_ontology=active,
+        historical_ontology_dir=history,
+        audit=audit,
+        strict=True,
+    )
+
+    assert registry is not None
 
 
 def _view_config(
@@ -224,7 +237,7 @@ async def test_forged_view_never_opens_gate(
 
     with pytest.raises(
         MigrationApprovalAuditError,
-        match="not found",
+        match="signature verification failed",
     ):
         await view.verify_approvals(audit)
 
@@ -348,7 +361,7 @@ async def test_executor_requires_verified_approval_before_read(
         if forged:
             with pytest.raises(
                 MigrationApprovalAuditError,
-                match="not found",
+                match="signature verification failed",
             ):
                 await view.verify_approvals(audit)
 

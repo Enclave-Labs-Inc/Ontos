@@ -9,7 +9,7 @@ import pytest
 from ontos.audit.emitter import AuditEmitter
 from ontos.migration.records import MapToExistingChange
 from ontos.runtime.models import ArticleTwelveField
-from ontos.runtime.ontology_approval import _audit_approval
+from ontos.runtime.ontology_approval import record_ontology_approval_event
 
 
 def _audit() -> AuditEmitter:
@@ -35,7 +35,7 @@ async def _emit(
 
     from ontos.runtime.ontology_approval import ApprovalAuditDecision
 
-    return await _audit_approval(
+    return await record_ontology_approval_event(
         audit=audit,
         subject="user:approver",
         agent_identity="ontos-cli-local-operator",

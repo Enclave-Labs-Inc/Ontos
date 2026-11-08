@@ -104,7 +104,7 @@ def test_authorization_and_failure_audit_both_unavailable(
         raise OSError("private audit backend details")
 
     monkeypatch.setattr(runtime_server, "build_authz", fail_authorization)
-    monkeypatch.setattr(approval, "_audit_approval", fail_failure_audit)
+    monkeypatch.setattr(approval, "record_ontology_approval_event", fail_failure_audit)
 
     result = runner.invoke(app, _args(tmp_path, change))
 

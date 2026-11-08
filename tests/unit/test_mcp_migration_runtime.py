@@ -11,13 +11,14 @@ from fastmcp import Client
 import ontos.llm
 import ontos.planner
 from ontos.audit.emitter import AuditEmitter
+from ontos.migration.approval_audit import sign_migration_record
 from ontos.migration.records import AddPatternChange, MigrationRecord
 from ontos.ontology.artifact_writer import write_ontology_version
 from ontos.ontology.loader import EntityType, Ontology, Pattern, RelationType
 from ontos.planner import Plan, SeedByEntity, TraversalStep
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.models import Confidence, Fact, Provenance
-from ontos.runtime.ontology_approval import _audit_approval
+from ontos.runtime.ontology_approval import record_ontology_approval_event
 from ontos.runtime.server import build_server
 from ontos.storage.networkx_store import NetworkxStore
 
@@ -61,7 +62,7 @@ async def _artifacts(
     # Use a genuine Article-12 approval for this migration.
     # The server receives this same audit sink at startup.
     audit = AuditEmitter(signing_key=b"m3-mcp-test")
-    approval = await _audit_approval(
+    approval = await record_ontology_approval_event(
         audit=audit,
         subject="user:operator",
         agent_identity="ontos-cli-local-operator",
@@ -98,6 +99,9 @@ async def _artifacts(
             ],
         }
     )
+
+    # Sign the migration using the key supplied to the MCP server.
+    record = sign_migration_record(record=record, audit=audit)
 
     active_path = tmp_path / "active.yaml"
     write_ontology_version(

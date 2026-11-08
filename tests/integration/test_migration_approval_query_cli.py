@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,13 +17,16 @@ import ontos.runtime.server as server_runtime
 from ontos.audit.postgres import PostgresAuditEmitter
 from ontos.cli import app
 from ontos.cli.main import _scan_for_export
-from ontos.migration.approval_audit import MigrationApprovalAuditError
+from ontos.migration.approval_audit import (
+    MigrationApprovalAuditError,
+    sign_migration_record,
+)
 from ontos.migration.records import AddPatternChange, MigrationRecord
 from ontos.ontology.artifact_writer import write_ontology_version
 from ontos.ontology.loader import EntityType, Ontology, Pattern, RelationType
 from ontos.planner import Plan, SeedByEntity, TraversalStep
 from ontos.runtime.models import ArticleTwelveField
-from ontos.runtime.ontology_approval import _audit_approval
+from ontos.runtime.ontology_approval import record_ontology_approval_event
 
 runner = CliRunner()
 
@@ -86,11 +90,12 @@ def _prepare(
     monkeypatch.setenv("ONTOS_MIGRATIONS_DIR", str(migrations))
     monkeypatch.setenv("ONTOS_ONTOLOGY_HISTORY_DIR", str(history))
 
-    async def create_approval():
+    async def create_approval() -> MigrationRecord:
         audit = PostgresAuditEmitter.from_url(audit_url)
         try:
             await audit.initialize()
-            return await _audit_approval(
+
+            approval_event = await record_ontology_approval_event(
                 audit=audit,
                 subject="user:operator",
                 agent_identity="ontos-cli-local-operator",
@@ -103,20 +108,26 @@ def _prepare(
                 supporting_candidate_refs=["a" * 64],
                 support_count=1,
             )
+
+            record = MigrationRecord(
+                schema_version=1,
+                ontology_id=base.id,
+                from_version="0.1",
+                to_version="0.2",
+                migration_kind="identity",
+                approval_query_id=approval_event.query_id,
+                approved_changes=[_change()],
+            )
+
+            return sign_migration_record(record=record, audit=audit)
         finally:
             await audit.close()
 
-    approval_event = asyncio.run(create_approval())
+    record = asyncio.run(create_approval())
 
-    record = MigrationRecord(
-        schema_version=1,
-        ontology_id=base.id,
-        from_version="0.1",
-        to_version="0.2",
-        migration_kind="identity",
-        approval_query_id=(uuid4() if forged else approval_event.query_id),
-        approved_changes=[_change()],
-    )
+    if forged:
+        # Change the ID after signing, invalidating the HMAC.
+        record = record.model_copy(update={"approval_query_id": uuid4()})
 
     active_path = tmp_path / "active.yaml"
     write_ontology_version(
@@ -283,7 +294,7 @@ def test_export_requires_persisted_matching_approval(
     if forged:
         with pytest.raises(
             MigrationApprovalAuditError,
-            match="not found",
+            match="signature verification failed",
         ):
             _scan_for_export(
                 storage_path,
@@ -338,3 +349,68 @@ def test_export_requires_persisted_matching_approval(
             await audit.close()
 
     asyncio.run(verify_audit())
+
+
+def test_signed_migration_survives_persistent_audit_pruning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expired Article-12 records must not disable approved migrations."""
+    active_path, db_path = _prepare(
+        tmp_path,
+        monkeypatch,
+        forged=False,
+    )
+
+    audit_url = f"sqlite+aiosqlite:///{db_path}"
+
+    async def prune_approval_history() -> None:
+        audit = PostgresAuditEmitter.from_url(audit_url)
+        try:
+            await audit.initialize()
+
+            # The fixture creates exactly one persisted approval event.
+            assert await audit.count_async() == 1
+
+            # Simulate expiry of the approval's retention window.
+            deleted = await audit.prune_expired(datetime.now(UTC) + timedelta(days=1))
+
+            assert deleted == 1
+            assert await audit.count_async() == 0
+        finally:
+            await audit.close()
+
+    asyncio.run(prune_approval_history())
+
+    # A new CLI invocation must trust the signed migration,
+    # even though the historical approval record no longer exists.
+    _mock_planner(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "Who works at the company?",
+            "--ontology",
+            str(active_path),
+            "--storage-path",
+            str(tmp_path / "graph.pkl"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output + repr(result.exception)
+
+    # Export must also work after retention pruning.
+    monkeypatch.setenv("ONTOS_ONTOLOGY_PATH", str(active_path))
+    monkeypatch.setenv("ONTOS_STORAGE_BACKEND", "networkx")
+
+    scan = _scan_for_export(
+        str(tmp_path / "graph.pkl"),
+        export_format="graphml",
+    )
+
+    assert scan.facts == []
+
+    # The query creates its own new audit event. It does not
+    # restore or require the expired approval event.
+    assert len(_query_events(db_path)) == 1

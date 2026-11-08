@@ -27,13 +27,14 @@ import ontos.planner
 from ontos.audit.emitter import AuditEmitter
 from ontos.audit.postgres import PostgresAuditEmitter
 from ontos.cli.main import app
+from ontos.migration.approval_audit import sign_migration_record
 from ontos.migration.records import AddPatternChange, MigrationRecord, load_migration_record
 from ontos.ontology.artifact_writer import write_ontology_version
 from ontos.ontology.loader import EntityType, Ontology, Pattern, RelationType
 from ontos.planner import Plan, SeedByEntity, TraversalStep
 from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.models import ArticleTwelveField, Confidence, Fact, Provenance
-from ontos.runtime.ontology_approval import _audit_approval
+from ontos.runtime.ontology_approval import record_ontology_approval_event
 from ontos.runtime.server import build_server
 from ontos.storage.networkx_store import NetworkxStore
 
@@ -131,7 +132,7 @@ async def _approved_server_audit(
     assert isinstance(change, AddPatternChange)
 
     audit = AuditEmitter(signing_key=signing_key)
-    approval = await _audit_approval(
+    approval = await record_ontology_approval_event(
         audit=audit,
         subject="user:operator",
         agent_identity="ontos-cli-local-operator",
@@ -145,7 +146,10 @@ async def _approved_server_audit(
         supporting_candidate_refs=["a" * 64],
     )
 
-    approved_record = record.model_copy(update={"approval_query_id": approval.query_id})
+    approved_record = sign_migration_record(
+        record=record.model_copy(update={"approval_query_id": approval.query_id}),
+        audit=audit,
+    )
     migration_path.write_text(
         yaml.safe_dump(approved_record.model_dump(mode="json")),
         encoding="utf-8",
@@ -307,7 +311,7 @@ async def _persist_export_approval(
     try:
         await audit.initialize()
 
-        approval = await _audit_approval(
+        approval = await record_ontology_approval_event(
             audit=audit,
             subject="user:operator",
             agent_identity="ontos-cli-local-operator",
@@ -322,10 +326,13 @@ async def _persist_export_approval(
         )
 
         assert await audit.verify_chain_async()
+        approved_record = sign_migration_record(
+            record=record.model_copy(update={"approval_query_id": approval.query_id}),
+            audit=audit,
+        )
     finally:
         await audit.close()
 
-    approved_record = record.model_copy(update={"approval_query_id": approval.query_id})
     migration_path.write_text(
         yaml.safe_dump(approved_record.model_dump(mode="json")),
         encoding="utf-8",

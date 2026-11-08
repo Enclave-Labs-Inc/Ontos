@@ -16,6 +16,7 @@ from uuid import UUID
 
 from ontos.audit.base import AuditSink, emit_record
 from ontos.authz import ONTOLOGY_APPROVER, VIEW, AuthzBackend
+from ontos.migration.approval_audit import sign_migration_record
 from ontos.migration.records import MigrationRecord
 from ontos.ontology.approval_selection import (
     ApprovalChange,
@@ -145,7 +146,7 @@ _APPROVAL_CHANGE_REFERENCE_LABEL = b"ontology-approval-change-reference"
 _APPROVAL_SCOPE_REFERENCE_LABEL = b"ontology-approval-scope-reference"
 
 
-async def _audit_approval(
+async def record_ontology_approval_event(
     *,
     audit: AuditSink,
     subject: str,
@@ -242,7 +243,7 @@ async def _prepare_ontology_approval(
     async def audit_decision(
         decision: ApprovalAuditDecision,
     ) -> AuditRecord:
-        return await _audit_approval(
+        return await record_ontology_approval_event(
             audit=audit,
             subject=subject,
             agent_identity=agent_identity,
@@ -359,7 +360,7 @@ async def approve_ontology_change(
         *,
         include_evidence: bool = False,
     ) -> AuditRecord:
-        return await _audit_approval(
+        return await record_ontology_approval_event(
             audit=audit,
             subject=subject,
             agent_identity=agent_identity,
@@ -427,7 +428,13 @@ async def approve_ontology_change(
         include_evidence=True,
     )
 
-    record = preview.model_copy(update={"approval_query_id": granted.query_id})
+    # Bind the complete migration to the persisted approval event.
+    # The signature survives audit retention pruning and is verified
+    # independently when the migration is loaded for runtime reads.
+    record = sign_migration_record(
+        record=preview.model_copy(update={"approval_query_id": granted.query_id}),
+        audit=audit,
+    )
 
     try:
         # Permission changes during audit persistence must prevent files.

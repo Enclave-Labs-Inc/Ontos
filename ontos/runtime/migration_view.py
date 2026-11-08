@@ -27,7 +27,7 @@ from ontos.migration.approval_audit import (
 )
 from ontos.migration.loading import (
     MigrationConfigurationError,
-    _load_migration_registry_with_records,
+    load_unverified_migration_registry_with_records,
 )
 from ontos.migration.records import MigrationRecord
 from ontos.migration.registry import MigrationRegistry
@@ -56,7 +56,7 @@ class MigrationView:
     verification_gate: _ApprovalVerificationGate | None = None
 
     def require_verified_approvals(self) -> None:
-        """Refuse migration-backed reads before audit verification."""
+        """Refuse migration-backed reads before signature verification."""
         gate = self.verification_gate
         if gate is not None and not gate.verified:
             raise MigrationApprovalAuditError("Migration approval audit has not been verified")
@@ -64,10 +64,12 @@ class MigrationView:
     async def verify_approvals(self, audit: AuditSink) -> None:
         """Verify the records used to construct this registry.
 
-        This is a startup/invocation verification gate, not continuous
-        monitoring. A long-running server does not automatically detect
-        audit-chain changes made after successful verification. Restart
-        the runtime after audit changes to force fresh verification.
+        This is a startup/invocation signature-verification gate,
+        not continuous monitoring. A long-running server does not re-read
+        migration YAML or reverify signatures after startup. Restart the
+        runtime after migration or signing-key changes.
+
+        Audit retention pruning does not invalidate signed migrations.
         """
         gate = self.verification_gate
         if gate is None:
@@ -164,7 +166,7 @@ def build_migration_view(
             )
         active_ontology = load_ontology(config.ontology_path)
 
-    registry, records = _load_migration_registry_with_records(
+    registry, records = load_unverified_migration_registry_with_records(
         migration_dir,
         active_ontology=active_ontology,
         historical_ontology_dir=history_dir,

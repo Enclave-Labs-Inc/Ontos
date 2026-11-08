@@ -21,6 +21,7 @@ from ontos.ontology.suggestion_materialization import (
 )
 from ontos.ontology.suggestion_proposals import ValidatedSemanticProposal
 from ontos.ontology.suggestion_support import resolve_proposal_support
+from ontos.ontology.suggestion_validation import filter_ontology_suggestions
 from ontos.ontology.suggestions import suggest_missing_patterns
 from ontos.storage.base import StoredCandidate
 
@@ -62,6 +63,13 @@ def recompute_approval_change(
             candidates=scoped,
             ontology=ontology,
             reference_key=reference_key,
+        )
+
+        # Match the final validation used by the suggestions service.
+        suggestions, _ = filter_ontology_suggestions(
+            list(suggestions),
+            ontology,
+            require_m2b_evidence=True,
         )
 
         matching = [
@@ -138,10 +146,18 @@ def recompute_approval_change(
         generator_version="m3-2-v1",
     )
 
-    if len(materialized.suggestions) != 1:
+    # Materialization alone does not run the shared final validation.
+    # Reject incomplete review evidence or ontology-inconsistent results.
+    accepted, _ = filter_ontology_suggestions(
+        list(materialized.suggestions),
+        ontology,
+        require_m2b_evidence=True,
+    )
+
+    if len(accepted) != 1:
         raise ApprovalSuggestionNotFoundError("No such suggestion")
 
-    suggestion = materialized.suggestions[0]
+    suggestion = accepted[0]
     assert suggestion.pattern is not None
 
     if isinstance(requested_change, MapToExistingChange):

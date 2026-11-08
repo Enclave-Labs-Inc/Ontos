@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from ontos.audit.emitter import AuditEmitter
+from ontos.migration.approval_audit import sign_migration_record
 from ontos.migration.loading import MigrationConfigurationError
 from ontos.migration.records import AddPatternChange, MigrationRecord, load_migration_record
 from ontos.ontology.artifact_writer import write_ontology_version
@@ -24,7 +25,7 @@ from ontos.runtime.config import RuntimeConfig
 from ontos.runtime.migration_executor import build_verified_executor
 from ontos.runtime.migration_view import build_migration_view
 from ontos.runtime.models import Confidence, Fact, Provenance
-from ontos.runtime.ontology_approval import _audit_approval
+from ontos.runtime.ontology_approval import record_ontology_approval_event
 from ontos.storage.networkx_store import NetworkxStore
 
 
@@ -115,7 +116,7 @@ async def _approve_migration_fixture(
 
     audit = AuditEmitter(signing_key=b"m3-executor-migration-test")
 
-    approval = await _audit_approval(
+    approval = await record_ontology_approval_event(
         audit=audit,
         subject="user:operator",
         agent_identity="ontos-cli-local-operator",
@@ -129,9 +130,12 @@ async def _approve_migration_fixture(
         supporting_candidate_refs=["a" * 64],
     )
 
-    # Update only the approval reference. The ontology history and
-    # migration change remain identical to the original fixture.
-    approved_record = record.model_copy(update={"approval_query_id": approval.query_id})
+    # Bind the persisted approval ID and unchanged migration content
+    # to a signature verified before migration-backed reads.
+    approved_record = sign_migration_record(
+        record=record.model_copy(update={"approval_query_id": approval.query_id}),
+        audit=audit,
+    )
     migration_path.write_text(yaml.safe_dump(approved_record.model_dump(mode="json")))
 
     assert audit.verify_chain()

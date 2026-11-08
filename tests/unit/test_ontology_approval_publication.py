@@ -140,6 +140,15 @@ async def test_success_persists_actual_approval_id(
     assert migration_data["approval_query_id"] == str(record.approval_query_id)
     assert record.approval_query_id.int != 0
 
+    # Verify the signature survives YAML serialization and reload.
+    from ontos.migration.approval_audit import verify_signed_migration_record
+    from ontos.migration.records import MigrationRecord
+
+    persisted = MigrationRecord.model_validate(migration_data)
+    assert persisted.approval_signature == record.approval_signature
+    assert persisted.approval_signature is not None
+    verify_signed_migration_record(record=persisted, audit=audit)
+
     approval_event = audit.by_query_id(record.approval_query_id)
     assert approval_event is not None
     assert json.loads(approval_event.article12[ArticleTwelveField.POLICY_DECISIONS]) == [
