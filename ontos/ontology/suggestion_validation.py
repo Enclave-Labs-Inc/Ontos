@@ -26,6 +26,13 @@ def is_valid_ontology_suggestion(
     if pattern is None:
         return False
 
+    # An already-approved predicate mapping must not be proposed again.
+    if suggestion.kind != "add_pattern" and suggestion.observed_predicate is not None:
+        observed = suggestion.observed_predicate
+        resolved = ontology.resolve_predicate(pattern.subject_type, observed, pattern.object_type)
+        if resolved != observed:
+            return False
+
     if not (
         is_safe_label(pattern.subject_type)
         and is_safe_label(pattern.object_type)
@@ -117,7 +124,10 @@ def has_complete_m2b_review_evidence(
         return False
 
     # Rejected evidence must not already be an allowed ontology pattern.
-    if ontology.is_valid_pattern(pattern.subject_type, observed, pattern.object_type):
+    resolved = ontology.resolve_predicate(pattern.subject_type, observed, pattern.object_type)
+    if resolved != observed or ontology.is_valid_pattern(
+        pattern.subject_type, resolved, pattern.object_type
+    ):
         return False
 
     if suggestion.kind == "map_to_existing":

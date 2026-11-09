@@ -150,3 +150,30 @@ def test_low_confidence_rejections_are_excluded() -> None:
         ontology=_ontology(),
     )
     assert groups == {}
+
+
+def test_mapped_predicate_excluded_from_llm_partition() -> None:
+    from ontos.ontology.loader import PredicateMapping
+
+    ontology = _ontology().model_copy(
+        update={
+            "predicate_mappings": [
+                PredicateMapping(
+                    subject_type="Person",
+                    observed_predicate="employed_by",
+                    object_type="Company",
+                    maps_to="works_at",
+                )
+            ]
+        }
+    )
+
+    mapped = _candidate("mapped", "finance", predicate="employed_by")
+    unmapped = _candidate("unmapped", "finance", predicate="owns")
+
+    groups = partition_current_suggestion_evidence(
+        authorized_candidates=[mapped, unmapped],
+        ontology=ontology,
+    )
+
+    assert groups == {"finance": [unmapped]}

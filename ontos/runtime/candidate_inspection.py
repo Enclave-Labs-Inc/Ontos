@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Literal, overload
 
 from ontos.audit.base import AuditSink
-from ontos.authz import ONTOLOGY_REVIEWER, VIEW, AuthzBackend
+from ontos.authz import ONTOLOGY_APPROVER, ONTOLOGY_REVIEWER, VIEW, AuthzBackend
 from ontos.extraction import RejectedCandidate
 from ontos.runtime.models import AuditRecord
 from ontos.storage.base import (
@@ -148,6 +148,7 @@ async def inspect_candidates(
     limit: int = 100,
     after: str | None = None,
     identity_assurance: str = "unverified",
+    required_relation: str = ONTOLOGY_REVIEWER,
     paginated: Literal[True],
 ) -> CandidateInspectionPage: ...
 
@@ -163,6 +164,7 @@ async def inspect_candidates(
     limit: int = 100,
     after: str | None = None,
     identity_assurance: str = "unverified",
+    required_relation: str = ONTOLOGY_REVIEWER,
     paginated: Literal[False] = False,
 ) -> tuple[list[RejectedCandidate], AuditRecord]: ...
 
@@ -177,9 +179,10 @@ async def inspect_candidates(
     limit: int = 100,
     after: str | None = None,
     identity_assurance: str = "unverified",
+    required_relation: str = ONTOLOGY_REVIEWER,
     paginated: bool = False,
 ) -> tuple[list[RejectedCandidate], AuditRecord] | CandidateInspectionPage:
-    """Require reviewer + VIEW, then audit before returning.
+    """Require the selected ontology role and VIEW; audit before returning.
 
     The caller's identity must be established by the transport layer;
     client-provided identity strings alone are not authentication.
@@ -213,13 +216,17 @@ async def inspect_candidates(
         await emit("invalid_request")
         raise CandidateInspectionRequestError("limit must be between 1 and 100")
 
+    if required_relation not in (ONTOLOGY_REVIEWER, ONTOLOGY_APPROVER):
+        await emit("invalid_request")
+        raise CandidateInspectionRequestError("Unsupported ontology access relation")
+
     try:
-        is_reviewer = await authz.check(subject, ONTOLOGY_REVIEWER, "ontology")
+        has_role = await authz.check(subject, required_relation, "ontology")
     except Exception:
         await emit("authorization_error")
         raise
 
-    if not is_reviewer:
+    if not has_role:
         await emit("deny")
         raise CandidateInspectionDeniedError("Candidate inspection denied")
 
@@ -242,6 +249,20 @@ async def inspect_candidates(
     except Exception:
         await emit("storage_error")
         raise
+
+    # Approval evidence must remain authorized after the storage read.
+    # This does not change existing reviewer inspection behavior.
+    if required_relation == ONTOLOGY_APPROVER:
+        try:
+            still_approver = await authz.check(subject, ONTOLOGY_APPROVER, "ontology")
+            current_acls = set(await authz.list_authorized_objects(subject, VIEW))
+        except Exception:
+            await emit("authorization_error")
+            raise
+
+        if not still_approver or not set(allowed_acls).issubset(current_acls):
+            await emit("deny")
+            raise CandidateInspectionDeniedError("Candidate inspection denied")
 
     # Fetching one extra candidate detects whether another page exists.
     # Never disclose or audit the lookahead candidate.

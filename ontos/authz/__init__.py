@@ -7,6 +7,7 @@ authz backend is a config change, not a rewrite.
 
 from ontos.authz.base import (
     AUDIT_EXPORTER,
+    ONTOLOGY_APPROVER,
     ONTOLOGY_REVIEWER,
     VIEW,
     AuthzBackend,
@@ -16,6 +17,7 @@ from ontos.authz.inmemory import InMemoryAuthz
 
 __all__ = [
     "AUDIT_EXPORTER",
+    "ONTOLOGY_APPROVER",
     "ONTOLOGY_REVIEWER",
     "VIEW",
     "AuthzBackend",

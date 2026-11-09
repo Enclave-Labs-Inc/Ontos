@@ -25,6 +25,7 @@ Nothing here calls an LLM. `same plan + same store = same ranking`.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal
 
@@ -82,9 +83,11 @@ class DeterministicExecutor:
         *,
         current_ontology: Ontology | None = None,
         migration_registry: MigrationRegistry | None = None,
+        migration_approval_check: Callable[[], None] | None = None,
     ) -> None:
         self._current_ontology = current_ontology
         self._migration_registry = migration_registry
+        self._migration_approval_check = migration_approval_check
 
     async def execute(
         self,
@@ -94,6 +97,10 @@ class DeterministicExecutor:
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
     ) -> ExecutionResult:
+        # Reject unverified configured migrations before reading the graph.
+        if self._migration_approval_check is not None:
+            self._migration_approval_check()
+
         as_of: datetime | None = plan.as_of
         warnings: list[str] = []
 
