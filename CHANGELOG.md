@@ -14,6 +14,87 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-09 - ontology evolution: versioned ontologies, audited approval and verified migrations
+
+Ontos can now evolve its ontology under review (#66 M3). An operator holding
+the new `ontology_approver` role approves one evidence-backed suggestion with
+`ontos ontology approve`. The change is recomputed from candidates the
+approver may view, recorded in the Article-12 audit trail, and written out as
+a new, never-overwritten ontology version and a **signed** migration record.
+Nothing is activated automatically.
+
+Once the operator activates a version, verified migrations project historical
+facts onto it on every read surface. LLM-assisted suggestions are now
+reproducible and pinned to a model digest, behind one explicit trust
+boundary. **Read the upgrade notes.**
+
+### Upgrade notes
+- **Migrations are opt-in.** They are off unless `ONTOS_MIGRATIONS_DIR` and
+  `ONTOS_ONTOLOGY_HISTORY_DIR` are both set; setting only one is an error.
+  With them on:
+  - every read path hides facts that have no ontology stamp, a different
+    ontology id, or no verified path to the active version;
+  - the privileged `--include-acl-mask` export is exempt;
+  - see `docs/ontology/m3-1-migrations.md` before enabling on an existing
+    graph.
+- **Migration records must be signed.** Verified reads refuse a migration
+  without a valid `approval_signature`, so create migrations with
+  `ontos ontology approve` rather than by hand. Signatures use a key derived
+  from the audit signing key, which means **rotating
+  `ONTOS_AUDIT_SIGNING_KEY` requires re-signing existing migrations**.
+- **New `ontology_approver` relation.** `ontology_reviewer` and
+  `audit_exporter` don't imply it. Grant it explicitly in OpenFGA.
+- **M2b suggestions need the model installed.** `--llm-model` resolves the
+  model digest from the local Ollama before reading evidence and fails if the
+  model isn't pulled.
+- **Suggestion output and audit shape changed.**
+  - `generator_version` is now `model@sha256:<digest>`.
+  - Outcome records add `prompt_schema_sha256` and `skipped_count`, and a
+    `cancelled` decision.
+  - Refused backends appear with `generator_trust: "refused"`.
+  - CLI JSON gains a `generation` block.
+  - Combined output is sorted.
+  - Excess model proposals count once in `invalid_count`.
+- **Stricter `OntologySuggestion`.**
+  - Labels must be identifiers of at most 64 characters.
+  - LLM-assisted kinds require a lower_snake_case `observed_predicate` and
+    `extractor_versions`.
+  - `add_pattern` rejects `observed_predicate`.
+- **Python API changes.**
+  - `require_approved_suggestion_backend` returns an
+    `ApprovedSuggestionBackend` token, not the backend.
+  - The endpoint policy moved to `ontos.llm.local_endpoint`; the old
+    `ontos.ontology.suggestion_endpoint` path still works.
+- **Additive.** `Provenance.mapped_from_predicate` appears in MCP responses
+  and every export format. NetworkX stores and `.pkl` snapshots saved by
+  0.8.0 load correctly.
+
+### Added — audited ontology approval and signed migrations (#66 M3-2, #117)
+- **`ontos ontology approve --acting-on-behalf-of SUBJECT`**, run by a
+  trusted local operator. It takes `--base-version`, `--new-version`, a
+  `--change-file` holding exactly one change (`add_pattern`,
+  `map_to_existing` or `new_relation_type`), `--acl-ref` and two output
+  paths.
+- **Authorization.** It requires `ontology_approver` plus VIEW on the
+  supporting evidence. The change is recomputed only from candidates the
+  approver may view, and an approver without VIEW gets the same "No such
+  suggestion" as for a nonexistent one.
+- **Audit-first and fail-closed.** The request is audited before any
+  candidate is read, and permissions are rechecked before granting and again
+  before publishing. `approval_granted` is persisted before either file is
+  written, and evidence references are HMAC-keyed.
+- **Safe outputs.** Neither file may already exist, the base version must
+  match the active ontology, and rollback removes only files this run
+  created.
+- **Signed migration records.** Each record carries an HMAC over its
+  canonical form, keyed with a purpose-specific subkey of the audit signing
+  key. The MCP server, `ontos query`, exports and the executor refuse
+  migrations that are unsigned or tampered with. Verification needs no audit
+  lookup, so retention pruning of the approval event doesn't invalidate a
+  migration.
+- **Suggestions skip already-mapped predicates.** Suggestions and approvals
+  share the final validation pass.
+
 ### Changed — one trust boundary and one validation path for M2b (#90)
 - **Explicit approval registry.** `APPROVED_SUGGESTION_BACKENDS` lists the
   exact classes allowed to receive candidate evidence; subclasses and
