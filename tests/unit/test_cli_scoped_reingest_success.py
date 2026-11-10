@@ -539,5 +539,9 @@ def test_untrusted_operator_identity_blocks_before_authorization(
     assert _decisions(records)[-1] == "operator_identity_untrusted"
     assert "completed" not in _decisions(records)
 
+    # The audit must capture the caller's claim, not attribute
+    # the rejected request to the configured trusted subject.
+    assert records[-1].article12[ArticleTwelveField.ACTING_ON_BEHALF_OF] == SUBJECT
+
     audit_json = json.dumps([record.model_dump(mode="json") for record in records])
     assert "PRIVATE OPERATOR TEST DOCUMENT" not in audit_json

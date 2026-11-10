@@ -70,6 +70,7 @@ async def authorize_scoped_reingest(
     audit: AuditSink,
     subject: str,
     sources: Sequence[SourceRecord],
+    record_allow: bool = True,
 ) -> None:
     """Authorize one exact scope before opening source documents.
 
@@ -143,13 +144,16 @@ async def authorize_scoped_reingest(
         )
         raise ScopedReingestDeniedError("Scoped re-ingestion denied")
 
-    # If this audit write fails, authorization does not succeed.
-    await _audit_decision(
-        audit=audit,
-        subject=subject,
-        sources=requested,
-        decision="allow",
-    )
+    # Initial authorization remains explicitly audited.
+    # Per-write rechecks can suppress repeated successful entries,
+    # but every denial and authorization error is still audited.
+    if record_allow:
+        await _audit_decision(
+            audit=audit,
+            subject=subject,
+            sources=requested,
+            decision="allow",
+        )
 
 
 async def prepare_scoped_reingest(

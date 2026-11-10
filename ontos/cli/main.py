@@ -526,9 +526,12 @@ def reingest(
             # deployment to pin the expected operator subject.
             trusted_subject = os.environ.get("ONTOS_REINGEST_OPERATOR_SUBJECT", "")
             if not trusted_subject.strip() or trusted_subject != acting_on_behalf_of:
+                # Record what the caller asserted, not the trusted
+                # identity they failed to match. This is an unverified
+                # claim, never proof of authentication.
                 await _audit_decision(
                     audit=audit,
-                    subject=trusted_subject,
+                    subject=acting_on_behalf_of,
                     sources=requested,
                     decision="operator_identity_untrusted",
                 )

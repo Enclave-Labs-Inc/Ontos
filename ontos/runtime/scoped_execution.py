@@ -85,6 +85,7 @@ async def run_scoped_reingest(
             audit=audit,
             subject=subject,
             sources=requested,
+            record_allow=False,
         )
 
         try:
@@ -92,9 +93,8 @@ async def run_scoped_reingest(
                 identity.source_id,
                 acl_ref=identity.acl_ref,
             )
-            if stored != identity:
-                raise ScopedReingestDeniedError("Scoped re-ingestion denied")
         except Exception:
+            # A failed registry lookup cannot establish the scope.
             await _audit_decision(
                 audit=audit,
                 subject=subject,
@@ -102,6 +102,17 @@ async def run_scoped_reingest(
                 decision="scope_unavailable",
             )
             raise ScopedReingestDeniedError("Scoped re-ingestion denied") from None
+
+        if stored != identity:
+            # A completed lookup with a changed or missing registration
+            # is an explicit scope denial, not a registry outage.
+            await _audit_decision(
+                audit=audit,
+                subject=subject,
+                sources=requested,
+                decision="deny",
+            )
+            raise ScopedReingestDeniedError("Scoped re-ingestion denied")
 
     pipeline = IngestPipeline(
         connector=connector,
