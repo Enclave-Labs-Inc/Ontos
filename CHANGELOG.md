@@ -14,6 +14,17 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Changed — readable SVG graph export
+- **New layout for `ontos export svg`.**
+  - Entities sit in one column per type, ordered so relationships flow left to
+    right, and are colour-coded with a legend and a summary header.
+  - Facts are curved, arrowed edges labelled with their predicate and source
+    document. Parallel facts fan out, and same-type relationships arc around
+    the column instead of cutting through the boxes between them.
+  - Hover tooltips show provenance.
+- **Unchanged.** Output stays deterministic and dependency-free, and keeps
+  the same `data-*` metadata.
+
 ### Fixed — one real-world entity is one graph entity (#121, #122)
 - **Duplicate entities broke `ask`.** The extractor stored whatever entity ids
   the model invented, and models are inconsistent: one #121 run gave a single
