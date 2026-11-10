@@ -19,6 +19,7 @@ import pytest
 import structlog
 
 from ontos.extraction.base import ExtractionResult
+from ontos.extraction.identity import acl_scoped_entity_id
 from ontos.ingest import SourceDocument
 from ontos.ontology import load_ontology
 from ontos.pipeline import ErrorPolicy, IngestPipeline
@@ -72,9 +73,13 @@ class _FixtureExtractor:
         return ExtractionResult(entities=self._script[inp.source_id], facts=[])
 
 
-async def test_cross_acl_entity_merge_rejected_through_pipeline_fail_fast() -> None:
-    """FAIL_FAST: cross-ACL conflict propagates CrossAclUpsertError
-    out of IngestPipeline.run()."""
+@pytest.mark.parametrize("policy", [ErrorPolicy.FAIL_FAST, ErrorPolicy.SKIP_AND_LOG])
+async def test_same_entity_from_two_acls_becomes_two_isolated_nodes(policy: ErrorPolicy) -> None:
+    """#121: entity ids are scoped by ACL, so the #48 scenario (Finance
+    then HR extracting the same entity) no longer collides. Each scope
+    gets its own node with its own ACL and attributes; neither document
+    is dropped, and no HR attribute ever lands under the Finance stamp.
+    """
     ontology = load_ontology(STARTER)
     store = NetworkxStore()
     pipeline = IngestPipeline(
@@ -88,49 +93,17 @@ async def test_cross_acl_entity_merge_rejected_through_pipeline_fail_fast() -> N
         resolver=None,
         store=store,
         ontology=ontology,
-        error_policy=ErrorPolicy.FAIL_FAST,
-    )
-    with pytest.raises(CrossAclUpsertError) as exc:
-        await pipeline.run()
-    assert exc.value.entity_id == "person:alice"
-    assert exc.value.stored_acl == "acl:finance"
-    assert exc.value.attempted_acl == "acl:hr"
-
-    # Finance attrs survived; no HR attrs leaked under the finance stamp.
-    attrs = store._graph.nodes["person:alice"]  # noqa: SLF001
-    assert attrs["canonical_name"] == "Alice Finance"
-    assert attrs["properties"] == {"dept": "finance"}
-
-
-async def test_cross_acl_entity_merge_rejected_through_pipeline_skip_and_log() -> None:
-    """SKIP_AND_LOG: HR doc lands in IngestReport.errors; finance attrs
-    survive untouched; the whole HR doc is skipped (no partial write)."""
-    ontology = load_ontology(STARTER)
-    store = NetworkxStore()
-    pipeline = IngestPipeline(
-        connector=_TwoDocConnector(),
-        extractor=_FixtureExtractor(
-            {
-                "finance": [_entity("Alice Finance", {"dept": "finance"})],
-                "hr": [_entity("Alice HR", {"dept": "hr"})],
-            }
-        ),
-        resolver=None,
-        store=store,
-        ontology=ontology,
-        error_policy=ErrorPolicy.SKIP_AND_LOG,
+        error_policy=policy,
     )
     report = await pipeline.run()
 
-    assert report.documents_seen == 2
-    assert len(report.errors) == 1
-    assert report.errors[0].source_id == "hr"
-    assert "cross-ACL" in report.errors[0].reason
-
-    attrs = store._graph.nodes["person:alice"]  # noqa: SLF001
-    assert attrs["acl_ref"] == "acl:finance"
-    assert attrs["canonical_name"] == "Alice Finance"
-    assert attrs["properties"] == {"dept": "finance"}
+    assert report.errors == []
+    finance = store._graph.nodes[acl_scoped_entity_id("person:alice", "acl:finance")]  # noqa: SLF001
+    hr = store._graph.nodes[acl_scoped_entity_id("person:alice", "acl:hr")]  # noqa: SLF001
+    assert (finance["acl_ref"], finance["properties"]) == ("acl:finance", {"dept": "finance"})
+    assert (hr["acl_ref"], hr["properties"]) == ("acl:hr", {"dept": "hr"})
+    # The scope suffix is a digest, never the ACL name.
+    assert not any("acl:" in str(node) for node in store._graph.nodes)  # noqa: SLF001
 
 
 async def test_merges_for_entity_visibility_coherent_after_cross_acl_fix() -> None:
@@ -222,6 +195,16 @@ async def test_audit_log_does_not_include_attempted_attribute_content() -> None:
     assert "123" not in event_str
 
 
+class _PublicConnector:
+    """A public doc: its entity ids stay unscoped, like pre-#121 ids."""
+
+    id = "public-conn"
+    source_kind = "test"
+
+    async def iter_documents(self):
+        yield SourceDocument(source_id="public", text="x", acl_ref=None)
+
+
 async def test_ingest_report_errors_do_not_leak_entity_id_or_stored_acl() -> None:
     """PR #49 review fix (1a): `IngestReport.errors[].reason` must NOT
     carry the stored ACL label or the entity id — a public caller
@@ -231,14 +214,11 @@ async def test_ingest_report_errors_do_not_leak_entity_id_or_stored_acl() -> Non
     attempted_acl pair lives in the audit log instead."""
     ontology = load_ontology(STARTER)
     store = NetworkxStore()
+    # A store written before #121 holds the unscoped id under Finance.
+    await store.upsert_entity(_entity("Alice Finance", {"dept": "finance"}), acl_ref="acl:finance")
     pipeline = IngestPipeline(
-        connector=_TwoDocConnector(),
-        extractor=_FixtureExtractor(
-            {
-                "finance": [_entity("Alice Finance", {"dept": "finance"})],
-                "hr": [_entity("Alice HR", {"dept": "hr"})],
-            }
-        ),
+        connector=_PublicConnector(),
+        extractor=_FixtureExtractor({"public": [_entity("Alice Public", {"dept": "public"})]}),
         resolver=None,
         store=store,
         ontology=ontology,
@@ -280,16 +260,9 @@ async def test_cross_acl_pre_check_leaves_store_untouched_whole_doc_skip() -> No
     )
     alice_hr = _entity("Alice HR", {"dept": "hr"})
 
-    class _HrConnector:
-        id = "hr-conn"
-        source_kind = "test"
-
-        async def iter_documents(self):
-            yield SourceDocument(source_id="hr", text="x", acl_ref="acl:hr")
-
     pipeline = IngestPipeline(
-        connector=_HrConnector(),
-        extractor=_FixtureExtractor({"hr": [bob, alice_hr]}),
+        connector=_PublicConnector(),
+        extractor=_FixtureExtractor({"public": [bob, alice_hr]}),
         resolver=None,
         store=store,
         ontology=ontology,
@@ -298,7 +271,7 @@ async def test_cross_acl_pre_check_leaves_store_untouched_whole_doc_skip() -> No
     report = await pipeline.run()
 
     assert len(report.errors) == 1
-    assert report.errors[0].source_id == "hr"
+    assert report.errors[0].source_id == "public"
     # person:bob must NOT exist in the store — pre-check caught the
     # conflict before any write landed.
     assert "person:bob" not in store._graph.nodes  # noqa: SLF001

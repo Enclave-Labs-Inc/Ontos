@@ -159,7 +159,7 @@ class DeterministicExecutor:
                 allowed_acls,
                 warnings,
             )
-            return [resolved] if resolved is not None else []
+            return resolved if resolved is not None else []
         if isinstance(plan.seed, SeedByKeyword):
             hits = await store.search(
                 plan.seed.keyword,
@@ -185,8 +185,8 @@ class DeterministicExecutor:
         acl_subject: str | None,
         allowed_acls: list[str] | None,
         warnings: list[str],
-    ) -> str | None:
-        """Resolve a planner-supplied entity_id to one that lives in the graph.
+    ) -> list[str] | None:
+        """Resolve a planner-supplied entity_id to the graph entities it names.
 
         The LLM planner can drift — appending "(Person)" or other type
         annotations to what should be a bare entity id, wrapping in
@@ -199,9 +199,12 @@ class DeterministicExecutor:
           1. Exact match — id is already correct, no warning.
           2. Strip trailing " (Type)" annotation and retry.
           3. Search entities by id, canonical name or alias (#82).
-             Resolve ONLY when there is a single unambiguous candidate; on
-             multiple matches, emit an ambiguity warning naming the
-             candidates and return None instead of guessing.
+             Prefer exact name/alias matches. Resolve when the remaining
+             candidates are one identity: a single entity, or several with
+             the same type and casefolded name (#121: duplicates from older
+             stores, or the same name under different ACLs the caller may
+             see). Otherwise emit an ambiguity warning naming the candidates
+             and return None instead of guessing.
         Returns None if all three miss OR if the search fallback is
         ambiguous — silent wrong-entity resolution is worse than an
         explicit failure that surfaces the ambiguity.
@@ -213,7 +216,7 @@ class DeterministicExecutor:
             acl_subject=acl_subject,
             allowed_acls=allowed_acls,
         ):
-            return entity_id
+            return [entity_id]
 
         # 2. Strip trailing " (Type)" annotation.
         if _TYPE_SUFFIX_RE.search(entity_id):
@@ -227,7 +230,7 @@ class DeterministicExecutor:
                 warnings.append(
                     f"seed entity {entity_id!r} resolved to {stripped!r} via type-suffix strip"
                 )
-                return stripped
+                return [stripped]
 
         # 3. Keyword-search fallback on the cleaned-up name.
         # Search does substring match; can still succeed after
@@ -255,14 +258,36 @@ class DeterministicExecutor:
             acl_subject=acl_subject,
             allowed_acls=allowed_acls,
         )
-        candidates = [entity.id for entity in matches]
+        wanted = needle.casefold()
+        exact = [
+            entity
+            for entity in matches
+            if wanted == entity.id.casefold()
+            or wanted
+            in {name.casefold() for name in (entity.canonical_name, *entity.aliases) if name}
+        ]
+        pool = exact or matches
+        candidates = [entity.id for entity in pool]
 
         if len(candidates) == 1:
             warnings.append(
                 f"seed entity {entity_id!r} resolved to "
                 f"{candidates[0]!r} via keyword search fallback"
             )
-            return candidates[0]
+            return candidates
+
+        identities = {
+            (entity.type.casefold(), entity.canonical_name.casefold())
+            if entity.type and entity.canonical_name
+            else (None, entity.id)
+            for entity in pool
+        }
+        if len(candidates) > 1 and len(identities) == 1:
+            warnings.append(
+                f"seed entity {entity_id!r} resolved to {len(candidates)} entities "
+                "with the same type and name; treating them as one"
+            )
+            return candidates
         if len(candidates) > 1:
             preview = ", ".join(repr(c) for c in candidates[:5])
             total = (

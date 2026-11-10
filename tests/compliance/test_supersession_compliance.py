@@ -229,15 +229,15 @@ async def test_compliance_as_of_before_correction_returns_old_fact(
     ).run()
     after_correction = datetime.now(UTC)
 
-    historical = await store.facts_for_entity("person:david-lee", as_of=before_correction)
+    historical = await store.facts_for_entity("Person:david lee", as_of=before_correction)
     historical_works_at = [f for f in historical if f.predicate == "works_at"]
     assert len(historical_works_at) == 1
-    assert historical_works_at[0].object_id == "company:beta"
+    assert historical_works_at[0].object_id == "Company:beta systems"
 
-    current = await store.facts_for_entity("person:david-lee", as_of=after_correction)
+    current = await store.facts_for_entity("Person:david lee", as_of=after_correction)
     current_works_at = [f for f in current if f.predicate == "works_at"]
     assert len(current_works_at) == 1
-    assert current_works_at[0].object_id == "company:acme"
+    assert current_works_at[0].object_id == "Company:acme corp"
 
 
 # ────────────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ import pytest
 from ontos.executor import DeterministicExecutor
 from ontos.ontology import Ontology, load_ontology
 from ontos.planner import Plan, SeedByEntity, TraversalStep
-from ontos.runtime.models import Confidence, Fact, Provenance
+from ontos.runtime.models import Confidence, Entity, Fact, Provenance
 from ontos.storage.networkx_store import NetworkxStore
 
 STARTER_PATH = (
@@ -180,6 +180,10 @@ async def test_ambiguous_keyword_fallback_refuses_to_guess(
     is worse than an explicit failure. If the search fallback finds
     "Acme Corp", "Acme Corp Europe", and "Acme Corp Holdings", the
     executor must refuse to pick one and instead surface the ambiguity.
+
+    Since #121 an exact name match is not a guess and wins (see
+    test_exact_name_match_beats_longer_namesakes), so this drives the
+    refusal with a needle that matches none of them exactly.
     """
     store = NetworkxStore()
     now = datetime.now(UTC)
@@ -206,7 +210,7 @@ async def test_ambiguous_keyword_fallback_refuses_to_guess(
     await store.add_fact(_mk("Carol", "Acme Corp Holdings"))
 
     plan = Plan.build(
-        seed=SeedByEntity(entity_id="acme corp"),  # lowercase → forces search
+        seed=SeedByEntity(entity_id="acme"),  # matches all three, none exactly
         steps=[TraversalStep(depth=1)],
         ontology=ontology,
     )
@@ -287,15 +291,15 @@ async def test_popular_entity_no_longer_crowds_out_namesake(
 ) -> None:
     """Under the old fact-window search, 60 facts about "Acme Corp" filled
     the k=50 window and hid "Acme Corp Holdings", so the seed silently
-    resolved to the popular entity. Both are now candidates, so the
-    executor refuses to guess."""
+    resolved to the popular entity. Both are now candidates, so for a
+    needle neither matches exactly the executor refuses to guess."""
     store = NetworkxStore()
     for i in range(60):
         await store.add_fact(_works_at_fact(f"Person-{i}", "Acme Corp", f"doc-{i}"))
     await store.add_fact(_works_at_fact("Zed", "Acme Corp Holdings", "doc-z"))
 
     plan = Plan.build(
-        seed=SeedByEntity(entity_id="acme corp"),
+        seed=SeedByEntity(entity_id="acme"),
         steps=[TraversalStep(depth=1)],
         ontology=ontology,
     )
@@ -342,3 +346,74 @@ async def test_legitimate_name_with_parens_not_clobbered(
     assert result.hits
     # No resolution warning — we found it exactly.
     assert not any("resolved to" in w for w in result.warnings)
+
+
+def _entity(entity_id: str, entity_type: str, name: str) -> Entity:
+    return Entity(
+        id=entity_id,
+        type=entity_type,
+        canonical_name=name,
+        provenance=Provenance(
+            source_id="doc",
+            extractor_id="test",
+            extractor_version="0",
+            confidence=Confidence.EXTRACTED,
+            confidence_score=1.0,
+        ),
+    )
+
+
+async def test_exact_name_match_beats_longer_namesakes(ontology: Ontology) -> None:
+    """#121: "acme corp" names Acme Corp exactly; "Acme Corp Europe" is a
+    different, longer name, so resolving to the exact match is not a guess."""
+    store = NetworkxStore()
+    await store.add_fact(_works_at_fact("Alice", "Acme Corp", "doc-1"))
+    await store.add_fact(_works_at_fact("Bob", "Acme Corp Europe", "doc-2"))
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="acme corp"),
+        steps=[TraversalStep(depth=1, direction="in")],
+        ontology=ontology,
+    )
+
+    result = await DeterministicExecutor().execute(plan, store)
+
+    assert {(h.fact.subject_id, h.fact.object_id) for h in result.hits} == {("Alice", "Acme Corp")}
+
+
+async def test_same_identity_duplicates_are_treated_as_one(ontology: Ontology) -> None:
+    """#121: stores written before stable ids hold one company under several
+    raw ids. Same type and name means one identity, so seed with all."""
+    store = NetworkxStore()
+    for raw_id in ("2", "4", "Company:Acme Corp"):
+        await store.upsert_entity(_entity(raw_id, "Company", "Acme Corp"))
+    await store.upsert_entity(_entity("beta", "Company", "Acme Corp Europe"))
+    await store.add_fact(_works_at_fact("Dana", "Company:Acme Corp", "2024-team.md"))
+    await store.add_fact(_works_at_fact("Sam", "2", "2026-update.md"))
+    await store.add_fact(_works_at_fact("Eve", "beta", "other.md"))
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="Acme Corp"),
+        steps=[TraversalStep(relations=["works_at"], depth=1, direction="in")],
+        ontology=ontology,
+    )
+
+    result = await DeterministicExecutor().execute(plan, store)
+
+    assert {h.fact.subject_id for h in result.hits} == {"Dana", "Sam"}
+    assert any("treating them as one" in w for w in result.warnings)
+
+
+async def test_different_types_with_one_name_still_refuse(ontology: Ontology) -> None:
+    store = NetworkxStore()
+    await store.upsert_entity(_entity("p", "Person", "Jordan"))
+    await store.upsert_entity(_entity("c", "Company", "Jordan"))
+    await store.add_fact(_works_at_fact("p", "c", "doc"))
+    plan = Plan.build(
+        seed=SeedByEntity(entity_id="jordan"),
+        steps=[TraversalStep(depth=1)],
+        ontology=ontology,
+    )
+
+    result = await DeterministicExecutor().execute(plan, store)
+
+    assert result.hits == []
+    assert any("refusing to guess" in w for w in result.warnings)

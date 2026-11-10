@@ -14,6 +14,34 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Fixed — one real-world entity is one graph entity (#121, #122)
+- **Duplicate entities broke `ask`.** The extractor stored whatever entity ids
+  the model invented, and models are inconsistent: one #121 run gave a single
+  "Acme Corp" two ids in one document and a third id in another. The
+  resolver only compared entities within one document, and its merge records
+  were never applied, so the graph held several "Acme Corp" nodes and
+  "Who works at Acme Corp?" refused to guess.
+- **Stable ids.** Entity ids are now derived from `(type, casefolded name)`,
+  for example `Company:acme corp`. The same entity converges within and
+  across documents, and rejected candidates use the same ids.
+- **Scoped by ACL.** A restricted document's ids carry a digest of its ACL,
+  so a same-named entity under another ACL stays a separate node (#48). The
+  pipeline no longer refuses such documents.
+- **Read-time consolidation.**
+  - When a seed matches several entities the caller can see, an exact name
+    or alias match wins.
+  - Candidates with the same type and name are treated as one entity, which
+    fixes stores written before this change without re-ingesting.
+  - Different types, or merely similar names, still refuse to guess.
+- **Empty entities are rejected (#122).** A triple whose subject or object
+  has an empty id, name or type is dropped with a generic warning, never
+  stored.
+- **Behaviour changes.**
+  - Two different people with the same name in one document are now one
+    entity (the exact-match rule).
+  - Stored ids no longer match the model's raw ids.
+  - An exact seed name match is no longer treated as ambiguous.
+
 ## [0.9.0] - 2026-11-09 - ontology evolution: versioned ontologies, audited approval and verified migrations
 
 Ontos can now evolve its ontology under review (#66 M3). An operator holding

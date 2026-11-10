@@ -303,7 +303,7 @@ async def test_permission_aware_traversal_does_not_leak_through_mcp(
         bob_result = await client.call_tool(
             "traverse",
             {
-                "start": "person:alice",
+                "start": "Person:alice smith",
                 "agent_identity": "agent:bob",
                 "acting_on_behalf_of": "bob",
                 "depth": 5,
@@ -312,7 +312,7 @@ async def test_permission_aware_traversal_does_not_leak_through_mcp(
         alice_result = await client.call_tool(
             "traverse",
             {
-                "start": "person:alice",
+                "start": "Person:alice smith",
                 "agent_identity": "agent:alice",
                 "acting_on_behalf_of": "alice",
                 "depth": 5,
@@ -325,15 +325,15 @@ async def test_permission_aware_traversal_does_not_leak_through_mcp(
     # Bob sees Alice → Acme only (one hop, one fact).
     assert len(bob_facts) == 1
     for fact in bob_facts:
-        assert fact["object_id"] not in ("company:widget", "company:foo")
-        assert fact["subject_id"] not in ("company:widget", "company:foo")
+        assert fact["object_id"] not in ("Company:widget inc", "Company:foo holdings")
+        assert fact["subject_id"] not in ("Company:widget inc", "Company:foo holdings")
 
     # Alice sees the whole chain.
     alice_ids = {fact["object_id"] for fact in alice_facts} | {
         fact["subject_id"] for fact in alice_facts
     }
-    assert "company:widget" in alice_ids
-    assert "company:foo" in alice_ids
+    assert "Company:widget inc" in alice_ids
+    assert "Company:foo holdings" in alice_ids
 
 
 async def test_audit_chain_stays_hash_linked_across_multiple_tool_calls(
@@ -348,7 +348,7 @@ async def test_audit_chain_stays_hash_linked_across_multiple_tool_calls(
         await client.call_tool("search", {"query": "works_at", "agent_identity": "agent:x"})
         await client.call_tool(
             "traverse",
-            {"start": "person:alice", "agent_identity": "agent:x", "depth": 2},
+            {"start": "Person:alice smith", "agent_identity": "agent:x", "depth": 2},
         )
 
     # 3 tool calls => 3 audit records, chain intact
@@ -366,7 +366,7 @@ async def test_explain_returns_facts_with_provenance_via_mcp(
     async with Client(server) as client:
         result = await client.call_tool(
             "explain",
-            {"entity_id": "company:acme", "agent_identity": "agent:x"},
+            {"entity_id": "Company:acme corp", "agent_identity": "agent:x"},
         )
 
     facts = _unwrap(result)["payload"]

@@ -167,7 +167,8 @@ async def test_ambiguity_guard_against_neo4j(
     try:
         ontology = load_ontology(STARTER_PATH)
         plan = Plan.build(
-            seed=SeedByEntity(entity_id="acme corp"),
+            # Matches all three, none exactly: an exact name wins since #121.
+            seed=SeedByEntity(entity_id="acme"),
             steps=[TraversalStep(depth=1)],
             ontology=ontology,
         )

@@ -26,6 +26,7 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from ontos.extraction import ExtractionError, ExtractionInput, ExtractionResult, Extractor
+from ontos.extraction.identity import acl_scoped_entity_id
 from ontos.ingest import Connector
 from ontos.ontology import Ontology
 from ontos.resolver import Resolver
@@ -59,6 +60,26 @@ def _entity_identity_key(
         return None
 
     return entity_type.casefold(), canonical_name.casefold()
+
+
+def _scope_entity_ids(extraction: ExtractionResult, acl_ref: str | None) -> ExtractionResult:
+    """Suffix every entity id, and the fact endpoints using it, with the ACL scope."""
+    if acl_ref is None:
+        return extraction
+    entities = [
+        entity.model_copy(update={"id": acl_scoped_entity_id(entity.id, acl_ref)})
+        for entity in extraction.entities
+    ]
+    facts = [
+        fact.model_copy(
+            update={
+                "subject_id": acl_scoped_entity_id(fact.subject_id, acl_ref),
+                "object_id": acl_scoped_entity_id(fact.object_id, acl_ref),
+            }
+        )
+        for fact in extraction.facts
+    ]
+    return extraction.model_copy(update={"entities": entities, "facts": facts})
 
 
 def _reconcile_same_source_entity_ids(
@@ -305,6 +326,11 @@ class IngestPipeline:
                 )
                 errors.append(IngestError(source_id=doc.source_id, reason=reason))
                 continue
+
+            # Same-named entities under different ACLs stay separate nodes
+            # (#121): an entity carries one ACL, and #48 refuses to rewrite
+            # it from another scope.
+            extraction = _scope_entity_ids(extraction, doc.acl_ref)
 
             # Stabilize LLM-chosen raw IDs across re-ingests of the same
             # source before ACL checks, entity writes, resolution, or

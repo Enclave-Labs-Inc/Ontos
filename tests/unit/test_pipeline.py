@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 
 from ontos.extraction import ExtractionError, ExtractionInput, LlmExtractor, RawTriple
+from ontos.extraction.identity import acl_scoped_entity_id
 from ontos.ingest import TextConnector
 from ontos.ontology import Ontology, load_ontology
 from ontos.pipeline import ErrorPolicy, IngestPipeline
 from ontos.resolver import ExactMatchResolver
+from ontos.runtime.models import Confidence, Entity, Provenance
 from ontos.storage.networkx_store import NetworkxStore
 
 STARTER_PATH = (
@@ -354,7 +356,7 @@ async def test_issue_21_second_ingest_closes_prior_fact(ontology: Ontology) -> N
     assert first_report.facts_superseded == 0
 
     beta_facts = [
-        f for f in await shared_store.facts_for_entity("person:david-lee") if f.t_invalid is None
+        f for f in await shared_store.facts_for_entity("Person:david lee") if f.t_invalid is None
     ]
     assert len(beta_facts) == 1
     beta_fact = beta_facts[0]
@@ -378,11 +380,11 @@ async def test_issue_21_second_ingest_closes_prior_fact(ontology: Ontology) -> N
 
     # Only the Acme fact is active.
     active = [
-        f for f in await shared_store.facts_for_entity("person:david-lee") if f.t_invalid is None
+        f for f in await shared_store.facts_for_entity("Person:david lee") if f.t_invalid is None
     ]
     assert len(active) == 1
     acme_fact = active[0]
-    assert acme_fact.object_id == "company:acme"
+    assert acme_fact.object_id == "Company:acme corp"
     assert beta_after.superseded_by == acme_fact.id
 
 
@@ -433,7 +435,7 @@ async def test_many_to_many_ingest_does_not_fire_supersession(
     assert first.facts_superseded == 0
     assert second.facts_superseded == 0
 
-    active = [f for f in await store.facts_for_entity("company:acme") if f.t_invalid is None]
+    active = [f for f in await store.facts_for_entity("Company:acme") if f.t_invalid is None]
     acquired = [f for f in active if f.predicate == "acquired"]
     assert len(acquired) == 2
 
@@ -478,7 +480,7 @@ async def test_same_source_re_ingest_is_idempotent(ontology: Ontology) -> None:
     assert len(second.supersession_records) == 1
     assert "idempotent re-ingest" in second.supersession_records[0].reason
 
-    active = [f for f in await store.facts_for_entity("person:david-lee") if f.t_invalid is None]
+    active = [f for f in await store.facts_for_entity("Person:david lee") if f.t_invalid is None]
     assert len(active) == 1
 
 
@@ -524,7 +526,7 @@ async def test_different_source_corroboration_preserves_both(
     assert corroboration.facts_reaffirmed == 0
     assert corroboration.facts_superseded == 0
 
-    active = [f for f in await store.facts_for_entity("person:david-lee") if f.t_invalid is None]
+    active = [f for f in await store.facts_for_entity("Person:david lee") if f.t_invalid is None]
     works_at = [f for f in active if f.predicate == "works_at"]
     assert len(works_at) == 2
     source_ids = sorted(f.provenance.source_id for f in works_at)
@@ -587,11 +589,11 @@ async def test_backfill_older_fact_is_written_pre_closed(ontology: Ontology) -> 
     # after the pipeline-driven path, and the backfill is also stored.
     before_backfill_active = [
         f
-        for f in await store.facts_for_entity("person:david-lee")
+        for f in await store.facts_for_entity("Person:david lee")
         if f.t_invalid is None and f.predicate == "works_at"
     ]
     assert len(before_backfill_active) == 1
-    assert before_backfill_active[0].object_id == "company:acme"
+    assert before_backfill_active[0].object_id == "Company:acme corp"
 
 
 async def test_as_of_returns_the_right_historical_fact(ontology: Ontology) -> None:
@@ -647,16 +649,16 @@ async def test_as_of_returns_the_right_historical_fact(ontology: Ontology) -> No
     after_correction = datetime.now(UTC)
 
     # Historical view: before the correction landed, Beta was the active fact.
-    historical = await store.facts_for_entity("person:david-lee", as_of=before_correction)
+    historical = await store.facts_for_entity("Person:david lee", as_of=before_correction)
     historical_works_at = [f for f in historical if f.predicate == "works_at"]
     assert len(historical_works_at) == 1
-    assert historical_works_at[0].object_id == "company:beta"
+    assert historical_works_at[0].object_id == "Company:beta systems"
 
     # Current view: Acme is the active fact.
-    current = await store.facts_for_entity("person:david-lee", as_of=after_correction)
+    current = await store.facts_for_entity("Person:david lee", as_of=after_correction)
     current_works_at = [f for f in current if f.predicate == "works_at"]
     assert len(current_works_at) == 1
-    assert current_works_at[0].object_id == "company:acme"
+    assert current_works_at[0].object_id == "Company:acme corp"
 
 
 async def test_same_source_reingest_reuses_prior_raw_entity_ids(
@@ -734,19 +736,25 @@ async def test_same_source_reingest_reuses_prior_raw_entity_ids(
     snapshot = await store.scan()
 
     assert {(entity.id, entity.type, entity.canonical_name) for entity in snapshot.entities} == {
-        ("Person:David Lee", "Person", "David Lee"),
-        ("Company:Beta Systems", "Company", "Beta Systems"),
+        ("Person:david lee", "Person", "David Lee"),
+        ("Company:beta systems", "Company", "Beta Systems"),
     }
 
     assert len(snapshot.facts) == 1
-    assert snapshot.facts[0].subject_id == "Person:David Lee"
-    assert snapshot.facts[0].object_id == "Company:Beta Systems"
+    assert snapshot.facts[0].subject_id == "Person:david lee"
+    assert snapshot.facts[0].object_id == "Company:beta systems"
 
 
-async def test_same_source_id_reconciliation_skips_ambiguous_namesakes(
+async def test_same_name_entities_in_one_source_converge(
     ontology: Ontology,
 ) -> None:
-    """Same-source reconciliation must not guess between namesakes."""
+    """Same-named entities of one type converge, even within one document (#121).
+
+    The model's raw ids can't tell namesakes from its own id noise (it gave
+    one "Acme Corp" two ids in #121), so identity follows the exact-match
+    rule: (type, casefolded name). Two different John Smiths in one source
+    are therefore one entity; telling them apart needs extra attributes.
+    """
     text = "Two different people named John Smith work at different companies."
     store = NetworkxStore()
 
@@ -836,12 +844,7 @@ async def test_same_source_id_reconciliation_skips_ambiguous_namesakes(
         if entity.type == "Person" and entity.canonical_name == "John Smith"
     }
 
-    assert john_ids == {
-        "person:john-1",
-        "person:john-2",
-        "person:new-john-a",
-        "person:new-john-b",
-    }
+    assert john_ids == {"Person:john smith"}
 
 
 async def test_same_source_id_reconciliation_is_strict_same_acl(
@@ -919,12 +922,13 @@ async def test_same_source_id_reconciliation_is_strict_same_acl(
     finance_facts = await store.search("works_at", allowed_acls=["acl:finance"])
 
     assert len(hr_facts) == 1
-    assert hr_facts[0].subject_id == "person:alice-hr"
-    assert hr_facts[0].object_id == "company:acme-hr"
+    # Same name under two ACLs: two scoped entities, never one (#121).
+    assert hr_facts[0].subject_id == acl_scoped_entity_id("Person:alice", "acl:hr")
+    assert hr_facts[0].object_id == acl_scoped_entity_id("Company:acme", "acl:hr")
 
     assert len(finance_facts) == 1
-    assert finance_facts[0].subject_id == "person:alice-finance"
-    assert finance_facts[0].object_id == "company:acme-finance"
+    assert finance_facts[0].subject_id == acl_scoped_entity_id("Person:alice", "acl:finance")
+    assert finance_facts[0].object_id == acl_scoped_entity_id("Company:acme", "acl:finance")
 
 
 async def test_same_source_reconciliation_handles_permuted_raw_ids(
@@ -1006,19 +1010,23 @@ async def test_same_source_reconciliation_handles_permuted_raw_ids(
     entities = {entity.id: (entity.type, entity.canonical_name) for entity in snapshot.entities}
 
     assert entities == {
-        "1": ("Person", "Alice"),
-        "2": ("Company", "Acme"),
+        "Person:alice": ("Person", "Alice"),
+        "Company:acme": ("Company", "Acme"),
     }
 
     assert len(snapshot.facts) == 1
-    assert snapshot.facts[0].subject_id == "1"
-    assert snapshot.facts[0].object_id == "2"
+    assert snapshot.facts[0].subject_id == "Person:alice"
+    assert snapshot.facts[0].object_id == "Company:acme"
 
 
 async def test_same_source_reconciliation_refuses_unresolvable_raw_id_collision(
     ontology: Ontology,
 ) -> None:
-    """A conflicting raw-ID reuse must never overwrite a prior entity."""
+    """A conflicting raw-ID reuse must never overwrite a prior entity.
+
+    Since #121 ids come from (type, name), so a reused raw id can't make
+    Charlie overwrite Alice: both are kept, and Alice's fact is reaffirmed.
+    """
     text = "Alice works at Acme."
     store = NetworkxStore()
 
@@ -1091,8 +1099,9 @@ async def test_same_source_reconciliation_refuses_unresolvable_raw_id_collision(
         error_policy=ErrorPolicy.SKIP_AND_LOG,
     ).run()
 
-    assert second.facts_written == 0
-    assert len(second.errors) == 1
+    assert second.errors == []
+    assert second.facts_written == 1
+    assert second.facts_reaffirmed == 1
 
     snapshot = await store.scan()
 
@@ -1100,13 +1109,15 @@ async def test_same_source_reconciliation_refuses_unresolvable_raw_id_collision(
 
     # Most important invariant: the original meanings are untouched.
     assert entities == {
-        "1": ("Person", "Alice"),
-        "2": ("Company", "Acme"),
+        "Person:alice": ("Person", "Alice"),
+        "Company:acme": ("Company", "Acme"),
+        "Person:charlie": ("Person", "Charlie"),
+        "Company:gamma": ("Company", "Gamma"),
     }
-
-    assert len(snapshot.facts) == 1
-    assert snapshot.facts[0].subject_id == "1"
-    assert snapshot.facts[0].object_id == "2"
+    assert {(f.subject_id, f.object_id) for f in snapshot.facts} == {
+        ("Person:alice", "Company:acme"),
+        ("Person:charlie", "Company:gamma"),
+    }
 
 
 async def test_pipeline_retains_rejected_candidates_with_document_acl(
@@ -1232,15 +1243,14 @@ async def test_pipeline_candidate_storage_failure_is_not_silent(
 async def test_rejected_document_does_not_retain_candidates(
     ontology: Ontology,
 ) -> None:
-    """A cross-ACL entity conflict must not retain rejected candidates."""
+    """A cross-ACL entity conflict must not retain rejected candidates.
+
+    Since #121 ids are ACL-scoped, the conflict arises only for a store
+    written before then: an unscoped entity stamped Finance, met by a
+    public document extracting the same entity.
+    """
     valid = _triple(
-        "person:alice",
-        "Person",
-        "Alice",
-        "works_at",
-        "company:acme",
-        "Company",
-        "Acme",
+        "person:alice", "Person", "Alice", "works_at", "company:acme", "Company", "Acme"
     )
     invalid = _triple(
         "person:secret",
@@ -1251,27 +1261,25 @@ async def test_rejected_document_does_not_retain_candidates(
         "Company",
         "Secret Company",
     )
-
-    script = {
-        "Finance document": [valid],
-        "HR document": [valid, invalid],
-    }
-
-    connector = TextConnector(
-        {
-            "finance-doc": "Finance document",
-            "hr-doc": "HR document",
-        },
-        acl_ref_by_source={
-            "finance-doc": "acl:finance",
-            "hr-doc": "acl:hr",
-        },
-    )
-
     store = NetworkxStore()
+    await store.upsert_entity(
+        Entity(
+            id="Person:alice",
+            type="Person",
+            canonical_name="Alice",
+            provenance=Provenance(
+                source_id="finance-doc",
+                extractor_id="legacy",
+                extractor_version="0",
+                confidence=Confidence.EXTRACTED,
+                confidence_score=1.0,
+            ),
+        ),
+        acl_ref="acl:finance",
+    )
     pipeline = IngestPipeline(
-        connector=connector,
-        extractor=LlmExtractor(ScriptedLLM(script), ontology),
+        connector=TextConnector({"public-doc": "Public document"}),
+        extractor=LlmExtractor(ScriptedLLM({"Public document": [valid, invalid]}), ontology),
         resolver=None,
         store=store,
         ontology=ontology,
@@ -1283,27 +1291,9 @@ async def test_rejected_document_does_not_retain_candidates(
 
     assert report.candidates_retained == 0
     assert len(report.errors) == 1
-    assert report.errors[0].source_id == "hr-doc"
-
-    assert await store.list_candidates(allowed_acls=["acl:hr"]) == []
-
-    assert (
-        len(
-            await store.search(
-                "works_at",
-                allowed_acls=["acl:finance"],
-            )
-        )
-        == 1
-    )
-
-    assert (
-        await store.search(
-            "works_at",
-            allowed_acls=["acl:hr"],
-        )
-        == []
-    )
+    assert report.errors[0].source_id == "public-doc"
+    assert await store.list_candidates(allowed_acls=[], include_public=True) == []
+    assert await store.search("works_at") == []
 
 
 async def test_backend_exception_does_not_leak_into_ingest_report(
@@ -1363,7 +1353,7 @@ async def test_candidates_follow_same_source_id_reconciliation(ontology: Ontolog
     await _retain(store, ontology, script("person:alice-v2"))
 
     candidates = await store.list_candidates(allowed_acls=["acl:x"])
-    assert [c.raw_triple.subject_id for c in candidates] == ["person:alice"]
+    assert [c.raw_triple.subject_id for c in candidates] == ["Person:alice"]
 
 
 async def test_candidates_retained_counts_only_new_candidates(ontology: Ontology) -> None:

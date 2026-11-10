@@ -152,7 +152,7 @@ async def test_issue_21_second_ingest_closes_prior_fact_against_neo4j(
     assert first.facts_superseded == 0
 
     beta_before = [
-        f for f in await store.facts_for_entity("person:david-lee") if f.t_invalid is None
+        f for f in await store.facts_for_entity("Person:david lee") if f.t_invalid is None
     ]
     assert len(beta_before) == 1
     beta_fact = beta_before[0]
@@ -176,11 +176,11 @@ async def test_issue_21_second_ingest_closes_prior_fact_against_neo4j(
     assert beta_after.superseded_by is not None
 
     # Only the Acme fact remains active for David Lee's works_at.
-    active = [f for f in await store.facts_for_entity("person:david-lee") if f.t_invalid is None]
+    active = [f for f in await store.facts_for_entity("Person:david lee") if f.t_invalid is None]
     works_at_active = [f for f in active if f.predicate == "works_at"]
     assert len(works_at_active) == 1
     acme_fact = works_at_active[0]
-    assert acme_fact.object_id == "company:acme"
+    assert acme_fact.object_id == "Company:acme corp"
     assert beta_after.superseded_by == acme_fact.id
 
 
@@ -230,15 +230,15 @@ async def test_bitemporal_as_of_against_neo4j(store: Neo4jStore, ontology: Ontol
     ).run()
     after_correction = datetime.now(UTC)
 
-    historical = await store.facts_for_entity("person:david-lee", as_of=before_correction)
+    historical = await store.facts_for_entity("Person:david lee", as_of=before_correction)
     historical_works_at = [f for f in historical if f.predicate == "works_at"]
     assert len(historical_works_at) == 1
-    assert historical_works_at[0].object_id == "company:beta"
+    assert historical_works_at[0].object_id == "Company:beta systems"
 
-    current = await store.facts_for_entity("person:david-lee", as_of=after_correction)
+    current = await store.facts_for_entity("Person:david lee", as_of=after_correction)
     current_works_at = [f for f in current if f.predicate == "works_at"]
     assert len(current_works_at) == 1
-    assert current_works_at[0].object_id == "company:acme"
+    assert current_works_at[0].object_id == "Company:acme corp"
 
 
 async def test_many_to_many_relation_does_not_fire_supersession_against_neo4j(
@@ -249,7 +249,7 @@ async def test_many_to_many_relation_does_not_fire_supersession_against_neo4j(
     for obj in ("company:beta", "company:gamma"):
         await store.add_fact(
             Fact(
-                subject_id="company:acme",
+                subject_id="Company:acme",
                 predicate="acquired",
                 object_id=obj,
                 provenance=Provenance(
@@ -287,6 +287,6 @@ async def test_many_to_many_relation_does_not_fire_supersession_against_neo4j(
     ).run()
     assert report.facts_superseded == 0
 
-    active = [f for f in await store.facts_for_entity("company:acme") if f.t_invalid is None]
+    active = [f for f in await store.facts_for_entity("Company:acme") if f.t_invalid is None]
     acquired_active = [f for f in active if f.predicate == "acquired"]
     assert len(acquired_active) == 3
