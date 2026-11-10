@@ -385,9 +385,13 @@ async def test_type_suffix_is_removed_from_canonical_name(
     assert result.facts[0].object_id == "Company:acme corp"
 
 
-async def test_rejects_raw_id_reused_for_different_entities(
+async def test_raw_id_reused_for_different_entities_keeps_them_apart(
     ontology: Ontology,
 ) -> None:
+    """The model may reuse one raw id for different entities (llama3 used
+    "Person" for both Sam Ortiz and Dana Lee). Ids come from each endpoint's
+    own (type, name) since #121, so they stay distinct and every fact points
+    at the right entity, instead of the whole document being aborted."""
     llm = FakeLLM(
         [
             [
@@ -399,20 +403,30 @@ async def test_rejects_raw_id_reused_for_different_entities(
                     object_id="same-id",
                     object_type="Company",
                     object_canonical_name="Beta Systems",
-                )
+                ),
+                _valid_triple(subject_id="Person", subject_canonical_name="Sam Ortiz"),
+                _valid_triple(subject_id="Person", subject_canonical_name="Dana Lee"),
             ]
         ]
     )
 
-    extractor = LlmExtractor(llm, ontology)
-
-    with pytest.raises(ExtractionError, match="raw entity id"):
-        await extractor.extract(
-            ExtractionInput(
-                source_id="collision-test",
-                text="Beta Systems is a subsidiary of Acme Corp.",
-            )
+    result = await LlmExtractor(llm, ontology).extract(
+        ExtractionInput(
+            source_id="collision-test", text="Beta Systems is a subsidiary of Acme Corp."
         )
+    )
+
+    assert {e.id for e in result.entities} == {
+        "Company:acme corp",
+        "Company:beta systems",
+        "Person:sam ortiz",
+        "Person:dana lee",
+    }
+    assert {(f.subject_id, f.object_id) for f in result.facts} == {
+        ("Company:acme corp", "Company:beta systems"),
+        ("Person:sam ortiz", "Company:acme corp"),
+        ("Person:dana lee", "Company:acme corp"),
+    }
 
 
 async def test_rejected_candidate_captures_low_confidence(

@@ -220,8 +220,6 @@ class LlmExtractor:
         rejected: list[RejectedCandidate] = []
         entities: dict[str, Entity] = {}
         facts: list[Fact] = []
-        raw_identity_by_id: dict[str, tuple[str, str]] = {}
-        stable_id_by_raw: dict[str, str] = {}
         now = datetime.now(UTC)
 
         for raw in raw_triples:
@@ -306,33 +304,17 @@ class LlmExtractor:
                 ),
             )
 
-            for eid, etype, ename in (
-                (raw.subject_id, raw.subject_type, raw.subject_canonical_name),
-                (raw.object_id, raw.object_type, raw.object_canonical_name),
+            # Ids come from each endpoint's own (type, name), never from the
+            # model's raw ids (#121), so a raw id the model reuses for two
+            # different entities can't merge or misroute them.
+            endpoint_ids: list[str] = []
+            for etype, ename in (
+                (raw.subject_type, raw.subject_canonical_name),
+                (raw.object_type, raw.object_canonical_name),
             ):
                 canonical_name = _normalize_canonical_name(etype, ename)
-                identity_key = (
-                    etype.strip().casefold(),
-                    canonical_name.casefold(),
-                )
-
-                previous_identity = raw_identity_by_id.get(eid)
-                if previous_identity is not None and previous_identity != identity_key:
-                    raise ExtractionError(
-                        source_id=input.source_id,
-                        message=(
-                            f"raw entity id {eid!r} maps to multiple identities "
-                            "within one extraction response"
-                        ),
-                        sample=input.text,
-                    )
-
-                raw_identity_by_id[eid] = identity_key
-
-                # The stored id comes from (type, name), never from the
-                # model's raw id, so duplicates converge (#121).
                 stable_id = entity_identity_id(etype, canonical_name)
-                stable_id_by_raw[eid] = stable_id
+                endpoint_ids.append(stable_id)
                 if stable_id not in entities:
                     entities[stable_id] = Entity(
                         id=stable_id,
@@ -343,9 +325,9 @@ class LlmExtractor:
 
             facts.append(
                 Fact(
-                    subject_id=stable_id_by_raw[raw.subject_id],
+                    subject_id=endpoint_ids[0],
                     predicate=normalized_predicate,
-                    object_id=stable_id_by_raw[raw.object_id],
+                    object_id=endpoint_ids[1],
                     provenance=provenance,
                     t_valid=now,
                     ingested_at=now,

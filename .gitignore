@@ -22,3 +22,6 @@ audit-logs/
 .vscode/
 dist/
 build/
+
+# Demo run output
+examples/demo/out/
