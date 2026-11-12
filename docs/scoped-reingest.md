@@ -51,6 +51,7 @@ The following must be configured before running the command:
 | `ONTOS_AUTHZ_BACKEND` | Runtime authorization backend |
 | `ONTOS_REINGEST_SOURCE_ROOT` | Trusted source directory |
 | `ONTOS_REINGEST_OPERATOR_SUBJECT` | Deployment-pinned operator identity |
+| `ONTOS_REINGEST_RECHECK_SECONDS` | Optional; see "Per-write rechecks" (default `0`) |
 | Storage configuration | Existing persistent NetworkX or Neo4j graph |
 
 The supplied `--source-dir` must resolve to the same directory
@@ -114,6 +115,34 @@ For a registered public document, omit `--acl-ref`.
 Failure events are recorded where the audit sink remains
 operational. A failed audit operation must not authorize
 additional graph writes.
+
+## Per-write rechecks
+
+By default, every graph mutation (entity, candidate, merge,
+fact) first rechecks `ONTOLOGY_APPROVER`, `VIEW` on the full
+scope, and the source registration. That is two authorization
+calls and one registry lookup per write, which dominates
+re-ingest time for large documents on a remote OpenFGA.
+
+`ONTOS_REINGEST_RECHECK_SECONDS=<n>` lets a successful recheck
+cover the following writes for up to `n` seconds (maximum
+300). The trade-off is explicit:
+
+- A permission revoked mid-run can go unnoticed for at most
+  `n` seconds; writes in that window still commit.
+- Denials and authorization errors are never reused: the
+  first recheck after the window that fails stops all
+  further writes.
+- Scope membership (is this write for the requested source?)
+  is still checked on every write.
+- When `n > 0`, the audit records for that run include
+  `recheck_interval_seconds`, so the window is visible in the
+  Article-12 chain.
+
+The setting is read from the deployment environment, not a
+command-line flag, like the pinned operator subject and
+source root. Invalid values (negative, non-numeric, above
+300) refuse to run.
 
 ## Document-loading safeguards
 
@@ -209,6 +238,7 @@ Relevant automated tests include:
 - `tests/unit/test_pipeline_scoped_write_gate.py`
 - `tests/unit/test_scoped_reingest_authorization.py`
 - `tests/unit/test_scoped_reingest_preparation.py`
+- `tests/unit/test_scoped_reingest_recheck_interval.py`
 
 The Neo4j integration suite must also pass before M3-3 is
 considered ready for review.

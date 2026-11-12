@@ -14,6 +14,14 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- `ONTOS_REINGEST_RECHECK_SECONDS` (default `0`, maximum `300`) lets scoped
+  re-ingest reuse a successful per-write authorization recheck for a bounded
+  window instead of calling the authorization backend and source registry
+  before every graph mutation (#126). Denials are never reused, and the
+  window is recorded in the run's audit records.
+
 ## [0.9.0] - 2026-11-09 - ontology evolution: versioned ontologies, audited approval and verified migrations
 
 Ontos can now evolve its ontology under review (#66 M3). An operator holding

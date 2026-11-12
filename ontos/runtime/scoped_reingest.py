@@ -44,7 +44,17 @@ async def _audit_decision(
     subject: str,
     sources: Sequence[SourceRecord],
     decision: str,
+    recheck_interval_seconds: float = 0.0,
 ) -> None:
+    arguments: dict[str, object] = {
+        "identity_assurance": "operator_asserted",
+        "requested_count": len(sources),
+        "scope_ref": _scope_reference(audit, sources),
+    }
+    # Only recorded when per-write rechecks were relaxed, so the audit
+    # shows the window in which a revocation could go unnoticed.
+    if recheck_interval_seconds:
+        arguments["recheck_interval_seconds"] = recheck_interval_seconds
     await emit_record(
         audit,
         query_id=None,
@@ -52,11 +62,7 @@ async def _audit_decision(
         acting_on_behalf_of=subject or None,
         query_text="scoped re-ingestion authorization",
         tool_invoked="ontos.reingest",
-        tool_arguments={
-            "identity_assurance": "operator_asserted",
-            "requested_count": len(sources),
-            "scope_ref": _scope_reference(audit, sources),
-        },
+        tool_arguments=arguments,
         result_fact_ids=[],
         latency_ms=0.0,
         model_versions={"component": "scoped-reingest-m3-3-v1"},
