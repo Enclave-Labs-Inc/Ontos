@@ -43,6 +43,7 @@ from ontos.storage.base import (
     StoredCandidate,
 )
 from ontos.storage.models import GraphScan, StoredEntity
+from ontos.storage.sources import SourceAclConflictError, SourceRecord
 
 log = structlog.get_logger(__name__)
 
@@ -201,6 +202,8 @@ class Neo4jStore:
         """Create indexes idempotently. Safe to call on every boot."""
         statements = [
             "CREATE INDEX entity_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.id)",
+            "CREATE CONSTRAINT ingested_source_identity IF NOT EXISTS "
+            "FOR (s:IngestedSource) REQUIRE s.identity IS UNIQUE",
             "CREATE CONSTRAINT rejected_candidate_id IF NOT EXISTS "
             "FOR (n:RejectedCandidate) REQUIRE n.id IS UNIQUE",
             "CREATE CONSTRAINT rejected_candidate_logical_id IF NOT EXISTS "
@@ -299,6 +302,87 @@ class Neo4jStore:
                 # Neo4j constraint messages can contain internal node details.
                 # Never include them in candidate migration error messages.
                 raise RuntimeError("candidate logical identity migration collision") from None
+
+    async def get_source_record(
+        self, source_id: str, *, acl_ref: str | None
+    ) -> SourceRecord | None:
+        """Privileged lookup by exact source and ACL scope."""
+        identity = json.dumps(
+            [source_id, acl_ref],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        query = """
+            MATCH (s:IngestedSource {identity: $identity})
+            RETURN s.source_id AS source_id,
+                   s.is_public AS is_public,
+                   s.acl_ref AS acl_ref
+        """
+
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(query, identity=identity)
+            row = await result.single()
+
+        if row is None:
+            return None
+
+        stored_acl = row["acl_ref"]
+        is_public = row["is_public"]
+
+        if (
+            row["source_id"] != source_id
+            or not isinstance(is_public, bool)
+            or (is_public and stored_acl is not None)
+            or (not is_public and (not isinstance(stored_acl, str) or not stored_acl.strip()))
+            or stored_acl != acl_ref
+        ):
+            raise SourceAclConflictError("Stored source identity or ACL metadata is invalid")
+
+        return SourceRecord(source_id, stored_acl)
+
+    async def register_source(self, record: SourceRecord) -> None:
+        """Atomically register one exact (source_id, acl_ref) pair."""
+        if not record.source_id.strip():
+            raise ValueError("source_id must not be empty")
+
+        if record.acl_ref is not None and not record.acl_ref.strip():
+            raise ValueError("acl_ref must not be empty")
+
+        identity = json.dumps(
+            [record.source_id, record.acl_ref],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        query = """
+            MERGE (s:IngestedSource {identity: $identity})
+            ON CREATE SET
+                s.source_id = $source_id,
+                s.is_public = $is_public,
+                s.acl_ref = $acl_ref
+            WITH s
+            WHERE s.source_id = $source_id
+              AND s.is_public = $is_public
+              AND (
+                (s.acl_ref IS NULL AND $acl_ref IS NULL)
+                OR s.acl_ref = $acl_ref
+              )
+            RETURN s.identity AS identity
+        """
+
+        async def _register(tx: Any) -> None:
+            result = await tx.run(
+                query,
+                identity=identity,
+                source_id=record.source_id,
+                acl_ref=record.acl_ref,
+                is_public=record.acl_ref is None,
+            )
+            matched = await result.single()
+            if matched is None:
+                raise SourceAclConflictError("Stored source identity or ACL metadata is invalid")
+
+        async with self._driver.session(database=self._database) as session:
+            await session.execute_write(_register)
 
     async def add_candidates(
         self,
