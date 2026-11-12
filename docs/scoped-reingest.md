@@ -21,8 +21,67 @@ The command is intended for trusted local operators.
 
 An unregistered source or mismatched ACL is denied.
 
-Older graph stores may require a trusted source-registry
-backfill before scoped re-ingestion can be used.
+## Where the ACL comes from
+
+Local files carry no ACL. The `acl_ref` used by
+`ontos reingest` comes from the trusted source registry,
+which records the exact `(source_id, acl_ref)` pair a source
+was first ingested with.
+
+`--acl-ref` must match that registered pair exactly. It is a
+selector, never a way to assign or change a source's ACL.
+Registering an existing source under a different ACL raises
+`SourceAclConflictError`; changing a source's ACL requires a
+new source id (an administrative ACL migration is not yet
+supported).
+
+## Sources ingested before the registry existed
+
+The registry is populated by normal ingestion since scoped
+re-ingestion was added (#120). Sources ingested earlier have facts and
+candidates but no registry entry, so `ontos reingest` denies
+them.
+
+Register such a source by running a normal `ontos ingest` of
+it once with its original ACL. Facts the extractor
+reproduces are reaffirmed, not duplicated. An audited backfill command is
+tracked in #125.
+
+## Finding the sources to re-ingest
+
+After `ontos ontology approve` writes a signed migration
+record, list the sources whose rejected evidence supports the
+approved change:
+
+```bash
+ontos ontology affected-sources \
+  --migration-record migrations/0.1-to-0.2.yaml \
+  --acting-on-behalf-of "user:operator" \
+  --storage-path /trusted/ontos-store.pkl
+```
+
+```json
+{
+  "ontology_id": "ontos.starter",
+  "to_version": "0.2",
+  "registered": [{"source_id": "deals/acme.md", "acl_ref": "acl:legal"}],
+  "unregistered": [{"source_id": "old/globex.md", "acl_ref": null}]
+}
+```
+
+- The command requires `ONTOLOGY_APPROVER`, a persistent
+  audit database, and the same `ONTOS_AUDIT_SIGNING_KEY` that
+  signed the record; unsigned or tampered records are refused.
+- Only sources whose evidence the operator may `VIEW` (plus
+  public sources) are listed. Nothing about other sources is
+  returned, counted, or audited.
+- Evidence from any version of the record's ontology counts.
+- Pass each `registered` pair to `ontos reingest`.
+  `unregistered` sources must be registered first (above).
+- The Article-12 record carries only counts and the same keyed
+  `scope_ref` that `ontos reingest` records for that set of
+  sources, so discovery and re-ingest correlate in the chain.
+- The command is read-only.
 
 ## Required authorization
 
@@ -239,6 +298,9 @@ Relevant automated tests include:
 - `tests/unit/test_scoped_reingest_authorization.py`
 - `tests/unit/test_scoped_reingest_preparation.py`
 - `tests/unit/test_scoped_reingest_recheck_interval.py`
+- `tests/unit/test_affected_sources.py`
+- `tests/unit/test_ontology_affected_sources_cli.py`
+- `tests/compliance/test_affected_sources_acl.py`
 
 The Neo4j integration suite must also pass before M3-3 is
 considered ready for review.

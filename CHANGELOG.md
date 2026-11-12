@@ -21,6 +21,14 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   window instead of calling the authorization backend and source registry
   before every graph mutation (#126). Denials are never reused, and the
   window is recorded in the run's audit records.
+- `ontos ontology affected-sources` lists the sources whose rejected
+  evidence supports a signed migration record, split into those registered
+  for `ontos reingest` and those not yet registered (#124). It requires
+  `ontology_approver`, only considers evidence the operator may VIEW, and
+  audits counts plus the same keyed scope reference `ontos reingest` records.
+- `docs/scoped-reingest.md` now states that the source registry, not the
+  file, is the ACL trust anchor, and how to register sources ingested
+  before the registry existed (#127).
 
 ## [0.9.0] - 2026-11-09 - ontology evolution: versioned ontologies, audited approval and verified migrations
 
