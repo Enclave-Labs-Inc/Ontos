@@ -7,6 +7,8 @@ the deployment must establish trusted operator identity externally.
 
 from __future__ import annotations
 
+import math
+import time
 from collections.abc import Awaitable, Callable, Sequence
 
 from ontos.audit.base import AuditSink
@@ -30,6 +32,22 @@ from ontos.runtime.scoped_reingest import (
 from ontos.storage.base import CandidateStore, GraphStore
 from ontos.storage.sources import SourceRecord, SourceRegistry
 
+# Upper bound on how long a revoked permission can go unnoticed.
+MAX_RECHECK_INTERVAL_SECONDS = 300.0
+
+
+def validate_recheck_interval(seconds: float) -> float:
+    """Reject negative, non-finite, or over-long recheck intervals."""
+    if (
+        isinstance(seconds, bool)
+        or not math.isfinite(seconds)
+        or not 0 <= seconds <= MAX_RECHECK_INTERVAL_SECONDS
+    ):
+        raise ValueError(
+            f"recheck interval must be between 0 and {MAX_RECHECK_INTERVAL_SECONDS:g} seconds"
+        )
+    return float(seconds)
+
 
 async def run_scoped_reingest(
     *,
@@ -45,6 +63,8 @@ async def run_scoped_reingest(
     ontology: Ontology,
     candidate_store: CandidateStore | None = None,
     emit_completion: bool = True,
+    recheck_interval_seconds: float = 0.0,
+    clock: Callable[[], float] = time.monotonic,
 ) -> IngestReport:
     """Execute explicitly scoped re-ingestion with repeated ACL checks.
 
@@ -53,8 +73,23 @@ async def run_scoped_reingest(
     checks. Each graph mutation is independently permission-gated.
 
     Partial writes are possible if permissions are revoked mid-operation.
+
+    With the default `recheck_interval_seconds=0` every mutation is
+    rechecked. A positive interval reuses the last successful recheck
+    for up to that many seconds, so a revocation can go unnoticed for
+    at most that long; denials and errors are never reused.
     """
     requested = tuple(sources)
+    try:
+        interval = validate_recheck_interval(recheck_interval_seconds)
+    except ValueError:
+        await _audit_decision(
+            audit=audit,
+            subject=subject,
+            sources=requested,
+            decision="invalid_request",
+        )
+        raise
 
     prepared = await prepare_scoped_reingest(
         authz=authz,
@@ -67,16 +102,25 @@ async def run_scoped_reingest(
 
     connector = PreparedScopedConnector(prepared)
     requested_set = set(requested)
+    last_allowed_at: float | None = None
 
     async def before_write(identity: SourceRecord) -> None:
+        nonlocal last_allowed_at
+
+        # Scope membership is checked on every write, never reused.
         if identity not in requested_set:
             await _audit_decision(
                 audit=audit,
                 subject=subject,
                 sources=requested,
+                recheck_interval_seconds=interval,
                 decision="deny",
             )
             raise ScopedReingestDeniedError("Scoped re-ingestion denied")
+
+        if interval > 0 and last_allowed_at is not None and clock() - last_allowed_at < interval:
+            return
+        last_allowed_at = None
 
         # Recheck the complete original scope rather than only the
         # current document, to prevent partial-scope substitution.
@@ -99,6 +143,7 @@ async def run_scoped_reingest(
                 audit=audit,
                 subject=subject,
                 sources=requested,
+                recheck_interval_seconds=interval,
                 decision="scope_unavailable",
             )
             raise ScopedReingestDeniedError("Scoped re-ingestion denied") from None
@@ -110,9 +155,12 @@ async def run_scoped_reingest(
                 audit=audit,
                 subject=subject,
                 sources=requested,
+                recheck_interval_seconds=interval,
                 decision="deny",
             )
             raise ScopedReingestDeniedError("Scoped re-ingestion denied")
+
+        last_allowed_at = clock()
 
     pipeline = IngestPipeline(
         connector=connector,
@@ -133,6 +181,7 @@ async def run_scoped_reingest(
             audit=audit,
             subject=subject,
             sources=requested,
+            recheck_interval_seconds=interval,
             decision="failed",
         )
         raise
@@ -144,6 +193,7 @@ async def run_scoped_reingest(
             audit=audit,
             subject=subject,
             sources=requested,
+            recheck_interval_seconds=interval,
             decision="completed",
         )
     return report

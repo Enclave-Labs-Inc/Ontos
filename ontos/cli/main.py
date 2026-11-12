@@ -512,6 +512,18 @@ def reingest(
         )
         raise typer.Exit(code=2)
 
+    from ontos.runtime.scoped_execution import validate_recheck_interval
+
+    # Deployment-pinned, like the operator subject and source root:
+    # relaxing per-write rechecks is not an operator's per-run choice.
+    try:
+        recheck_interval = validate_recheck_interval(
+            float(os.environ.get("ONTOS_REINGEST_RECHECK_SECONDS", "0") or "0")
+        )
+    except ValueError:
+        typer.echo("Invalid ONTOS_REINGEST_RECHECK_SECONDS.", err=True)
+        raise typer.Exit(code=2) from None
+
     identity = SourceRecord(source_id=source_id, acl_ref=acl_ref)
     requested = [identity]
 
@@ -629,6 +641,7 @@ def reingest(
                 store=store,
                 ontology=ontology,
                 emit_completion=False,
+                recheck_interval_seconds=recheck_interval,
             )
 
             # NetworkX persists on close. Do not record success or
@@ -652,6 +665,7 @@ def reingest(
                 subject=acting_on_behalf_of,
                 sources=requested,
                 decision="completed",
+                recheck_interval_seconds=recheck_interval,
             )
 
             # Never print extracted text, raw facts, source paths or

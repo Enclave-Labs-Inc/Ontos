@@ -16,6 +16,11 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ### Added
 
+- `ONTOS_REINGEST_RECHECK_SECONDS` (default `0`, maximum `300`) lets scoped
+  re-ingest reuse a successful per-write authorization recheck for a bounded
+  window instead of calling the authorization backend and source registry
+  before every graph mutation (#126). Denials are never reused, and the
+  window is recorded in the run's audit records.
 - `ontos ontology affected-sources` lists the sources whose rejected
   evidence supports a signed migration record, split into those registered
   for `ontos reingest` and those not yet registered (#124). It requires
