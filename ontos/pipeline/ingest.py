@@ -27,6 +27,7 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from ontos.extraction import ExtractionError, ExtractionInput, ExtractionResult, Extractor
+from ontos.extraction.identity import acl_scoped_entity_id
 from ontos.ingest import Connector
 from ontos.ontology import Ontology
 from ontos.resolver import Resolver
@@ -61,6 +62,26 @@ def _entity_identity_key(
         return None
 
     return entity_type.casefold(), canonical_name.casefold()
+
+
+def _scope_entity_ids(extraction: ExtractionResult, acl_ref: str | None) -> ExtractionResult:
+    """Suffix every entity id, and the fact endpoints using it, with the ACL scope."""
+    if acl_ref is None:
+        return extraction
+    entities = [
+        entity.model_copy(update={"id": acl_scoped_entity_id(entity.id, acl_ref)})
+        for entity in extraction.entities
+    ]
+    facts = [
+        fact.model_copy(
+            update={
+                "subject_id": acl_scoped_entity_id(fact.subject_id, acl_ref),
+                "object_id": acl_scoped_entity_id(fact.object_id, acl_ref),
+            }
+        )
+        for fact in extraction.facts
+    ]
+    return extraction.model_copy(update={"entities": entities, "facts": facts})
 
 
 def _reconcile_same_source_entity_ids(
@@ -327,6 +348,28 @@ class IngestPipeline:
                 )
                 errors.append(IngestError(source_id=doc.source_id, reason=reason))
                 continue
+
+            # The same source id under several ACLs is a supported, strictly
+            # separate set of scopes, so this is not refused. But with
+            # ACL-scoped ids a source whose ACL *changed* now lands on fresh
+            # nodes while its old facts stay readable under the old ACL and
+            # are never superseded. Make that visible instead of silent.
+            if await self._store.source_has_other_acl(doc.source_id, acl_ref=doc.acl_ref):
+                # Generic text: never disclose the other ACL in the report.
+                warnings.append(
+                    f"{doc.source_id}: source also has facts under a different ACL; "
+                    "they are not superseded by this ingest"
+                )
+                log.warning(
+                    "source-acl-changed",
+                    source_id=doc.source_id,
+                    attempted_acl=doc.acl_ref,
+                )
+
+            # Same-named entities under different ACLs stay separate nodes
+            # (#121): an entity carries one ACL, and #48 refuses to rewrite
+            # it from another scope.
+            extraction = _scope_entity_ids(extraction, doc.acl_ref)
 
             # Stabilize LLM-chosen raw IDs across re-ingests of the same
             # source before ACL checks, entity writes, resolution, or

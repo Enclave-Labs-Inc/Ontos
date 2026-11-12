@@ -10,6 +10,7 @@ import pytest
 from ontos.audit.emitter import AuditEmitter
 from ontos.authz import ONTOLOGY_APPROVER, VIEW, InMemoryAuthz
 from ontos.extraction import ExtractionInput, ExtractionResult
+from ontos.extraction.identity import acl_scoped_entity_id
 from ontos.ingest.base import SourceDocument
 from ontos.ingest.scoped_files import load_scoped_document
 from ontos.ontology import load_ontology
@@ -332,9 +333,10 @@ async def test_per_write_checks_do_not_repeat_allow_events(
     )
 
     assert report.documents_extracted == 1
+    # Restricted entity ids are ACL-scoped by the pipeline (#123).
     assert store.upserts == [
-        "scoped-audit-person-one",
-        "scoped-audit-person-two",
+        acl_scoped_entity_id("scoped-audit-person-one", "acl:finance"),
+        acl_scoped_entity_id("scoped-audit-person-two", "acl:finance"),
     ]
 
     decisions = _decisions(audit)

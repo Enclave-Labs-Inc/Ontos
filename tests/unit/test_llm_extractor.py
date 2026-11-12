@@ -97,9 +97,10 @@ async def test_happy_path_produces_facts_with_provenance(ontology: Ontology) -> 
 
     assert len(result.facts) == 1
     fact = result.facts[0]
-    assert fact.subject_id == "person:alice"
+    # Stored ids come from (type, name), not the model's raw ids (#121).
+    assert fact.subject_id == "Person:alice smith"
     assert fact.predicate == "works_at"
-    assert fact.object_id == "company:acme"
+    assert fact.object_id == "Company:acme corp"
     # Provenance populated end-to-end
     assert fact.provenance.source_id == "doc-1"
     assert "fake-llm" in fact.provenance.extractor_id
@@ -229,9 +230,9 @@ async def test_entities_are_deduped_across_triples(ontology: Ontology) -> None:
     extractor = LlmExtractor(llm, ontology)
     result = await extractor.extract(ExtractionInput(source_id="d", text="t"))
     entity_ids = [e.id for e in result.entities]
-    assert entity_ids.count("person:alice") == 1
-    assert "company:acme" in entity_ids
-    assert "company:foo" in entity_ids
+    assert entity_ids.count("Person:alice smith") == 1
+    assert "Company:acme corp" in entity_ids
+    assert "Company:foo inc" in entity_ids
 
 
 async def test_every_fact_references_an_entity_in_the_result(ontology: Ontology) -> None:
@@ -316,7 +317,7 @@ async def test_bitemporal_defaults_set(ontology: Ontology) -> None:
     assert fact.t_invalid is None
 
 
-async def test_type_prefix_is_removed_from_canonical_name_but_raw_id_is_preserved(
+async def test_type_prefix_is_removed_from_canonical_name(
     ontology: Ontology,
 ) -> None:
     llm = FakeLLM(
@@ -342,15 +343,15 @@ async def test_type_prefix_is_removed_from_canonical_name_but_raw_id_is_preserve
 
     entities = {entity.id: entity for entity in result.entities}
 
-    assert entities["Person:Alice Johnson"].canonical_name == "Alice Johnson"
-    assert entities["Company:Acme Corp"].canonical_name == "Acme Corp"
+    assert entities["Person:alice johnson"].canonical_name == "Alice Johnson"
+    assert entities["Company:acme corp"].canonical_name == "Acme Corp"
 
     # Current Ontos pre-resolution semantics intentionally preserve raw IDs.
-    assert result.facts[0].subject_id == "Person:Alice Johnson"
-    assert result.facts[0].object_id == "Company:Acme Corp"
+    assert result.facts[0].subject_id == "Person:alice johnson"
+    assert result.facts[0].object_id == "Company:acme corp"
 
 
-async def test_type_suffix_is_removed_from_canonical_name_but_raw_id_is_preserved(
+async def test_type_suffix_is_removed_from_canonical_name(
     ontology: Ontology,
 ) -> None:
     llm = FakeLLM(
@@ -376,17 +377,21 @@ async def test_type_suffix_is_removed_from_canonical_name_but_raw_id_is_preserve
 
     entities = {entity.id: entity for entity in result.entities}
 
-    assert entities["Alice Johnson (Person)"].canonical_name == "Alice Johnson"
-    assert entities["Acme Corp (Company)"].canonical_name == "Acme Corp"
+    assert entities["Person:alice johnson"].canonical_name == "Alice Johnson"
+    assert entities["Company:acme corp"].canonical_name == "Acme Corp"
 
     # Raw IDs remain untouched under current pre-resolution semantics.
-    assert result.facts[0].subject_id == "Alice Johnson (Person)"
-    assert result.facts[0].object_id == "Acme Corp (Company)"
+    assert result.facts[0].subject_id == "Person:alice johnson"
+    assert result.facts[0].object_id == "Company:acme corp"
 
 
-async def test_rejects_raw_id_reused_for_different_entities(
+async def test_raw_id_reused_for_different_entities_keeps_them_apart(
     ontology: Ontology,
 ) -> None:
+    """The model may reuse one raw id for different entities (llama3 used
+    "Person" for both Sam Ortiz and Dana Lee). Ids come from each endpoint's
+    own (type, name) since #121, so they stay distinct and every fact points
+    at the right entity, instead of the whole document being aborted."""
     llm = FakeLLM(
         [
             [
@@ -398,20 +403,30 @@ async def test_rejects_raw_id_reused_for_different_entities(
                     object_id="same-id",
                     object_type="Company",
                     object_canonical_name="Beta Systems",
-                )
+                ),
+                _valid_triple(subject_id="Person", subject_canonical_name="Sam Ortiz"),
+                _valid_triple(subject_id="Person", subject_canonical_name="Dana Lee"),
             ]
         ]
     )
 
-    extractor = LlmExtractor(llm, ontology)
-
-    with pytest.raises(ExtractionError, match="raw entity id"):
-        await extractor.extract(
-            ExtractionInput(
-                source_id="collision-test",
-                text="Beta Systems is a subsidiary of Acme Corp.",
-            )
+    result = await LlmExtractor(llm, ontology).extract(
+        ExtractionInput(
+            source_id="collision-test", text="Beta Systems is a subsidiary of Acme Corp."
         )
+    )
+
+    assert {e.id for e in result.entities} == {
+        "Company:acme corp",
+        "Company:beta systems",
+        "Person:sam ortiz",
+        "Person:dana lee",
+    }
+    assert {(f.subject_id, f.object_id) for f in result.facts} == {
+        ("Company:acme corp", "Company:beta systems"),
+        ("Person:sam ortiz", "Company:acme corp"),
+        ("Person:dana lee", "Company:acme corp"),
+    }
 
 
 async def test_rejected_candidate_captures_low_confidence(
@@ -430,9 +445,11 @@ async def test_rejected_candidate_captures_low_confidence(
 
     candidate = result.rejected[0]
     assert candidate.reason == "below_min_confidence"
-    assert candidate.raw_triple.subject_id == raw.subject_id
+    # Candidates carry the same stable ids as facts (#121); the observed
+    # predicate is kept as the model produced it.
+    assert candidate.raw_triple.subject_id == "Person:alice smith"
     assert candidate.raw_triple.predicate == raw.predicate
-    assert candidate.raw_triple.object_id == raw.object_id
+    assert candidate.raw_triple.object_id == "Company:acme corp"
     assert candidate.provenance.source_id == "restricted-doc"
     assert candidate.provenance.extractor_id == extractor.id
     assert candidate.provenance.extractor_version == extractor.version

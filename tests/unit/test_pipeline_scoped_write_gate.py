@@ -10,6 +10,7 @@ import pytest
 from ontos.audit.emitter import AuditEmitter
 from ontos.authz import ONTOLOGY_APPROVER, VIEW, InMemoryAuthz
 from ontos.extraction import ExtractionInput, ExtractionResult
+from ontos.extraction.identity import acl_scoped_entity_id
 from ontos.ingest import TextConnector
 from ontos.ontology import load_ontology
 from ontos.pipeline.ingest import ErrorPolicy, IngestPipeline
@@ -275,9 +276,12 @@ async def test_revocation_between_entity_writes_blocks_second_write() -> None:
 
     # The first write had already committed. The second must not run.
     assert store.registration_attempts == [SOURCE]
-    assert store.upserted == ["person-one"]
-    assert await store.entity_acl("person-one") == "acl:finance"
-    assert await store.entity_acl("person-two") is None
+    # Restricted entity ids are ACL-scoped by the pipeline (#123).
+    person_one = acl_scoped_entity_id("person-one", "acl:finance")
+    person_two = acl_scoped_entity_id("person-two", "acl:finance")
+    assert store.upserted == [person_one]
+    assert await store.entity_acl(person_one) == "acl:finance"
+    assert await store.entity_acl(person_two) is None
 
     # Initial check, first entity check, then revoked-access denial.
     assert len(audit) == 3

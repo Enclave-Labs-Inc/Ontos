@@ -25,6 +25,51 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   file, is the ACL trust anchor, and how to register sources ingested
   before the registry existed (#127).
 
+### Changed — readable SVG graph export
+- **New layout for `ontos export svg`.**
+  - Entities sit in one column per type, ordered so relationships flow left to
+    right, and are colour-coded with a legend and a summary header.
+  - Facts are curved, arrowed edges labelled with their predicate and source
+    document. Parallel facts fan out, and same-type relationships arc around
+    the column instead of cutting through the boxes between them.
+  - Hover tooltips show provenance.
+- **Unchanged.** Output stays deterministic and dependency-free, and keeps
+  the same `data-*` metadata.
+
+### Fixed — one real-world entity is one graph entity (#121, #122)
+- **Duplicate entities broke `ask`.** The extractor stored whatever entity ids
+  the model invented, and models are inconsistent: one #121 run gave a single
+  "Acme Corp" two ids in one document and a third id in another. The
+  resolver only compared entities within one document, and its merge records
+  were never applied, so the graph held several "Acme Corp" nodes and
+  "Who works at Acme Corp?" refused to guess.
+- **Stable ids.** Entity ids are now derived from `(type, casefolded name)`,
+  for example `Company:acme corp`. The same entity converges within and
+  across documents, and rejected candidates use the same ids.
+- **Scoped by ACL.** A restricted document's ids carry a digest of its ACL,
+  so a same-named entity under another ACL stays a separate node (#48). The
+  pipeline no longer refuses such documents.
+- **Read-time consolidation.**
+  - When a seed matches several entities the caller can see, an exact name
+    or alias match wins.
+  - Candidates with the same type and name are treated as one entity, which
+    fixes stores written before this change without re-ingesting.
+  - Different types, or merely similar names, still refuse to guess.
+- **Empty entities are rejected (#122).** A triple whose subject or object
+  has an empty id, name or type is dropped with a generic warning, never
+  stored.
+- **Behaviour changes.**
+  - Two different people with the same name in one document are now one
+    entity (the exact-match rule).
+  - Stored ids no longer match the model's raw ids.
+  - An exact seed name match is no longer treated as ambiguous.
+  - Ingesting a source under a different ACL than before now adds a
+    warning to the ingest report ("source also has facts under a
+    different ACL; they are not superseded by this ingest"). The other
+    ACL is never named. Before this change such a document either failed
+    with a cross-ACL entity conflict, when raw ids happened to collide, or
+    silently created a second copy.
+
 ## [0.9.0] - 2026-11-09 - ontology evolution: versioned ontologies, audited approval and verified migrations
 
 Ontos can now evolve its ontology under review (#66 M3). An operator holding

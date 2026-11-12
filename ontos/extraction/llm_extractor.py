@@ -39,6 +39,7 @@ from ontos.extraction.base import (
     ExtractionResult,
     RejectedCandidate,
 )
+from ontos.extraction.identity import entity_identity_id
 from ontos.ontology import Ontology
 from ontos.runtime.models import Confidence, Entity, Fact, Provenance
 
@@ -219,11 +220,27 @@ class LlmExtractor:
         rejected: list[RejectedCandidate] = []
         entities: dict[str, Entity] = {}
         facts: list[Fact] = []
-        raw_identity_by_id: dict[str, tuple[str, str]] = {}
         now = datetime.now(UTC)
 
         for raw in raw_triples:
             label, score = _calibrate(raw.llm_confidence)
+
+            # #122: an empty endpoint becomes an `''` entity that pollutes
+            # search, exports and seed resolution. Not worth retaining as a
+            # candidate either: there is nothing to review.
+            if any(
+                not value.strip()
+                for value in (
+                    raw.subject_id,
+                    raw.subject_type,
+                    raw.subject_canonical_name,
+                    raw.object_id,
+                    raw.object_type,
+                    raw.object_canonical_name,
+                )
+            ):
+                warnings.append("Triple rejected: empty entity id, name or type.")
+                continue
 
             # Normalize only an approved, type-pair-scoped mapping.
             # Keep raw unchanged for rejected-candidate evidence.
@@ -245,9 +262,21 @@ class LlmExtractor:
                 reason = None
 
             if reason is not None:
+                # Stable ids like facts (#121), so a renamed raw id on
+                # re-ingest doesn't store the same candidate twice (#73).
+                # The predicate stays as observed: that is the evidence.
+                candidate_triple = raw.model_dump()
+                candidate_triple["subject_id"] = entity_identity_id(
+                    raw.subject_type,
+                    _normalize_canonical_name(raw.subject_type, raw.subject_canonical_name),
+                )
+                candidate_triple["object_id"] = entity_identity_id(
+                    raw.object_type,
+                    _normalize_canonical_name(raw.object_type, raw.object_canonical_name),
+                )
                 rejected.append(
                     RejectedCandidate(
-                        raw_triple=CandidateTriple.model_validate(raw.model_dump()),
+                        raw_triple=CandidateTriple.model_validate(candidate_triple),
                         reason=reason,
                         provenance=CandidateProvenance(
                             source_id=input.source_id,
@@ -275,32 +304,20 @@ class LlmExtractor:
                 ),
             )
 
-            for eid, etype, ename in (
-                (raw.subject_id, raw.subject_type, raw.subject_canonical_name),
-                (raw.object_id, raw.object_type, raw.object_canonical_name),
+            # Ids come from each endpoint's own (type, name), never from the
+            # model's raw ids (#121), so a raw id the model reuses for two
+            # different entities can't merge or misroute them.
+            endpoint_ids: list[str] = []
+            for etype, ename in (
+                (raw.subject_type, raw.subject_canonical_name),
+                (raw.object_type, raw.object_canonical_name),
             ):
                 canonical_name = _normalize_canonical_name(etype, ename)
-                identity_key = (
-                    etype.strip().casefold(),
-                    canonical_name.casefold(),
-                )
-
-                previous_identity = raw_identity_by_id.get(eid)
-                if previous_identity is not None and previous_identity != identity_key:
-                    raise ExtractionError(
-                        source_id=input.source_id,
-                        message=(
-                            f"raw entity id {eid!r} maps to multiple identities "
-                            "within one extraction response"
-                        ),
-                        sample=input.text,
-                    )
-
-                raw_identity_by_id[eid] = identity_key
-
-                if eid not in entities:
-                    entities[eid] = Entity(
-                        id=eid,
+                stable_id = entity_identity_id(etype, canonical_name)
+                endpoint_ids.append(stable_id)
+                if stable_id not in entities:
+                    entities[stable_id] = Entity(
+                        id=stable_id,
                         type=etype,
                         canonical_name=canonical_name,
                         provenance=provenance.model_copy(update={"mapped_from_predicate": None}),
@@ -308,9 +325,9 @@ class LlmExtractor:
 
             facts.append(
                 Fact(
-                    subject_id=raw.subject_id,
+                    subject_id=endpoint_ids[0],
                     predicate=normalized_predicate,
-                    object_id=raw.object_id,
+                    object_id=endpoint_ids[1],
                     provenance=provenance,
                     t_valid=now,
                     ingested_at=now,

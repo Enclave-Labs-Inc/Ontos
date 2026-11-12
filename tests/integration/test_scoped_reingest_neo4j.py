@@ -10,6 +10,7 @@ import pytest
 from ontos.audit.emitter import AuditEmitter
 from ontos.authz import ONTOLOGY_APPROVER, VIEW, InMemoryAuthz
 from ontos.extraction import ExtractionInput, ExtractionResult
+from ontos.extraction.identity import acl_scoped_entity_id
 from ontos.ingest.base import SourceDocument
 from ontos.ingest.scoped_files import load_scoped_document
 from ontos.ontology import load_ontology
@@ -101,10 +102,13 @@ async def read_entity(
     store: Neo4jStore,
     entity_id: str,
 ) -> dict[str, str] | None:
+    # Restricted entity ids carry an ACL suffix (#123); match both forms
+    # so "nothing was written" checks cannot pass vacuously.
     async with store._driver.session(database=store._database) as session:
         result = await session.run(
             """
-            MATCH (e:Entity {id: $entity_id})
+            MATCH (e:Entity)
+            WHERE e.id = $entity_id OR e.id STARTS WITH $entity_id + '@'
             RETURN e.id AS id,
                    e.acl_ref AS acl_ref,
                    e.canonical_name AS canonical_name
@@ -184,7 +188,7 @@ async def test_authorized_scoped_reingest_writes_entity(
     )
 
     assert entity is not None
-    assert entity["id"] == extractor.entity_id
+    assert entity["id"] == acl_scoped_entity_id(extractor.entity_id, "acl:finance")
     assert entity["acl_ref"] == "acl:finance"
     assert entity["canonical_name"] == "Scoped Test Employee"
 

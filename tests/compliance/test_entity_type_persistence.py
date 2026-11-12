@@ -21,6 +21,7 @@ from pathlib import Path
 import structlog
 
 from ontos.extraction.base import ExtractionResult
+from ontos.extraction.identity import acl_scoped_entity_id
 from ontos.ingest import SourceDocument
 from ontos.ontology import load_ontology
 from ontos.pipeline import ErrorPolicy, IngestPipeline
@@ -184,15 +185,16 @@ async def test_entity_inherits_acl_from_restricted_source_doc() -> None:
         error_policy=ErrorPolicy.FAIL_FAST,
     )
     await pipeline.run()
-    assert store._graph.nodes["alice"]["acl_ref"] == "acl:finance"  # noqa: SLF001
+    node = acl_scoped_entity_id("alice", "acl:finance")  # #121: ids are ACL-scoped
+    assert store._graph.nodes[node]["acl_ref"] == "acl:finance"  # noqa: SLF001
 
 
-async def test_cross_acl_second_doc_rejected_under_skip_and_log() -> None:
-    """#48: the pre-#48 "silent downgrade" scenario — restricted doc
-    then public doc re-upserting the same entity — is now a loud
-    `CrossAclUpsertError`. Under `SKIP_AND_LOG` the pipeline records
-    it in `IngestReport.errors`, keeps running, and the stored attrs
-    stay the restricted-doc values (no partial overwrite)."""
+async def test_restricted_then_public_doc_keep_separate_entities() -> None:
+    """#48's "silent downgrade" scenario (restricted doc, then a public doc
+    re-upserting the same entity) can no longer happen: since #121 entity
+    ids are ACL-scoped, so the two land on separate nodes. The public node
+    never carries the restricted attrs and neither doc is dropped. The
+    store-level `CrossAclUpsertError` remains as a backstop."""
     ontology = load_ontology(STARTER)
     prov = _prov()
     restricted_entities = [
@@ -236,17 +238,17 @@ async def test_cross_acl_second_doc_rejected_under_skip_and_log() -> None:
     )
     report = await pipeline.run()
 
-    # The public doc is in errors; restricted doc succeeded.
-    assert len(report.errors) == 1
-    assert report.errors[0].source_id == "public"
-    assert "cross-ACL" in report.errors[0].reason
+    assert report.errors == []
 
-    # Stored attrs are the restricted doc's values — no partial update
-    # from the rejected public write.
-    attrs = store._graph.nodes["alice"]  # noqa: SLF001
-    assert attrs["acl_ref"] == "acl:finance"
-    assert attrs["canonical_name"] == "Alice Finance"
-    assert attrs["properties"] == {"department": "finance"}
+    restricted = store._graph.nodes[acl_scoped_entity_id("alice", "acl:finance")]  # noqa: SLF001
+    assert restricted["acl_ref"] == "acl:finance"
+    assert restricted["canonical_name"] == "Alice Finance"
+    assert restricted["properties"] == {"department": "finance"}
+
+    public = store._graph.nodes["alice"]  # noqa: SLF001
+    assert public["acl_ref"] is None
+    assert public["canonical_name"] == "Alice Public"
+    assert public["properties"] == {"department": "public"}
 
 
 async def test_resolver_type_merge_last_write_wins_with_audit_warning() -> None:

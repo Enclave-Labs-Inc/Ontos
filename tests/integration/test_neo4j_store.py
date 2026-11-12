@@ -2078,3 +2078,15 @@ async def test_source_registry_rejects_empty_identifiers(
         await store.register_source(SourceRecord("doc.txt", ""))
 
     assert await store.get_source_record("doc.txt", acl_ref=None) is None
+
+
+async def test_source_has_other_acl(store: Neo4jStore) -> None:
+    await store.add_fact(_make_fact("A", "knows", "B", acl_ref="acl:hr"))
+
+    assert await store.source_has_other_acl("test-source", acl_ref="acl:hr") is False
+    assert await store.source_has_other_acl("test-source", acl_ref="acl:finance") is True
+    assert await store.source_has_other_acl("test-source", acl_ref=None) is True
+    assert await store.source_has_other_acl("other-source", acl_ref=None) is False
+
+    await store.add_fact(_make_fact("C", "knows", "D"))
+    assert await store.source_has_other_acl("test-source", acl_ref="acl:hr") is True

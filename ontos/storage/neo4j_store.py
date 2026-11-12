@@ -960,6 +960,27 @@ class Neo4jStore:
             records = await result.data()
         return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]
 
+    async def source_has_other_acl(
+        self,
+        source_id: str,
+        *,
+        acl_ref: str | None,
+    ) -> bool:
+        query = """
+        MATCH (:Entity)-[r:RELATES]->(:Entity)
+        WHERE r.prov_source_id = $source_id
+          // Null-safe: `r.acl_ref = null` is null, and NOT null drops the row.
+          AND CASE
+              WHEN $acl_ref IS NULL THEN r.acl_ref IS NOT NULL
+              ELSE r.acl_ref IS NULL OR r.acl_ref <> $acl_ref
+          END
+        RETURN count(r) > 0 AS conflict
+        """
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(query, source_id=source_id, acl_ref=acl_ref)
+            row = await result.single()
+        return bool(row and row["conflict"])
+
     async def entities_for_source(
         self,
         source_id: str,
