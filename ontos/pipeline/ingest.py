@@ -19,6 +19,7 @@ report so the operator sees exactly what didn't land.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -32,6 +33,7 @@ from ontos.resolver import Resolver
 from ontos.runtime.models import Entity, Fact
 from ontos.storage.base import CandidateStore, CrossAclUpsertError, GraphStore
 from ontos.storage.models import StoredEntity
+from ontos.storage.sources import SourceRecord, SourceRegistry
 from ontos.supersession import (
     CardinalitySupersessionPolicy,
     SupersessionPolicy,
@@ -255,6 +257,8 @@ class IngestPipeline:
         supersession: SupersessionPolicy | None = None,
         error_policy: ErrorPolicy = ErrorPolicy.FAIL_FAST,
         candidate_store: CandidateStore | None = None,
+        source_registry: SourceRegistry | None = None,
+        before_write: Callable[[SourceRecord], Awaitable[None]] | None = None,
     ) -> None:
         self._connector = connector
         self._extractor = extractor
@@ -266,6 +270,23 @@ class IngestPipeline:
         )
         self._error_policy = error_policy
         self._candidate_store = candidate_store
+        self._before_write = before_write
+        self._source_registry: SourceRegistry | None = (
+            source_registry
+            if source_registry is not None
+            else store
+            if isinstance(store, SourceRegistry)
+            else None
+        )
+
+    async def _check_write_access(self, source: SourceRecord) -> None:
+        """Recheck scoped authorization before each graph mutation.
+
+        Ordinary ingestion has no callback and is unchanged.
+        Authorization failures propagate under every error policy.
+        """
+        if self._before_write is not None:
+            await self._before_write(source)
 
     async def run(self) -> IngestReport:
         documents_seen = 0
@@ -284,6 +305,7 @@ class IngestPipeline:
 
         async for doc in self._connector.iter_documents():
             documents_seen += 1
+
             try:
                 extraction = await self._extractor.extract(
                     ExtractionInput(
@@ -396,11 +418,31 @@ class IngestPipeline:
                 )
                 continue
 
+            # Operator-triggered re-ingestion rechecks authorization
+            # immediately before the first per-document storage mutation.
+            # Exceptions must propagate even under SKIP_AND_LOG.
+            source_identity = SourceRecord(
+                source_id=doc.source_id,
+                acl_ref=doc.acl_ref,
+            )
+            await self._check_write_access(source_identity)
+
+            # Reserve the source identity before any entity, candidate,
+            # merge, or fact writes. This is intentionally after
+            # extraction and entity preflight: failed extractions and
+            # skipped documents do not register new sources.
+            # Registration is an ACL reservation, not a completion flag.
+            if self._source_registry is not None:
+                await self._source_registry.register_source(
+                    SourceRecord(source_id=doc.source_id, acl_ref=doc.acl_ref)
+                )
+
             # Pre-check passed: safe to write all entities. upsert_entity
             # may still raise under a concurrent writer race (TOCTOU) —
             # route the same way for defense in depth.
             try:
                 for entity in extraction.entities:
+                    await self._check_write_access(source_identity)
                     await self._store.upsert_entity(entity, acl_ref=doc.acl_ref)
             except CrossAclUpsertError:
                 if self._error_policy is ErrorPolicy.FAIL_FAST:
@@ -432,6 +474,7 @@ class IngestPipeline:
                 ]
                 # Storage failures deliberately propagate. Retention
                 # must never silently lose rejected candidates.
+                await self._check_write_access(source_identity)
                 candidates_retained += await self._candidate_store.add_candidates(
                     stamped_candidates
                 )
@@ -445,6 +488,7 @@ class IngestPipeline:
                 # the store layer on (canonical, merged, resolver_id)
                 # keys — re-ingest produces one record, not N.
                 for merge in resolution.merges:
+                    await self._check_write_access(source_identity)
                     await self._store.record_merge(merge)
                     merges_recorded += 1
 
@@ -493,10 +537,12 @@ class IngestPipeline:
                     )
 
                 if decision.facts_to_close:
+                    await self._check_write_access(source_identity)
                     await self._store.supersede(
                         write_fact, [old.id for old in decision.facts_to_close]
                     )
                 else:
+                    await self._check_write_access(source_identity)
                     await self._store.add_fact(write_fact)
                 facts_written += 1
                 written_fact_ids.append(str(write_fact.id))

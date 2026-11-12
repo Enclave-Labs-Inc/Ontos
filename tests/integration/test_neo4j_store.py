@@ -1997,3 +1997,84 @@ async def test_read_determinism(store: Neo4jStore, check) -> None:  # type: igno
 async def test_scan_raw_endpoint_leak(store: Neo4jStore, check) -> None:  # type: ignore[no-untyped-def]
     """#100: Neo4j scan hides untyped nodes named only by forbidden facts."""
     await check(store)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_source_registry_round_trips_without_facts(
+    store: Neo4jStore,
+) -> None:
+    from ontos.storage.sources import SourceRecord
+
+    restricted = SourceRecord("finance.txt", "acl:finance")
+    public = SourceRecord("public.txt", None)
+
+    await store.register_source(restricted)
+    await store.register_source(public)
+
+    assert await store.get_source_record("finance.txt", acl_ref="acl:finance") == restricted
+
+    assert await store.get_source_record("public.txt", acl_ref=None) == public
+
+    assert await store.get_source_record("missing.txt", acl_ref=None) is None
+
+    await store.register_source(restricted)
+    await store.register_source(public)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_source_registry_allows_same_id_in_separate_acl_scopes(
+    store: Neo4jStore,
+) -> None:
+    from ontos.storage.sources import SourceRecord
+
+    records = [
+        SourceRecord("shared.txt", "acl:hr"),
+        SourceRecord("shared.txt", "acl:finance"),
+        SourceRecord("shared.txt", None),
+    ]
+
+    for record in records:
+        await store.register_source(record)
+
+    for record in records:
+        assert await store.get_source_record("shared.txt", acl_ref=record.acl_ref) == record
+
+    assert await store.get_source_record("shared.txt", acl_ref="acl:legal") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "acl",
+    [None, "acl:finance"],
+)
+async def test_source_registry_repeated_registration_is_idempotent(
+    store: Neo4jStore,
+    acl: str | None,
+) -> None:
+    from ontos.storage.sources import SourceRecord
+
+    record = SourceRecord("doc.txt", acl)
+
+    await store.register_source(record)
+    await store.register_source(record)
+
+    assert await store.get_source_record("doc.txt", acl_ref=acl) == record
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_source_registry_rejects_empty_identifiers(
+    store: Neo4jStore,
+) -> None:
+    from ontos.storage.sources import SourceRecord
+
+    with pytest.raises(ValueError):
+        await store.register_source(SourceRecord("", None))
+
+    with pytest.raises(ValueError):
+        await store.register_source(SourceRecord("doc.txt", ""))
+
+    assert await store.get_source_record("doc.txt", acl_ref=None) is None

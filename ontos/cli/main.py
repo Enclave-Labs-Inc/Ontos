@@ -379,6 +379,316 @@ def _cli_failure_decision(exc: Exception) -> str:
     return "error"
 
 
+@app.command("reingest")
+def reingest(
+    ctx: typer.Context,
+    source_dir: Annotated[
+        Path,
+        typer.Option(
+            "--source-dir",
+            help="Trusted root containing the exact requested source.",
+        ),
+    ],
+    source_id: Annotated[
+        str,
+        typer.Option(
+            "--source-id",
+            help="Exact root-relative source ID; no directory scanning.",
+        ),
+    ],
+    ontology_path: Annotated[
+        Path,
+        typer.Option("--ontology", help="Active ontology YAML."),
+    ],
+    acting_on_behalf_of: Annotated[
+        str,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Trusted local operator identity; not authentication.",
+        ),
+    ],
+    acl_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--acl-ref",
+            help="Exact recorded ACL; omit only for public sources.",
+        ),
+    ] = None,
+    storage_path: Annotated[
+        str | None,
+        typer.Option(
+            "--storage-path",
+            help="Existing persistent NetworkX storage path.",
+        ),
+    ] = None,
+    ollama_model: Annotated[
+        str,
+        typer.Option("--ollama-model", help="Local Ollama extraction model."),
+    ] = "llama3.1:8b",
+    ollama_url: Annotated[
+        str,
+        typer.Option(
+            "--ollama-url",
+            help="Loopback Ollama URL; remote endpoints are refused.",
+        ),
+    ] = "http://localhost:11434",
+    ollama_timeout: Annotated[
+        float,
+        typer.Option("--ollama-timeout", help="Ollama timeout in seconds."),
+    ] = 60.0,
+) -> None:
+    """Re-ingest one registered, explicitly ACL-scoped local source.
+
+    Requires ontology_approver plus VIEW on restricted evidence, a
+    persistent Article-12 audit sink, and trusted local-operator access.
+    Only the selected .txt, .md or .pdf source is loaded.
+    """
+    from ontos.extraction import LlmExtractor
+    from ontos.ingest.base import SourceDocument
+    from ontos.ingest.scoped_files import load_scoped_document
+    from ontos.ontology import load_ontology
+    from ontos.resolver import ExactMatchResolver
+    from ontos.runtime.scoped_execution import run_scoped_reingest
+    from ontos.runtime.scoped_reingest import (
+        ScopedReingestDeniedError,
+        _audit_decision,
+        authorize_scoped_reingest,
+    )
+    from ontos.runtime.server import (
+        build_authz,
+        build_store,
+        initialize_store,
+    )
+    from ontos.storage.base import GraphStore
+    from ontos.storage.sources import SourceRecord, SourceRegistry
+
+    # Explicitly forbid bridge backends and non-loopback URLs.
+    try:
+        parsed_url = urlsplit(ollama_url)
+        local_url = (
+            parsed_url.scheme == "http"
+            and parsed_url.hostname in ("localhost", "127.0.0.1", "::1")
+            and parsed_url.port is not None
+            and not parsed_url.username
+            and not parsed_url.password
+            and parsed_url.path in ("", "/")
+            and not parsed_url.query
+            and not parsed_url.fragment
+        )
+    except ValueError:
+        local_url = False
+
+    if not local_url:
+        raise typer.BadParameter("Scoped re-ingestion requires a loopback HTTP Ollama URL.")
+
+    if ollama_timeout <= 0:
+        raise typer.BadParameter("--ollama-timeout must be positive.")
+
+    storage_url, storage_password_env = _cli_storage_override(ctx)
+
+    if storage_url is not None and storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    resolved_path = None if storage_url is not None else _resolve_storage_path(storage_path)
+
+    try:
+        cfg = _build_cli_runtime_config(
+            resolved_path,
+            storage_url=storage_url,
+            storage_password_env=storage_password_env,
+        )
+    except ValueError:
+        typer.echo("Invalid re-ingestion runtime configuration.", err=True)
+        raise typer.Exit(code=2) from None
+
+    if cfg.storage_backend == "networkx" and cfg.storage_path is None:
+        typer.echo("Re-ingestion requires persistent storage.", err=True)
+        raise typer.Exit(code=2)
+
+    if not cfg.audit_db_url or not os.environ.get(cfg.audit_signing_key_env):
+        typer.echo(
+            "Persistent audit database and explicit signing key required.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    identity = SourceRecord(source_id=source_id, acl_ref=acl_ref)
+    requested = [identity]
+
+    async def _run() -> None:
+        # The audit sink is initialized before graph access, document
+        # loading, extractor construction or any graph mutation.
+        audit = await _open_cli_audit(cfg)
+        store: GraphStore | None = None
+
+        try:
+            # A CLI argument is not proof of identity. Require the
+            # deployment to pin the expected operator subject.
+            trusted_subject = os.environ.get("ONTOS_REINGEST_OPERATOR_SUBJECT", "")
+            if not trusted_subject.strip() or trusted_subject != acting_on_behalf_of:
+                # Record what the caller asserted, not the trusted
+                # identity they failed to match. This is an unverified
+                # claim, never proof of authentication.
+                await _audit_decision(
+                    audit=audit,
+                    subject=acting_on_behalf_of,
+                    sources=requested,
+                    decision="operator_identity_untrusted",
+                )
+                raise ScopedReingestDeniedError("Scoped re-ingestion denied")
+
+            try:
+                authz = build_authz(cfg)
+            except Exception:
+                await _audit_decision(
+                    audit=audit,
+                    subject=acting_on_behalf_of,
+                    sources=requested,
+                    decision="authorization_error",
+                )
+                raise ScopedReingestDeniedError("Scoped re-ingestion denied") from None
+
+            # Authorize before building storage or parsing any source.
+            await authorize_scoped_reingest(
+                authz=authz,
+                audit=audit,
+                subject=acting_on_behalf_of,
+                sources=requested,
+            )
+
+            # The deployment must pin the trusted source directory.
+            # The CLI flag alone must never select an arbitrary root.
+            try:
+                configured_root = os.environ.get("ONTOS_REINGEST_SOURCE_ROOT")
+                if not configured_root:
+                    raise ValueError("Missing configured source root")
+
+                trusted_root = Path(configured_root).resolve(strict=True)
+                requested_root = source_dir.resolve(strict=True)
+
+                if not trusted_root.is_dir() or requested_root != trusted_root:
+                    raise ValueError("Untrusted source root")
+            except (OSError, RuntimeError, ValueError):
+                await _audit_decision(
+                    audit=audit,
+                    subject=acting_on_behalf_of,
+                    sources=requested,
+                    decision="source_root_untrusted",
+                )
+                raise ScopedReingestDeniedError("Scoped re-ingestion denied") from None
+
+            try:
+                store = build_store(cfg)
+                if not isinstance(store, SourceRegistry):
+                    raise TypeError("Source registry unsupported")
+                await initialize_store(store)
+            except Exception:
+                await _audit_decision(
+                    audit=audit,
+                    subject=acting_on_behalf_of,
+                    sources=requested,
+                    decision="storage_error",
+                )
+                raise ScopedReingestDeniedError("Scoped re-ingestion unavailable") from None
+
+            try:
+                ontology = load_ontology(ontology_path)
+                llm = _build_llm(
+                    "ollama",
+                    ollama_model=ollama_model,
+                    ollama_url=ollama_url,
+                    ollama_timeout=ollama_timeout,
+                    anthropic_model="",
+                    anthropic_api_key_env="",
+                )
+                extractor = LlmExtractor(llm, ontology)
+            except Exception:
+                await _audit_decision(
+                    audit=audit,
+                    subject=acting_on_behalf_of,
+                    sources=requested,
+                    decision="setup_failed",
+                )
+                raise ScopedReingestDeniedError("Scoped re-ingestion unavailable") from None
+
+            async def load_one(record: SourceRecord) -> SourceDocument:
+                return await load_scoped_document(
+                    source_root=trusted_root,
+                    identity=record,
+                )
+
+            report = await run_scoped_reingest(
+                authz=authz,
+                audit=audit,
+                subject=acting_on_behalf_of,
+                sources=requested,
+                registry=store,
+                load_source=load_one,
+                extractor=extractor,
+                resolver=ExactMatchResolver(),
+                store=store,
+                ontology=ontology,
+                emit_completion=False,
+            )
+
+            # NetworkX persists on close. Do not record success or
+            # print a success response until persistence succeeds.
+            try:
+                await store.close()
+            except Exception:
+                store = None
+                await _audit_decision(
+                    audit=audit,
+                    subject=acting_on_behalf_of,
+                    sources=requested,
+                    decision="persistence_failed",
+                )
+                raise ScopedReingestDeniedError("Scoped re-ingestion persistence failed") from None
+
+            store = None
+
+            await _audit_decision(
+                audit=audit,
+                subject=acting_on_behalf_of,
+                sources=requested,
+                decision="completed",
+            )
+
+            # Never print extracted text, raw facts, source paths or
+            # extractor warnings in the operator-facing result.
+            typer.echo(
+                json.dumps(
+                    {
+                        "completed": True,
+                        "documents_seen": report.documents_seen,
+                        "documents_extracted": report.documents_extracted,
+                        "facts_written": report.facts_written,
+                        "facts_superseded": report.facts_superseded,
+                    },
+                    sort_keys=True,
+                )
+            )
+
+        except ScopedReingestDeniedError:
+            typer.echo(
+                "Scoped re-ingestion denied or unavailable.",
+                err=True,
+            )
+            raise typer.Exit(code=1) from None
+        except Exception:
+            typer.echo(
+                "Scoped re-ingestion failed; partial writes may exist. Inspect the audit chain.",
+                err=True,
+            )
+            raise typer.Exit(code=1) from None
+        finally:
+            if store is not None:
+                await _close_store_without_masking(store)
+            await _close_store_without_masking(audit)
+
+    asyncio.run(_run())
+
+
 @app.command()
 def ingest(
     ctx: typer.Context,

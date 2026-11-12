@@ -54,6 +54,7 @@ from ontos.storage.base import (
     StoredCandidate,
 )
 from ontos.storage.models import GraphScan, StoredEntity
+from ontos.storage.sources import SourceRecord
 
 log = structlog.get_logger(__name__)
 
@@ -97,6 +98,7 @@ class NetworkxStore:
         # (source_id, id) sorted so pages are a bisect, not a full sort.
         self._candidates: dict[str, RejectedCandidate] = {}
         self._candidate_order: list[tuple[str, str]] = []
+        self._source_acls: set[tuple[str, str | None]] = set()
         self._path: Path | None = path
         # Set by any state-mutating method; checked by `flush()` so that
         # read-only callers (e.g. `ontos query`) never rewrite the file —
@@ -230,6 +232,12 @@ class NetworkxStore:
             # migration path — on next flush the file gets rewritten
             # under the current magic header with the new key).
             self._merges = payload.get("merges", {})
+            stored_sources = payload.get("sources", [])
+            # Accept the intermediate single-ACL registry payload too.
+            if isinstance(stored_sources, dict):
+                self._source_acls = set(stored_sources.items())
+            else:
+                self._source_acls = set(stored_sources)
             for candidate in payload.get("candidates", []):
                 self._index_candidate(candidate)
         except (KeyError, TypeError) as exc:
@@ -262,6 +270,7 @@ class NetworkxStore:
                     "facts": self._facts,
                     "merges": self._merges,
                     "candidates": list(self._candidates.values()),
+                    "sources": list(self._source_acls),
                 }
             )
         )
@@ -275,6 +284,28 @@ class NetworkxStore:
             tmp.chmod(0o600)
         tmp.replace(self._path)  # atomic swap
         self._dirty = False
+
+    async def get_source_record(
+        self, source_id: str, *, acl_ref: str | None
+    ) -> SourceRecord | None:
+        """Privileged lookup by exact source and ACL scope."""
+        if (source_id, acl_ref) not in self._source_acls:
+            return None
+        return SourceRecord(source_id, acl_ref)
+
+    async def register_source(self, record: SourceRecord) -> None:
+        """Register an exact source/ACL pair idempotently."""
+        if not record.source_id.strip():
+            raise ValueError("source_id must not be empty")
+        if record.acl_ref is not None and not record.acl_ref.strip():
+            raise ValueError("acl_ref must not be empty")
+
+        identity = (record.source_id, record.acl_ref)
+        if identity in self._source_acls:
+            return
+
+        self._source_acls.add(identity)
+        self._dirty = True
 
     @property
     def path(self) -> Path | None:
@@ -951,6 +982,7 @@ class NetworkxStore:
         self._merges.clear()
         self._candidates.clear()
         self._candidate_order.clear()
+        self._source_acls.clear()
 
 
 def _read_order(fact: Fact) -> tuple[float, str]:
