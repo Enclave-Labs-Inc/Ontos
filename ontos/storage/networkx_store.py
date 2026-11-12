@@ -656,6 +656,17 @@ class NetworkxStore:
         acl = attrs.get("acl_ref")
         return acl if isinstance(acl, str) else None
 
+    async def source_has_other_acl(
+        self,
+        source_id: str,
+        *,
+        acl_ref: str | None,
+    ) -> bool:
+        return any(
+            fact.provenance.source_id == source_id and fact.acl_ref != acl_ref
+            for fact in self._facts.values()
+        )
+
     async def entities_for_source(
         self,
         source_id: str,

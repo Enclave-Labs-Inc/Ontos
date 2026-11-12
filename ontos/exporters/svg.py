@@ -277,7 +277,10 @@ def _curve(
         # Arc out to the right of the column, never through other boxes.
         sx, sy = subject[0] + _NODE_WIDTH, subject[1] + _NODE_HEIGHT / 2
         tx, ty = target[0] + _NODE_WIDTH, target[1] + _NODE_HEIGHT / 2
-        reach = _ARC_REACH + lane * _FAN
+        # Lanes alternate 0, 1, -1, 2, -2 ...; arcs only fan outward, so
+        # map them to a strictly increasing reach (lane -2 at 90 - 96 would
+        # otherwise fold back through the column).
+        reach = _ARC_REACH + (2 * abs(lane) - (lane > 0)) * _FAN / 2
         c1, c2 = (sx + reach, sy), (tx + reach, ty)
     else:
         forward = target[0] > subject[0]

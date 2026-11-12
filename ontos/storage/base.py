@@ -363,6 +363,19 @@ class GraphStore(Protocol):
         """
         ...
 
+    async def source_has_other_acl(
+        self,
+        source_id: str,
+        *,
+        acl_ref: str | None,
+    ) -> bool:
+        """Whether any fact from `source_id` carries an ACL other than `acl_ref`.
+
+        Internal write-path lookup. Historical facts count. Returns only a
+        boolean so the stored ACL itself is never disclosed to the caller.
+        """
+        ...
+
     async def entities_for_source(
         self,
         source_id: str,

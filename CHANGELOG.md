@@ -63,6 +63,12 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
     entity (the exact-match rule).
   - Stored ids no longer match the model's raw ids.
   - An exact seed name match is no longer treated as ambiguous.
+  - Ingesting a source under a different ACL than before now adds a
+    warning to the ingest report ("source also has facts under a
+    different ACL; they are not superseded by this ingest"). The other
+    ACL is never named. Before this change such a document either failed
+    with a cross-ACL entity conflict, when raw ids happened to collide, or
+    silently created a second copy.
 
 ## [0.9.0] - 2026-11-09 - ontology evolution: versioned ontologies, audited approval and verified migrations
 

@@ -106,3 +106,19 @@ def test_render_svg_is_deterministic() -> None:
     )
 
     assert render_svg(scan) == render_svg(reversed_scan)
+
+
+def test_same_column_arcs_always_fan_outward() -> None:
+    """#123 review: parallel same-column arcs must not fold back into the column."""
+    from ontos.exporters.svg import _NODE_WIDTH, _curve
+
+    subject, target = (40, 40), (40, 200)
+    column_edge = subject[0] + _NODE_WIDTH
+    reaches = []
+    for lane in (0, 1, -1, 2, -2, 3, -3):
+        path, _ = _curve(subject, target, same_column=True, lane=lane)
+        control_x = float(path.split("C")[1].split(",")[0].split()[0])
+        reaches.append(control_x - column_edge)
+
+    assert all(reach > 0 for reach in reaches)
+    assert reaches == sorted(reaches) and len(set(reaches)) == len(reaches)

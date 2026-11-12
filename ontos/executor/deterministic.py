@@ -282,7 +282,7 @@ class DeterministicExecutor:
             else (None, entity.id)
             for entity in pool
         }
-        if len(candidates) > 1 and len(identities) == 1:
+        if len(identities) == 1:
             warnings.append(
                 f"seed entity {entity_id!r} resolved to {len(candidates)} entities "
                 "with the same type and name; treating them as one"

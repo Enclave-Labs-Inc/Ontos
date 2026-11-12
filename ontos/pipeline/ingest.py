@@ -349,6 +349,23 @@ class IngestPipeline:
                 errors.append(IngestError(source_id=doc.source_id, reason=reason))
                 continue
 
+            # The same source id under several ACLs is a supported, strictly
+            # separate set of scopes, so this is not refused. But with
+            # ACL-scoped ids a source whose ACL *changed* now lands on fresh
+            # nodes while its old facts stay readable under the old ACL and
+            # are never superseded. Make that visible instead of silent.
+            if await self._store.source_has_other_acl(doc.source_id, acl_ref=doc.acl_ref):
+                # Generic text: never disclose the other ACL in the report.
+                warnings.append(
+                    f"{doc.source_id}: source also has facts under a different ACL; "
+                    "they are not superseded by this ingest"
+                )
+                log.warning(
+                    "source-acl-changed",
+                    source_id=doc.source_id,
+                    attempted_acl=doc.acl_ref,
+                )
+
             # Same-named entities under different ACLs stay separate nodes
             # (#121): an entity carries one ACL, and #48 refuses to rewrite
             # it from another scope.

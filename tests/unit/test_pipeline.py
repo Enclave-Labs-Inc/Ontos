@@ -918,6 +918,12 @@ async def test_same_source_id_reconciliation_is_strict_same_acl(
     assert second.facts_written == 1
     assert second.facts_reaffirmed == 0
 
+    # The ACL change is surfaced, never silent, and the other ACL is not
+    # disclosed in the report (#123 review).
+    assert not any("different ACL" in warning for warning in first.warnings)
+    assert any("different ACL" in warning for warning in second.warnings)
+    assert all("acl:hr" not in warning for warning in second.warnings)
+
     hr_facts = await store.search("works_at", allowed_acls=["acl:hr"])
     finance_facts = await store.search("works_at", allowed_acls=["acl:finance"])
 

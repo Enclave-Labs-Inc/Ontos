@@ -30,9 +30,15 @@ was first ingested with.
 
 `--acl-ref` must match that registered pair exactly. It is a
 selector, never a way to assign or change a source's ACL.
-Registering an existing source under a different ACL raises
-`SourceAclConflictError`; changing a source's ACL requires a
-new source id (an administrative ACL migration is not yet
+
+One source id may be registered under several ACLs; each pair
+is a strictly separate scope with its own entities and facts.
+Ingesting a source under a new ACL therefore does not replace
+or supersede its facts under the old one: ingest reports a
+warning ("source also has facts under a different ACL") and
+the old facts stay readable under the old ACL. To really
+change a source's ACL, retire the old facts explicitly or use
+a new source id (an administrative ACL migration is not yet
 supported).
 
 ## Sources ingested before the registry existed
