@@ -2618,6 +2618,127 @@ def ontology_approve(
     asyncio.run(_run())
 
 
+@ontology_app.command("affected-sources")
+def ontology_affected_sources(
+    ctx: typer.Context,
+    acting_on_behalf_of: Annotated[
+        str,
+        typer.Option(
+            "--acting-on-behalf-of",
+            help="Trusted-local-operator asserted identity; not authentication.",
+        ),
+    ],
+    migration_record_path: Annotated[
+        Path,
+        typer.Option("--migration-record", help="Signed migration YAML from `ontology approve`."),
+    ],
+    storage_path: Annotated[
+        str | None,
+        typer.Option("--storage-path", help="Local NetworkX storage path."),
+    ] = None,
+) -> None:
+    """List the sources to re-ingest after an approved ontology change.
+
+    Requires ontology_approver. Only sources whose rejected evidence the
+    operator may VIEW are listed; feed each registered pair to
+    `ontos reingest`. Read-only: nothing is re-ingested.
+    """
+    from ontos.migration.records import load_migration_record
+    from ontos.runtime.affected_sources import (
+        AffectedSourcesDeniedError,
+        AffectedSourcesRequestError,
+        discover_affected_sources,
+    )
+    from ontos.runtime.server import build_authz, build_store, initialize_store
+    from ontos.storage.base import CandidateStore
+    from ontos.storage.sources import SourceRecord, SourceRegistry
+
+    storage_url, storage_password_env = _cli_storage_override(ctx)
+    if storage_url is not None and storage_path is not None:
+        raise typer.BadParameter("--storage and --storage-path cannot be used together.")
+
+    if not acting_on_behalf_of.strip():
+        raise typer.BadParameter("--acting-on-behalf-of cannot be empty.")
+
+    try:
+        record = load_migration_record(migration_record_path)
+    except Exception:
+        typer.echo("Invalid migration record.", err=True)
+        raise typer.Exit(code=2) from None
+
+    resolved_path = None if storage_url is not None else _resolve_storage_path(storage_path)
+
+    try:
+        cfg = _build_cli_runtime_config(
+            resolved_path,
+            storage_url=storage_url,
+            storage_password_env=storage_password_env,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+    # The signing key verifies the migration record; a dev fallback
+    # key could never verify a real approval.
+    if not cfg.audit_db_url or not os.environ.get(cfg.audit_signing_key_env):
+        typer.echo("Persistent audit database and explicit signing key required.", err=True)
+        raise typer.Exit(code=2)
+
+    async def _run() -> None:
+        audit = await _open_cli_audit(cfg)
+        store = None
+        try:
+            try:
+                authz = build_authz(cfg)
+                store = build_store(cfg)
+                if not isinstance(store, CandidateStore) or not isinstance(store, SourceRegistry):
+                    raise TypeError("Storage does not support candidates and source registry")
+                await initialize_store(store)
+            except Exception:
+                typer.echo("Authorization or storage unavailable.", err=True)
+                raise typer.Exit(code=1) from None
+
+            try:
+                affected = await discover_affected_sources(
+                    record=record,
+                    candidate_store=store,
+                    registry=store,
+                    authz=authz,
+                    audit=audit,
+                    subject=acting_on_behalf_of,
+                    agent_identity="ontos-cli-local-operator",
+                )
+            except AffectedSourcesRequestError:
+                typer.echo("Migration record is not a verified approval.", err=True)
+                raise typer.Exit(code=2) from None
+            except AffectedSourcesDeniedError:
+                typer.echo("Affected-source discovery denied.", err=True)
+                raise typer.Exit(code=1) from None
+            except Exception:
+                typer.echo("Affected-source discovery failed; inspect the audit record.", err=True)
+                raise typer.Exit(code=1) from None
+
+            def _pairs(sources: tuple[SourceRecord, ...]) -> list[dict[str, str | None]]:
+                return [{"source_id": s.source_id, "acl_ref": s.acl_ref} for s in sources]
+
+            typer.echo(
+                json.dumps(
+                    {
+                        "ontology_id": record.ontology_id,
+                        "to_version": record.to_version,
+                        "registered": _pairs(affected.registered),
+                        "unregistered": _pairs(affected.unregistered),
+                    },
+                    indent=2,
+                )
+            )
+        finally:
+            if store is not None:
+                await _close_store_without_masking(store)
+            await _close_store_without_masking(audit)
+
+    asyncio.run(_run())
+
+
 audit_app = typer.Typer(help="Audit chain commands.")
 app.add_typer(audit_app, name="audit")
 
