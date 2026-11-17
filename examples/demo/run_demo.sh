@@ -47,9 +47,18 @@ step "2. The graph Ontos built (every fact carries its source)"
 
 step "3. Ask a question in plain English"
 echo "  Q: Who works at Acme Corp?"
-"${ONTOS[@]}" --storage "$STORE" query "Who works at Acme Corp?" \
-  --ontology "$REPO/docs/ontology/examples/starter.yaml" \
-  --ollama-model "$MODEL" --ollama-timeout 300 > "$OUT/query.json" 2> "$OUT/query.err"
+# The local model plans the query; small models occasionally return a plan
+# with no traversal steps (no hits). Planning is read-only and every attempt
+# is audited, so ask again rather than show an empty answer.
+for attempt in 1 2 3; do
+  "${ONTOS[@]}" --storage "$STORE" query "Who works at Acme Corp?" \
+    --ontology "$REPO/docs/ontology/examples/starter.yaml" \
+    --ollama-model "$MODEL" --ollama-timeout 300 > "$OUT/query.json" 2> "$OUT/query.err" || true
+  [ "$("${PY[@]}" "$HERE/show.py" hits "$OUT/query.json")" != "0" ] && break
+  if [ "$attempt" -lt 3 ]; then
+    echo "  (the model's query plan found nothing; asking again, attempt $((attempt + 1)))"
+  fi
+done
 "${PY[@]}" "$HERE/show.py" query "$OUT/query.json"
 
 step "4. An AI agent queries Ontos over MCP"

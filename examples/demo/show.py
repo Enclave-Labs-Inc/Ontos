@@ -25,6 +25,13 @@ def errors(path: str) -> None:
     print(len(_load(path)["errors"]))
 
 
+def hits(path: str) -> None:
+    try:
+        print(len(_load(path)["hits"]))
+    except (OSError, ValueError, KeyError):
+        print(0)
+
+
 def query(path: str) -> None:
     result = _load(path)
     hits = result["hits"]
@@ -59,4 +66,5 @@ def graph(path: str) -> None:
 
 
 if __name__ == "__main__":
-    {"ingest": ingest, "errors": errors, "query": query, "graph": graph}[sys.argv[1]](sys.argv[2])
+    commands = {"ingest": ingest, "errors": errors, "hits": hits, "query": query, "graph": graph}
+    commands[sys.argv[1]](sys.argv[2])
