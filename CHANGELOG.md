@@ -14,7 +14,57 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-17 - scoped re-ingestion and stable entity identity
+
+Completes the ontology-evolution loop from #66. After `ontos ontology
+approve`, an operator lists the affected sources and re-ingests them one at a
+time under their recorded ACL, with permissions rechecked before every write
+and every decision in the Article-12 audit trail. Entity ids are now stable
+and ACL-scoped, which fixes duplicate entities breaking `ask` (#121).
+**Read the upgrade notes.**
+
+### Upgrade notes
+- **Entity ids changed.**
+  - New ingests store `Type:casefolded name` ids. In a restricted document
+    they carry an `@<digest>` ACL suffix, for example
+    `Company:acme corp@3f2a…`.
+  - Existing stores keep their old ids and need no migration: read-time
+    consolidation treats same-type, same-name entities as one.
+  - Anything that matched on the model's raw ids, such as scripts or saved
+    exports, must switch to the new ids.
+- **One person, one node per name.** Two different people with the same
+  name in one document are now one entity.
+- **New ingest warning.** A source ingested under a different ACL than
+  before now gets a report warning, and its old facts are not superseded.
+- **Source registry.**
+  - Ingest now records each `(source_id, acl_ref)` pair, in the NetworkX
+    pickle and as `:IngestedSource` nodes with a uniqueness constraint in
+    Neo4j.
+  - The NetworkX file format is unchanged; older stores load with an empty
+    registry.
+  - Sources ingested before this release must be ingested normally once
+    before `ontos reingest` accepts them (#125).
+- **`ontos reingest` needs deployment configuration:**
+  - `ONTOS_AUDIT_DB_URL` and an explicit `ONTOS_AUDIT_SIGNING_KEY`;
+  - `ONTOS_REINGEST_SOURCE_ROOT` and `ONTOS_REINGEST_OPERATOR_SUBJECT`;
+  - a loopback Ollama;
+  - the operator must hold `ontology_approver`, plus `VIEW` on the source's
+    ACL.
+
+  See `docs/scoped-reingest.md`.
+
 ### Added
+
+- `ontos reingest` re-extracts one registered source under its exact
+  recorded ACL (#66 M3-3, #120).
+  - Authorization comes first: `ontology_approver` and `VIEW` are checked
+    before the store is opened or any file is read.
+  - The command loads only the selected `.txt`, `.md` or `.pdf`, with
+    `O_NOFOLLOW` and no directory scan.
+  - Before every graph mutation it rechecks permissions and the source
+    registration.
+  - Every decision is audited with keyed scope references, never raw
+    source ids or ACLs.
 
 - `ONTOS_REINGEST_RECHECK_SECONDS` (default `0`, maximum `300`) lets scoped
   re-ingest reuse a successful per-write authorization recheck for a bounded
@@ -40,6 +90,11 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
   - Hover tooltips show provenance.
 - **Unchanged.** Output stays deterministic and dependency-free, and keeps
   the same `data-*` metadata.
+
+- `examples/demo/`: a one-command local demo (`run_demo.sh`: ingest, ask,
+  an MCP agent, audit verification, SVG graph) and a deterministic
+  walkthrough of `as_of`, ACL pruning and the audit chain (`walkthrough.py`).
+  The demo re-asks when a small local model returns an empty query plan.
 
 ### Fixed — one real-world entity is one graph entity (#121, #122)
 - **Duplicate entities broke `ask`.** The extractor stored whatever entity ids
