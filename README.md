@@ -34,16 +34,16 @@ Every fact carries provenance. Every query is audit-ready. Every deployment runs
 
 ## Status
 
-**0.9.0.** The runtime works end-to-end:
+**0.10.0.** The runtime works end-to-end:
 - **Ingest** text and PDF corpora (`ontos ingest`).
 - **Query** with `ontos query "..."` or the `ask` MCP tool.
 - **Export** the graph for visualization (`ontos export`).
 - **Verify** the audit chain (`ontos audit verify`).
 
-0.9.0 adds:
-- **Ontology evolution with audited approval** (#66 M3): `ontos ontology approve` turns an evidence-backed suggestion into a new, signed ontology version and migration record. The new version is never activated automatically.
-- **Verified migrations on every read surface**: historical facts are projected onto the active ontology in `ask`, `search`, `traverse`, `explain`, `provenance` and exports.
-- **Reproducible, pinned LLM-assisted suggestions** with a single trust boundary for the model backend.
+0.10.0 adds:
+- **Audited, ACL-scoped re-ingestion** (#66 M3-3): after an approved ontology change, `ontos ontology affected-sources` lists the sources to reprocess and `ontos reingest` re-extracts exactly one registered source under its recorded ACL, rechecking permissions before every write.
+- **One real-world entity is one graph entity** (#121): stable, ACL-scoped entity ids, so plain-English questions such as "Who works at Acme Corp?" no longer stall on duplicate nodes.
+- **A readable SVG graph export** and a one-command local demo (`examples/demo/`).
 
 It also contains **breaking changes**. Read the upgrade notes in [CHANGELOG.md](CHANGELOG.md) before upgrading. Per-milestone architecture notes live in [docs/design/](docs/design/).
 
@@ -62,7 +62,7 @@ The PyPI distribution name is `enclave-ontos`; the import name stays `ontos` (sa
 Container image on GHCR (multi-platform amd64):
 
 ```bash
-docker pull ghcr.io/enclave-labs-inc/ontos:0.9.0
+docker pull ghcr.io/enclave-labs-inc/ontos:0.10.0
 # or the moving tag
 docker pull ghcr.io/enclave-labs-inc/ontos:latest
 ```
