@@ -1099,7 +1099,11 @@ def query(
             raise
         started = time.perf_counter()
         policy_decisions: list[dict[str, str]] = []
-        tool_arguments: dict[str, object] = {"planner_id": planner.id, "executor_id": executor.id}
+        tool_arguments: dict[str, object] = {
+            "planner_id": planner.id,
+            "executor_id": executor.id,
+            "search_mode": executor.keyword_search_mode,
+        }
         if acting_on_behalf_of is not None:
             tool_arguments["identity_assurance"] = "operator_asserted"
 

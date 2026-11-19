@@ -71,20 +71,51 @@ async def test_lexical_mode_is_acl_filtered_and_audited(principal: str, expected
 
     assert len(result.structured_content["payload"]) == expected
     arguments = _arguments(audit)
-    assert arguments["mode"] == "lexical"
+    assert arguments["mode"] == arguments["resolved_mode"] == "lexical"
     # Never counts or scores of filtered items.
-    assert set(arguments) == {"as_of", "k", "mode"}
+    assert set(arguments) == {"as_of", "k", "mode", "resolved_mode"}
 
 
 @pytest.mark.asyncio
-async def test_default_mode_is_substring_and_audited() -> None:
+async def test_default_mode_is_auto_resolving_to_lexical() -> None:
+    audit = AuditEmitter(signing_key=b"mcp-lexical")
+    async with Client(await _server(audit)) as client:
+        result = await client.call_tool(
+            "search",
+            {"query": "who works at acme", "agent_identity": "agent", "acting_on_behalf_of": "x"},
+        )
+
+    assert len(result.structured_content["payload"]) == 1
+    arguments = _arguments(audit)
+    assert (arguments["mode"], arguments["resolved_mode"]) == ("auto", "lexical")
+
+
+@pytest.mark.asyncio
+async def test_operator_can_revert_auto_to_substring(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONTOS_SEARCH_MODE", "substring")
+    audit = AuditEmitter(signing_key=b"mcp-lexical")
+    async with Client(await _server(audit)) as client:
+        result = await client.call_tool(
+            "search",
+            {"query": "who works at acme", "agent_identity": "agent", "acting_on_behalf_of": "x"},
+        )
+
+    assert result.structured_content["payload"] == []
+    arguments = _arguments(audit)
+    assert (arguments["mode"], arguments["resolved_mode"]) == ("auto", "substring")
+
+
+@pytest.mark.asyncio
+async def test_explicit_mode_overrides_deployment_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONTOS_SEARCH_MODE", "substring")
     audit = AuditEmitter(signing_key=b"mcp-lexical")
     async with Client(await _server(audit)) as client:
         await client.call_tool(
-            "search", {"query": "acme", "agent_identity": "agent", "acting_on_behalf_of": "user:x"}
+            "search",
+            {"query": "acme", "mode": "lexical", "agent_identity": "a", "acting_on_behalf_of": "x"},
         )
 
-    assert _arguments(audit)["mode"] == "substring"
+    assert _arguments(audit)["resolved_mode"] == "lexical"
 
 
 @pytest.mark.asyncio

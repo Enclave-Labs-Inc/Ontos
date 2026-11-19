@@ -14,6 +14,22 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Changed — BM25 is the default search (#119 phase 3)
+- **New `auto` mode.** Search now defaults to `auto`, set per deployment
+  with `ONTOS_SEARCH_MODE` (`auto` | `substring` | `lexical`). `auto`
+  resolves to BM25 lexical ranking until an embedding backend exists.
+- **Where it applies:**
+  - the MCP `search` tool (its `mode` argument now defaults to `auto`);
+  - keyword seeds in `ask` and `ontos query`.
+- **Audit.** `search` records `mode` and `resolved_mode`; `ask` and
+  `ontos query` record `search_mode`.
+- **Upgrade note.** Natural-language `search` queries that returned
+  nothing now return ranked facts, and partial-word queries such as "acm"
+  no longer match. Set `ONTOS_SEARCH_MODE=substring` to keep the old
+  behaviour.
+- **Unchanged.** Direct `store.search()` and `DeterministicExecutor()` use
+  stay `substring`.
+
 ### Added
 
 - **BM25 lexical search** (#119 phase 1): `search(..., mode="lexical")` is

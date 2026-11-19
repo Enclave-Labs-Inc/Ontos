@@ -37,6 +37,7 @@ from ontos.ontology import Ontology
 from ontos.planner import Plan, SeedByEntity, SeedByKeyword
 from ontos.runtime.models import Fact
 from ontos.storage.base import GraphStore
+from ontos.storage.lexical import SearchMode
 
 # Matches a trailing " (Word)" or " (Word_word2)" annotation — the
 # exact shape the LLM planner tends to append when it thinks it's
@@ -84,7 +85,9 @@ class DeterministicExecutor:
         current_ontology: Ontology | None = None,
         migration_registry: MigrationRegistry | None = None,
         migration_approval_check: Callable[[], None] | None = None,
+        keyword_search_mode: SearchMode = "substring",
     ) -> None:
+        self.keyword_search_mode: SearchMode = keyword_search_mode
         self._current_ontology = current_ontology
         self._migration_registry = migration_registry
         self._migration_approval_check = migration_approval_check
@@ -167,6 +170,7 @@ class DeterministicExecutor:
                 k=plan.seed.k,
                 acl_subject=acl_subject,
                 allowed_acls=allowed_acls,
+                mode=self.keyword_search_mode,
             )
             ids: list[str] = []
             for f in hits:
