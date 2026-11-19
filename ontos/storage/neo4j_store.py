@@ -42,6 +42,7 @@ from ontos.storage.base import (
     FactNotOpenError,
     StoredCandidate,
 )
+from ontos.storage.lexical import SearchMode, rank_bm25
 from ontos.storage.models import GraphScan, StoredEntity
 from ontos.storage.sources import SourceAclConflictError, SourceRecord
 
@@ -172,6 +173,39 @@ def _to_python_datetime(value: Any) -> Any:
     if isinstance(value, Neo4jDateTime):
         return value.to_native()
     return value
+
+
+# Facts the caller may see at `$as_of`: alive, own ACL allowed, and both
+# endpoint entities visible (same rule as scan()). Shared by every search
+# mode so their visibility can never diverge.
+_VISIBLE_FACTS_CYPHER = """
+        MATCH (a:Entity)-[r:RELATES]->(b:Entity)
+        WHERE
+            (
+                ($as_of IS NULL AND r.t_invalid IS NULL)
+                OR (
+                    $as_of IS NOT NULL
+                    AND r.t_valid <= $as_of
+                    AND (r.t_invalid IS NULL OR r.t_invalid > $as_of)
+                )
+            )
+            AND (
+                r.acl_ref IS NULL
+                OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
+                OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                    AND r.acl_ref = $acl_subject)
+            )
+            // A visible fact must not expose an endpoint entity the caller
+            // can't see; same rule as scan().
+            AND (a.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND a.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND a.acl_ref = $acl_subject))
+            AND (b.acl_ref IS NULL
+             OR ($allowed_acls IS NOT NULL AND b.acl_ref IN $allowed_acls)
+             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
+                 AND b.acl_ref = $acl_subject))
+"""
 
 
 class Neo4jStore:
@@ -705,40 +739,26 @@ class Neo4jStore:
         k: int = 10,
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
+        mode: SearchMode = "substring",
     ) -> list[Fact]:
+        if mode == "lexical":
+            return await self._search_lexical(
+                query,
+                as_of=as_of,
+                k=k,
+                acl_subject=acl_subject,
+                allowed_acls=allowed_acls,
+            )
+        if mode != "substring":
+            raise ValueError(f"unknown search mode: {mode!r}")
         # Substring match over ids, predicate, and names/aliases of endpoint
         # entities the caller can see, scored and ordered exactly like
         # NetworkxStore (#82, #102). Endpoints are visible by the WHERE
         # below, so their names are too; only typed (upserted) nodes have
         # names, as `add_fact` sets canonical_name = id on raw nodes.
-        # M3 upgrades to full-text + vector hybrid.
-        cypher = """
-        MATCH (a:Entity)-[r:RELATES]->(b:Entity)
-        WHERE
-            (
-                ($as_of IS NULL AND r.t_invalid IS NULL)
-                OR (
-                    $as_of IS NOT NULL
-                    AND r.t_valid <= $as_of
-                    AND (r.t_invalid IS NULL OR r.t_invalid > $as_of)
-                )
-            )
-            AND (
-                r.acl_ref IS NULL
-                OR ($allowed_acls IS NOT NULL AND r.acl_ref IN $allowed_acls)
-                OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
-                    AND r.acl_ref = $acl_subject)
-            )
-            // A visible fact must not expose an endpoint entity the caller
-            // can't see; same rule as scan().
-            AND (a.acl_ref IS NULL
-             OR ($allowed_acls IS NOT NULL AND a.acl_ref IN $allowed_acls)
-             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
-                 AND a.acl_ref = $acl_subject))
-            AND (b.acl_ref IS NULL
-             OR ($allowed_acls IS NOT NULL AND b.acl_ref IN $allowed_acls)
-             OR ($allowed_acls IS NULL AND $acl_subject IS NOT NULL
-                 AND b.acl_ref = $acl_subject))
+        cypher = (
+            _VISIBLE_FACTS_CYPHER
+            + """
         WITH a, r, b,
              [f IN
                  [a.id, r.predicate, b.id]
@@ -757,6 +777,7 @@ class Neo4jStore:
         ORDER BY score DESC, r.ingested_at, r.fact_id
         LIMIT $k
         """
+        )
         async with self._driver.session(database=self._database) as session:
             result = await session.run(
                 cypher,
@@ -768,6 +789,71 @@ class Neo4jStore:
             )
             records = await result.data()
         return [_edge_props_to_fact(r["subject_id"], r["object_id"], r["props"]) for r in records]
+
+    async def _search_lexical(
+        self,
+        query: str,
+        *,
+        as_of: datetime | None,
+        k: int,
+        acl_subject: str | None,
+        allowed_acls: list[str] | None,
+    ) -> list[Fact]:
+        # BM25 statistics must come from the caller's visible facts only,
+        # so a store-wide Lucene index can't be used (its idf would count
+        # forbidden facts). Fetch the visible corpus's text, score in Python
+        # with the same code as NetworkxStore, then load the top k.
+        corpus_cypher = (
+            _VISIBLE_FACTS_CYPHER
+            + """
+        RETURN r.fact_id AS fact_id, r.ingested_at AS ingested_at,
+               [f IN
+                   [a.id, r.predicate, b.id]
+                   + CASE WHEN a.type IS NULL THEN []
+                          ELSE [a.canonical_name] + coalesce(a.aliases, []) END
+                   + CASE WHEN b.type IS NULL THEN []
+                          ELSE [b.canonical_name] + coalesce(b.aliases, []) END
+                WHERE f IS NOT NULL AND f <> ""] AS fields
+        """
+        )
+        params: dict[str, Any] = {
+            "as_of": as_of,
+            "acl_subject": acl_subject,
+            "allowed_acls": allowed_acls,
+        }
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(corpus_cypher, params)
+            rows = await result.data()
+
+        order = {
+            row["fact_id"]: (_to_python_datetime(row["ingested_at"]).timestamp(), row["fact_id"])
+            for row in rows
+        }
+        ranked = rank_bm25(query, ((row["fact_id"], row["fields"]) for row in rows))
+        ranked.sort(key=lambda pair: (-pair[0], *order[pair[1]]))
+        top = [fact_id for _, fact_id in ranked[:k]]
+        if not top:
+            return []
+
+        # Re-apply visibility: a fact closed or re-scoped since the first
+        # read must not be returned.
+        fetch_cypher = (
+            _VISIBLE_FACTS_CYPHER
+            + """
+            AND r.fact_id IN $fact_ids
+        RETURN a.id AS subject_id, b.id AS object_id, properties(r) AS props
+        """
+        )
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(fetch_cypher, {**params, "fact_ids": top})
+            records = await result.data()
+        facts = {
+            record["props"]["fact_id"]: _edge_props_to_fact(
+                record["subject_id"], record["object_id"], record["props"]
+            )
+            for record in records
+        }
+        return [facts[fact_id] for fact_id in top if fact_id in facts]
 
     async def search_entities(
         self,
