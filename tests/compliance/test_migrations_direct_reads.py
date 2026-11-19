@@ -236,6 +236,40 @@ async def test_search_still_returns_k_when_the_top_hit_is_excluded(cfg: RuntimeC
     assert _ids(result) == {str(CURRENT.id)}
 
 
+async def test_lexical_search_applies_migration_projection(cfg: RuntimeConfig) -> None:
+    """#119: lexical mode goes through the same #112 projection as substring."""
+    audit = await _approved_server_audit(cfg, b"lexical")
+    server = build_server(cfg, store=await _store(), audit=audit)
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "search",
+            {"query": "works at", "mode": "lexical", "k": 10, "agent_identity": "a"},
+        )
+
+    assert _ids(result) == {str(CURRENT.id), str(VERIFIED.id), str(BEYOND.id)}
+    for record in audit._chain:
+        _no_hidden_ids(record.article12[ArticleTwelveField.RESULT_FACT_IDS])
+
+
+async def test_lexical_search_still_returns_k_when_top_hits_are_excluded(
+    cfg: RuntimeConfig,
+) -> None:
+    # "alice works" ties EXCLUDED, UNSTAMPED and CURRENT (same length, same
+    # terms), so ingest order ranks the two excluded facts first and the
+    # refetch has to re-score twice before CURRENT fills k=1.
+    audit = await _approved_server_audit(cfg, b"lexical-k")
+    server = build_server(cfg, store=await _store(), audit=audit)
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "search",
+            {"query": "alice works", "mode": "lexical", "k": 1, "agent_identity": "a"},
+        )
+
+    assert _ids(result) == {str(CURRENT.id)}
+
+
 async def test_ask_and_direct_reads_agree(
     cfg: RuntimeConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -88,6 +88,22 @@ def test_tokenize_is_unicode_aware_and_uses_casefold() -> None:
     assert tokenize("Straße Müller") == ["strasse", "müller"]
 
 
+def test_tokenize_keeps_combining_marks_inside_words() -> None:
+    # Devanagari vowel signs are combining marks (category M).
+    assert tokenize("हिन्दी") == ["हिन्दी"]
+    assert tokenize("हाथी") == ["हाथी"]
+    assert rank_bm25("हिन्दी", [("f1", ["हाथी"])]) == []
+
+
+def test_tokenize_normalizes_composed_and_decomposed_forms() -> None:
+    import unicodedata
+
+    nfd = unicodedata.normalize("NFD", "José")
+    nfc = unicodedata.normalize("NFC", "José")
+    assert tokenize(nfd) == tokenize(nfc) == ["josé"]
+    assert rank_bm25(nfd, [("f1", [nfc])]) != []
+
+
 def test_tokenize_empty_and_symbols_only() -> None:
     assert tokenize("") == []
     assert tokenize(" -> :: __ ") == []

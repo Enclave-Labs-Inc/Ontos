@@ -14,7 +14,7 @@ NetworkX and Neo4j return identical scores and orderings.
 from __future__ import annotations
 
 import math
-import re
+import unicodedata
 from collections import Counter
 from collections.abc import Hashable, Iterable, Sequence
 from typing import Literal
@@ -25,14 +25,18 @@ SearchMode = Literal["substring", "lexical"]
 K1 = 1.2
 B = 0.75
 
-# Letters and digits only: underscores split too, so `works_at` matches
-# "works" and "at". Unicode-aware, so non-English names tokenize.
-_TOKEN_RE = re.compile(r"[^\W_]+")
-
 
 def tokenize(text: str) -> list[str]:
-    """Casefolded word tokens; punctuation, underscores and spaces split."""
-    return _TOKEN_RE.findall(text.casefold())
+    """Casefolded word tokens; punctuation, underscores and spaces split.
+
+    NFKC first so composed and decomposed spellings match. Combining marks
+    stay inside a word: Indic vowel signs are marks, and splitting on them
+    reduces words to single consonants that match unrelated words.
+    """
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    return "".join(
+        ch if ch.isalnum() or unicodedata.category(ch).startswith("M") else " " for ch in normalized
+    ).split()
 
 
 def rank_bm25[Key: Hashable](
