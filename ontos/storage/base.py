@@ -28,6 +28,7 @@ from uuid import UUID
 from ontos.extraction.base import RejectedCandidate
 from ontos.resolver.base import MergeRecord
 from ontos.runtime.models import Entity, Fact
+from ontos.storage.lexical import SearchMode
 from ontos.storage.models import GraphScan, StoredEntity
 
 
@@ -302,7 +303,17 @@ class GraphStore(Protocol):
         k: int = 10,
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
-    ) -> list[Fact]: ...
+        mode: SearchMode = "substring",
+    ) -> list[Fact]:
+        """Facts matching `query`, visible to the caller and alive at `as_of`.
+
+        `substring` (default) matches the query as one substring of the
+        fact's ids, predicate and visible endpoint names. `lexical` ranks
+        by BM25 over the same text, with corpus statistics computed only
+        over facts the caller may see (`ontos.storage.lexical`). Both break
+        ties by (ingested_at, fact id) on every backend (#102).
+        """
+        ...
 
     async def search_entities(
         self,

@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast, get_args
 from uuid import UUID
 
 import structlog
@@ -47,6 +47,7 @@ from ontos.runtime.migration_view import MigrationView, build_migration_view
 from ontos.runtime.models import ArticleTwelveField, AuditRecord, Fact
 from ontos.runtime.temporal import parse_as_of
 from ontos.storage.base import GraphStore
+from ontos.storage.lexical import SearchMode
 from ontos.storage.networkx_store import NetworkxStore
 
 log = structlog.get_logger()
@@ -97,6 +98,7 @@ class SnapshotMetadata(BaseModel):
 
 
 MAX_SEARCH_K = 100
+SEARCH_MODES: tuple[str, ...] = get_args(SearchMode)
 MAX_TRAVERSE_DEPTH = 10
 # With migrations on, `search` refetches when projection drops facts so a
 # caller still gets up to `k`; this bounds the extra store reads.
@@ -514,8 +516,13 @@ def build_server(
         acting_on_behalf_of: str | None = None,
         as_of: str | None = None,
         k: int = 10,
+        mode: str = "substring",
     ) -> ToolResponse:
-        """Semantic + graph retrieval. Returns facts with per-fact provenance."""
+        """Keyword retrieval over facts. Returns facts with per-fact provenance.
+
+        `mode="substring"` (default) matches the query as one substring;
+        `mode="lexical"` ranks by BM25 over the caller's visible facts.
+        """
         started = time.perf_counter()
         caller = await _authenticate(
             tool="search",
@@ -525,6 +532,9 @@ def build_server(
         )
         ts = _parse_as_of_arg(as_of)
         k = _bounded_arg("k", k, 1, MAX_SEARCH_K)
+        if mode not in SEARCH_MODES:
+            raise InvalidToolArgumentError(f"mode must be one of {', '.join(SEARCH_MODES)}")
+        search_mode = cast(SearchMode, mode)
         allowed_acls, policy_decisions = await _resolve_allowed_acls(caller.principal)
         fetch = k
         while True:
@@ -534,6 +544,7 @@ def build_server(
                 k=fetch,
                 acl_subject=caller.principal,
                 allowed_acls=allowed_acls,
+                mode=search_mode,
             )
             if migration_view is None:
                 facts = fetched
@@ -548,7 +559,7 @@ def build_server(
             tool="search",
             caller=caller,
             query_text=query,
-            tool_arguments={"as_of": as_of, "k": k},
+            tool_arguments={"as_of": as_of, "k": k, "mode": mode},
             result_fact_ids=[str(f.id) for f in facts],
             latency_ms=latency_ms,
             policy_decisions=policy_decisions,

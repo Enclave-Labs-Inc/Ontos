@@ -53,6 +53,7 @@ from ontos.storage.base import (
     StorageError,
     StoredCandidate,
 )
+from ontos.storage.lexical import SearchMode, rank_bm25
 from ontos.storage.models import GraphScan, StoredEntity
 from ontos.storage.sources import SourceRecord
 
@@ -445,13 +446,12 @@ class NetworkxStore:
         k: int = 10,
         acl_subject: str | None = None,
         allowed_acls: list[str] | None = None,
+        mode: SearchMode = "substring",
     ) -> list[Fact]:
-        # M0: substring match over ids, predicate, and the canonical names and
-        # aliases of endpoint entities the caller can see (#82), ranked by
-        # naive relevance. M3 replaces this with vector + BM25 hybrid.
-        needle = query.lower()
-        matches: list[tuple[float, Fact]] = []
+        # Text per fact: ids, predicate, and the canonical names and aliases
+        # of endpoint entities the caller can see (#82).
         allowed_set = set(allowed_acls) if allowed_acls is not None else None
+        visible: list[tuple[Fact, list[str]]] = []
         for fact in self._facts.values():
             if not _fact_alive_at(fact, as_of):
                 continue
@@ -460,6 +460,19 @@ class NetworkxStore:
             fields = [fact.subject_id, fact.predicate, fact.object_id]
             for endpoint in (fact.subject_id, fact.object_id):
                 fields += self._visible_names(endpoint, acl_subject, allowed_set)
+            visible.append((fact, fields))
+
+        if mode == "lexical":
+            by_id = {fact.id: fact for fact, _ in visible}
+            ranked = rank_bm25(query, ((fact.id, fields) for fact, fields in visible))
+            ranked.sort(key=lambda pair: (-pair[0], *_read_order(by_id[pair[1]])))
+            return [by_id[fact_id] for _, fact_id in ranked[:k]]
+        if mode != "substring":
+            raise ValueError(f"unknown search mode: {mode!r}")
+
+        needle = query.lower()
+        matches: list[tuple[float, Fact]] = []
+        for fact, fields in visible:
             lowered = [field.lower() for field in fields]
             hay = " ".join(lowered)
             if needle in hay:

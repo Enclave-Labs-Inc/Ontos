@@ -14,6 +14,19 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **BM25 lexical search** (#119 phase 1): `search(..., mode="lexical")` is
+  available on both backends and on the MCP `search` tool.
+  - It ranks facts by their ids, predicate, and endpoint names and aliases,
+    so a question like "who works at Acme?" now finds `works_at` facts.
+  - Corpus statistics come only from facts the caller may see, so forbidden
+    facts can't change visible results or ranks.
+  - NetworkX and Neo4j return identical orderings.
+  - The default stays `substring`. The mode used is recorded in the audit
+    trail.
+  - See `docs/lexical-search.md`.
+
 ## [0.10.0] - 2026-11-17 - scoped re-ingestion and stable entity identity
 
 Completes the ontology-evolution loop from #66. After `ontos ontology
