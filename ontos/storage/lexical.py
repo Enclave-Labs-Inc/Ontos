@@ -20,6 +20,21 @@ from collections.abc import Hashable, Iterable, Sequence
 from typing import Literal
 
 SearchMode = Literal["substring", "lexical"]
+# What callers and configuration may ask for. `auto` is resolved by the
+# runtime: lexical today, hybrid once an embedding backend exists (#119).
+RequestedSearchMode = Literal["auto", "substring", "lexical"]
+
+
+def resolve_search_mode(requested: str) -> SearchMode:
+    """Map a requested mode to one every backend implements."""
+    if requested == "auto":
+        return "lexical"
+    if requested == "lexical":
+        return "lexical"
+    if requested == "substring":
+        return "substring"
+    raise ValueError(f"unknown search mode: {requested!r}")
+
 
 # Okapi BM25 defaults.
 K1 = 1.2

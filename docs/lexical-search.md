@@ -1,10 +1,30 @@
 # Lexical search (BM25)
 
 `search(..., mode="lexical")` ranks facts with Okapi BM25 (`k1 = 1.2`,
-`b = 0.75`). It is available on the MCP `search` tool and on both
-storage backends. The default mode is still `substring`.
+`b = 0.75`). It is available on both storage backends.
 
-This is phase 1 of #119: vector search and fusion come in later phases.
+This is #119 phases 1 and 3. Vector search (phase 2) and hybrid fusion
+come later.
+
+## Modes and defaults
+
+| Mode | Behaviour |
+| --- | --- |
+| `auto` | The deployment default, set by `ONTOS_SEARCH_MODE` (default `auto`). Today it resolves to `lexical`; once an embedding backend exists it will resolve to hybrid. |
+| `lexical` | BM25 ranking (below). |
+| `substring` | The query matched as one substring: the pre-0.11 behaviour. |
+
+Where the modes apply:
+- **MCP `search` tool:** takes `mode`, default `auto`. An explicit `mode`
+  overrides the deployment default.
+- **`ask` and `ontos query`:** keyword seeds (`SeedByKeyword`) use the
+  resolved deployment default. Entity seeds still use name and alias
+  matching, unchanged.
+- **Code that builds `DeterministicExecutor()` or calls `store.search()`
+  directly:** keeps `substring` unless it passes a mode.
+
+To revert a deployment, set `ONTOS_SEARCH_MODE=substring`. An unknown
+value fails at startup.
 
 ## What is matched
 
@@ -46,7 +66,11 @@ return identical scores and orderings. Ties break by
 
 ## Audit
 
-The MCP `search` tool records `mode` in the Article-12 `tool_arguments`.
+Article-12 `tool_arguments` name the retrieval mode:
+- **MCP `search`:** the requested `mode` and the `resolved_mode`.
+- **`ask` and `ontos query`:** the executor's `search_mode` for keyword
+  seeds.
+
 No scores, and no counts of filtered facts, are ever recorded.
 
 ## Cost

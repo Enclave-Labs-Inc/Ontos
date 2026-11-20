@@ -171,6 +171,8 @@ def test_query_as_a_subject_sees_only_what_it_may_view(
     assert _field(first, ArticleTwelveField.TOOL_ARGUMENTS)["identity_assurance"] == (
         "operator_asserted"
     )
+    # #119: the keyword-seed retrieval mode is part of the audited request.
+    assert _field(first, ArticleTwelveField.TOOL_ARGUMENTS)["search_mode"] == "lexical"
     assert _field(second, ArticleTwelveField.RESULT_FACT_IDS) == [public_id]
 
 

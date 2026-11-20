@@ -30,6 +30,8 @@ runtime:
     # ONTOS_PLANNER_BACKEND: ollama
     # ONTOS_PLANNER_MODEL: llama3.1:8b
     # ONTOS_PLANNER_URL: http://ollama.ontos.svc:11434
+    # Default retrieval for `search` and `ask` (auto = BM25; substring reverts):
+    # ONTOS_SEARCH_MODE: auto
 
   # Secret ref for the audit signing key. In production this Secret
   # is populated by an external-secrets ExternalSecret sourced from

@@ -125,6 +125,9 @@ class RuntimeConfig:
     planner_model: str = "llama3.1:8b"
     planner_url: str = "http://localhost:11434"
     planner_timeout_s: float = 60.0
+    # #119: default retrieval for MCP `search` and `ask`'s keyword seeds.
+    # `substring` reverts to pre-0.11 behaviour.
+    search_mode: str = "auto"
 
     # M3: Both directories are required to enable verified identity
     # migrations. No migration configuration preserves legacy behavior.
@@ -177,6 +180,10 @@ class RuntimeConfig:
         # No auto-default here on purpose — tests that build via
         # from_env() → build_store() must stay in-memory. The CLI
         # layer applies the "~/.ontos/dev-store.pkl" default.
+        search_mode = os.getenv("ONTOS_SEARCH_MODE", "auto").strip().lower() or "auto"
+        if search_mode not in ("auto", "substring", "lexical"):
+            raise ValueError("ONTOS_SEARCH_MODE must be one of auto, substring, lexical")
+
         raw_path = os.getenv("ONTOS_STORAGE_PATH", "")
         storage_path = Path(raw_path).expanduser() if raw_path else None
 
@@ -215,6 +222,7 @@ class RuntimeConfig:
             planner_model=os.getenv("ONTOS_PLANNER_MODEL", "llama3.1:8b"),
             planner_url=os.getenv("ONTOS_PLANNER_URL", "http://localhost:11434"),
             planner_timeout_s=float(os.getenv("ONTOS_PLANNER_TIMEOUT", "60")),
+            search_mode=search_mode,
             migration_dir=(Path(migration_raw).expanduser() if migration_raw else None),
             ontology_history_dir=(Path(history_raw).expanduser() if history_raw else None),
         )
