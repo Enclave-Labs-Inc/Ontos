@@ -34,18 +34,16 @@ Every fact carries provenance. Every query is audit-ready. Every deployment runs
 
 ## Status
 
-**0.10.0.** The runtime works end-to-end:
+**0.11.0.** The runtime works end-to-end:
 - **Ingest** text and PDF corpora (`ontos ingest`).
 - **Query** with `ontos query "..."` or the `ask` MCP tool.
 - **Export** the graph for visualization (`ontos export`).
 - **Verify** the audit chain (`ontos audit verify`).
 
-0.10.0 adds:
-- **Audited, ACL-scoped re-ingestion** (#66 M3-3): after an approved ontology change, `ontos ontology affected-sources` lists the sources to reprocess and `ontos reingest` re-extracts exactly one registered source under its recorded ACL, rechecking permissions before every write.
-- **One real-world entity is one graph entity** (#121): stable, ACL-scoped entity ids, so plain-English questions such as "Who works at Acme Corp?" no longer stall on duplicate nodes.
-- **A readable SVG graph export** and a one-command local demo (`examples/demo/`).
+0.11.0 adds:
+- **BM25 search by default** (#119): `search` and keyword-seeded `ask` rank facts by relevance, so natural-language questions such as "who works at Acme?" find the right facts instead of nothing. Ranking statistics come only from facts the caller may see, so hidden facts never influence results. `ONTOS_SEARCH_MODE=substring` restores the old behaviour.
 
-It also contains **breaking changes**. Read the upgrade notes in [CHANGELOG.md](CHANGELOG.md) before upgrading. Per-milestone architecture notes live in [docs/design/](docs/design/).
+It also **changes default search behaviour**. Read the upgrade notes in [CHANGELOG.md](CHANGELOG.md) before upgrading. Per-milestone architecture notes live in [docs/design/](docs/design/).
 
 ## Install
 
@@ -62,7 +60,7 @@ The PyPI distribution name is `enclave-ontos`; the import name stays `ontos` (sa
 Container image on GHCR (multi-platform amd64):
 
 ```bash
-docker pull ghcr.io/enclave-labs-inc/ontos:0.10.0
+docker pull ghcr.io/enclave-labs-inc/ontos:0.11.0
 # or the moving tag
 docker pull ghcr.io/enclave-labs-inc/ontos:latest
 ```

@@ -14,34 +14,60 @@ See [RELEASING.md](RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
-### Changed — BM25 is the default search (#119 phase 3)
-- **New `auto` mode.** Search now defaults to `auto`, set per deployment
-  with `ONTOS_SEARCH_MODE` (`auto` | `substring` | `lexical`). `auto`
-  resolves to BM25 lexical ranking until an embedding backend exists.
-- **Where it applies:**
-  - the MCP `search` tool (its `mode` argument now defaults to `auto`);
-  - keyword seeds in `ask` and `ontos query`.
-- **Audit.** `search` records `mode` and `resolved_mode`; `ask` and
-  `ontos query` record `search_mode`.
-- **Upgrade note.** Natural-language `search` queries that returned
-  nothing now return ranked facts, and partial-word queries such as "acm"
-  no longer match. Set `ONTOS_SEARCH_MODE=substring` to keep the old
-  behaviour.
-- **Unchanged.** Direct `store.search()` and `DeterministicExecutor()` use
-  stay `substring`.
+## [0.11.0] - 2026-11-26 - BM25 search by default
+
+Search now ranks facts by relevance instead of exact substring matching.
+The MCP `search` tool and `ask`'s keyword seeds use Okapi BM25 over each
+fact's ids, predicate, and its endpoints' names and aliases. A
+natural-language question such as "who works at Acme?" now finds the
+`works_at` facts instead of returning nothing (#119 phases 1 and 3).
+
+Ranking statistics are computed only over facts the caller may see, so
+forbidden facts can't influence visible results or their order.
+**Read the upgrade notes.**
+
+### Upgrade notes
+- **Default search behaviour changed.** The MCP `search` tool's `mode`
+  defaults to `auto`, as do keyword seeds in `ask` and `ontos query`.
+  `auto` resolves to BM25.
+  - Natural-language queries that returned nothing now return ranked
+    facts.
+  - BM25 matches whole words, so partial-word queries such as "acm" no
+    longer match.
+  - Set `ONTOS_SEARCH_MODE=substring` to keep the old behaviour. Unknown
+    values fail at startup.
+- **Unchanged.** Library callers of `store.search()` and
+  `DeterministicExecutor()` keep `substring` unless they pass a mode.
+  Entity seeds (`SeedByEntity`) still use name and alias matching.
+- **Audit shape.**
+  - `search` records add `mode` and `resolved_mode`.
+  - `ask` and `ontos query` records add `search_mode`.
+  - No scores or counts of filtered facts are recorded.
+- **Cost.** Each BM25 query scores every fact visible to the caller.
+  - On NetworkX this is about 3× substring search (around 85 ms per
+    query at 10k facts, 0.5 s at 50k).
+  - On Neo4j, the visible facts' text is transferred to the runtime on
+    each query.
+  - Caching is tracked in #134.
 
 ### Added
-
-- **BM25 lexical search** (#119 phase 1): `search(..., mode="lexical")` is
-  available on both backends and on the MCP `search` tool.
-  - It ranks facts by their ids, predicate, and endpoint names and aliases,
-    so a question like "who works at Acme?" now finds `works_at` facts.
-  - Corpus statistics come only from facts the caller may see, so forbidden
-    facts can't change visible results or ranks.
-  - NetworkX and Neo4j return identical orderings.
-  - The default stays `substring`. The mode used is recorded in the audit
-    trail.
-  - See `docs/lexical-search.md`.
+- **`search(..., mode="lexical")`** on both backends and the MCP `search`
+  tool (#119 phase 1, #133).
+  - **Visible-only statistics.** BM25 statistics come only from the
+    caller's visible facts: own ACL, endpoint-entity ACLs, and `as_of`.
+    Neo4j therefore doesn't use a store-wide Lucene index, whose
+    statistics would count forbidden facts.
+  - **Identical orderings.** Both backends score in
+    `ontos/storage/lexical.py`, so NetworkX and Neo4j return identical
+    orderings, with ties broken by ingest time, then fact id.
+  - **Unicode.** Tokens are NFKC-normalized and casefolded, and combining
+    marks stay inside words, so Devanagari words aren't split into single
+    consonants.
+- **`ONTOS_SEARCH_MODE`** (`auto` | `substring` | `lexical`) and the
+  `auto` mode (#119 phase 3, #135). `auto` will resolve to hybrid search
+  once local embeddings land (phase 2).
+- `docs/lexical-search.md`, plus `ONTOS_SEARCH_MODE` in `.env.example` and
+  the Helm values.
 
 ## [0.10.0] - 2026-11-17 - scoped re-ingestion and stable entity identity
 
